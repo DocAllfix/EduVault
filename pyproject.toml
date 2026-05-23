@@ -1,0 +1,91 @@
+# Nexus EduVault — PEP 621 project metadata, managed with uv.
+# REI-9: minimum versions are taken VERBATIM from BLUEPRINT §1.1.
+# OPT-1/2/3/4 (v3.0 optimizations) are the only additions outside §1.1.
+
+[project]
+name = "nexus-eduvault"
+version = "0.1.0"
+description = "Normative-grounded automatic course generation engine (D.Lgs 81/08, HACCP, etc.)"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+license = { text = "Proprietary" }
+authors = [
+    { name = "Axialoop di Di Lonardo Alessandro" },
+]
+
+dependencies = [
+    # === BLUEPRINT §1.1 — Stack Backend (minimum versions verbatim) ===
+    "fastapi>=0.111",              # API Framework: REST + WebSocket, Pydantic v2
+    "uvicorn[standard]>=0.30",     # ASGI server invoked by BP §02.1 Dockerfile CMD
+                                   # (implicit in BP §1.1 — FastAPI requires an ASGI runner)
+    "langgraph>=0.2",              # AI orchestration: 2-node state machine (research + content)
+    "python-pptx>=0.6.23",         # PPTX generation — NOT thread-safe (REI-3, Semaphore(1))
+    "cairosvg>=2.7",               # SVG -> PNG for slide diagrams
+    "weasyprint>=61",              # HTML/CSS -> PDF
+    "asyncpg>=0.29",               # Async PostgreSQL driver (pool 5/20)
+    "pydantic>=2.7",               # Cross-module data contracts (Pydantic v2)
+    "structlog>=24.1",             # Structured JSON logging
+    "tenacity>=8.2",               # Exponential backoff retries (LLM 429/500/529)
+    "slowapi>=0.1.9",              # FastAPI rate limiting
+    "psutil>=5.9",                 # Memory check before PPTX build
+    "httpx>=0.27",                 # Async HTTP client (Anthropic, Brave, Voyage)
+    "pillow>=10.0",                # Image conversion + integrity validation
+    "pdfplumber>=0.11",            # Structured PDF parsing for normative docs
+    "bcrypt>=4.1",                 # Password hashing
+    "pyotp>=2.9",                  # TOTP (v1.1 ready, dormant in v1.0 per §1.1 note)
+
+    # === BLUEPRINT §1.1 — service SDKs (no version pinned in §1.1) ===
+    # Version constraint deliberately omitted: BLUEPRINT does not pin them.
+    # Lock the floor when actual integration code lands (FASE 3+).
+    "anthropic",                   # Claude Sonnet 4 SDK
+    "voyageai",                    # Voyage AI SDK (voyage-3, 1024 dim)
+
+    # === v3.0 Optimizations (CLAUDE.md OPT-1 / OPT-2 / OPT-3 / OPT-4) ===
+    "edge-tts>=6.1",               # OPT-1: free TTS (replaces openai), it-IT-DiegoNeural
+    "mutagen>=1.47",               # OPT-4: MP3 duration computation for edge-tts output
+    "pydantic-settings>=2.3",      # OPT-2: typed env config (app.config.settings)
+    "jinja2>=3.1",                 # OPT-3: PDF dispensa template engine
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "pytest-cov>=5.0",
+    "mypy>=1.10",
+    "ruff>=0.5",
+    # Type stubs that actually exist on typeshed/PyPI for our stack.
+    # Stubs for asyncpg/bcrypt/pyotp/httpx are either inline or unavailable.
+    "types-Pillow",
+    "types-psutil",
+]
+
+# === Ruff (REI-6: ruff check must pass) ===
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+# === Mypy (REI-6: mypy --strict on app/) ===
+[tool.mypy]
+strict = true
+plugins = ["pydantic.mypy"]
+python_version = "3.12"
+
+# Third-party packages that ship without py.typed / stubs.
+# These are runtime-correct but mypy cannot introspect them.
+[[tool.mypy.overrides]]
+module = ["asyncpg", "asyncpg.*", "voyageai", "voyageai.*"]
+ignore_missing_imports = true
+
+# === Pytest ===
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+# === Build system (PEP 517) ===
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"]
