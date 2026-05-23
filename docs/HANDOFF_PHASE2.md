@@ -144,6 +144,7 @@ Repetute qui per evidenza alla nuova sessione — sono già in CLAUDE.md ma vale
 - **REI-13** dominio non deciso → nei test usare `nexus-eduvault.local` o placeholder, MAI `corsi8108.it`
 - **REI-14** prima di ogni prompt non banale → leggi `SKILLS_PLAYBOOK.md`/`CHEATSHEET.md`
 - **REI-15** dopo ogni grossa modifica a `app/` → reindex `npx @colbymchenry/codegraph index`
+- **REI-16** ogni volta che il prompt diverge da BP/plan/output precedente → segnala in coda alla risposta sotto `## Discrepanze segnalate`, ma applica il prompt (non chiedere conferma — l'utente ha esplicitamente detto "se te lo scrivo c'è un motivo"). Precedenza: REI inviolabili > prompt > blueprint > ricordi > inferenze.
 - **FIX-2** sanitize_svg INLINE (rilevante in FASE 4, non FASE 2)
 - **FIX-6** `source_hash` NON esiste nel nostro schema (rimosso dalla BP) — se la BP §06 lo cita, ignora
 - **STyled-components SCARTATO** (per FASE 6, ma utile sapere se la BP suggerisce altrimenti)
