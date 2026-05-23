@@ -23,6 +23,7 @@ from slowapi import _rate_limit_exceeded_handler
 from app.api.dependencies import limiter
 from app.api.routes import auth as auth_routes
 from app.api.routes import health as health_routes
+from app.api.routes import regulations as regulations_routes
 from app.config import configure_logging, settings
 from app.db.connection import create_pool
 from app.services.dependencies import (
@@ -59,6 +60,7 @@ app.add_middleware(
 # ═══ ROUTES ═══
 app.include_router(health_routes.router)
 app.include_router(auth_routes.router)
+app.include_router(regulations_routes.router)
 
 
 @app.on_event("startup")
