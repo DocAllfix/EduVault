@@ -22,8 +22,5 @@ REVOKE DELETE, UPDATE, TRUNCATE ON audit_log FROM nexus_app;
 
 -- ═══ GRANT PER TABELLE LANGGRAPH ═══
 -- LangGraph crea le proprie tabelle al primo avvio del backend.
--- Eseguire QUESTA sezione DOPO il primo avvio del backend (Sprint 3).
--- Se eseguita prima che le tabelle esistano, PostgreSQL darà errore —
--- in quel caso, rieseguire dopo il primo avvio.
--- GRANT SELECT, INSERT, UPDATE, DELETE ON checkpoints, checkpoint_writes, checkpoint_migrations TO nexus_app;
--- GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO nexus_app;
+-- I GRANT corrispondenti vivono in setup_langgraph_grants.sql, da eseguire
+-- DOPO il primo avvio del backend (FASE 5). Vedi quel file per dettagli.

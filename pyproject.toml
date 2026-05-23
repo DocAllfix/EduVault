@@ -19,6 +19,8 @@ dependencies = [
     "uvicorn[standard]>=0.30",     # ASGI server invoked by BP §02.1 Dockerfile CMD
                                    # (implicit in BP §1.1 — FastAPI requires an ASGI runner)
     "langgraph>=0.2",              # AI orchestration: 2-node state machine (research + content)
+    "langgraph-checkpoint-postgres>=3.0",  # AsyncPostgresSaver for BP §05.3 checkpointing
+    "psycopg[binary]>=3.3",        # required by langgraph-checkpoint-postgres at runtime
     "python-pptx>=0.6.23",         # PPTX generation — NOT thread-safe (REI-3, Semaphore(1))
     "cairosvg>=2.7",               # SVG -> PNG for slide diagrams
     "weasyprint>=61",              # HTML/CSS -> PDF
@@ -83,6 +85,13 @@ ignore_missing_imports = true
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+# Marker for tests that need live external resources (DB, Voyage, Anthropic, real PDFs).
+# Skipped by default; run explicitly with `pytest -m live` once resources are available
+# (see docs/VERIFICATION_DEBT.md §3 / §4 action item).
+markers = [
+    "live: requires live external resources (DB / Voyage / Anthropic / real PDFs)",
+]
+addopts = "-m 'not live'"
 
 # === Build system (PEP 517) ===
 [build-system]
