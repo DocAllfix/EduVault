@@ -4,7 +4,7 @@
 **Cliente:** C.F.P. Montessori  
 **Fornitore:** Axialoop di Di Lonardo Alessandro  
 **Riferimento:** Execution Plan v4.0 + Blueprint v7.0  
-**Ultimo aggiornamento:** 2026-05-23 (Step A.1 + A.2 completati)  
+**Ultimo aggiornamento:** 2026-05-23 (Step A.1-A.2 + B.1-B.2-B.3 ✅ — toolbelt completo, REI-15 attivo)  
 
 ---
 
@@ -42,9 +42,9 @@
 
 | # | Sotto-fase | Modello | Motivazione | Stato | Data | Note |
 |---|---|---|---|---|---|---|
-| B.1 | Analisi ambiente locale | **S** | Comandi shell + report tabellare | ⬜ | | |
-| B.2 | Ricerca MCP/Skills/Estensioni | **S** | Web search + filtro, no ragionamento architetturale | ⬜ | | |
-| B.3 | Installazione selettiva | **S** | Esecuzione comandi uno per uno | ⬜ | | |
+| B.1 | Analisi ambiente locale | **S** | Comandi shell + report tabellare | ✅ | 2026-05-23 | ENV_REPORT.md generato. Tutto conforme BP §1.1, solo psql client mancante (non bloccante). |
+| B.2 | Ricerca MCP/Skills/Estensioni | **S** | Web search + filtro, no ragionamento architetturale | ✅ | 2026-05-23 | docs/TOOLBELT.md v1 → v2 (con frontend-design, langchain-skills, Impeccable, UI/UX Pro Max, shadcn skill, Vercel guidelines; styled-components scartato con motivo). |
+| B.3 | Installazione selettiva | **S** | Esecuzione comandi uno per uno | ✅ | 2026-05-23 | **21 skill + 1 slash command + 6 MCP + 12 estensioni VS Code installati.** Skill: 7 design (impeccable + ckm:*) + karpathy-guidelines + frontend-design (Anthropic) + 6 langchain/langgraph + 6 chrome-devtools (cdt-*). Slash command: /code-review (Anthropic ufficiale). MCP: github, shadcn, playwright, postgres-restricted, codegraph, chrome-devtools. Plugin Anthropic ufficiali estratti manualmente dai loro repo sorgenti perché /plugin non funziona nell'estensione VS Code (bug noto #8569/#8590/#58556). Aggiunto REI-15 (auto-reindex codegraph). superpowers@obra rimandato a post-FASE 1. |
 
 ### STEP C — Questionario Cliente
 

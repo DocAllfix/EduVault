@@ -35,6 +35,10 @@ REI-12 Project Status Tracker — aggiornamento OBBLIGATORIO. Al completamento d
 
 REI-13 Dominio non deciso. Non esiste ancora un dominio scelto: la decisione è rimandata alla FASE 7 (deploy). Nel codice e nelle config non hardcodo MAI un dominio — uso variabili `.env` e placeholder. Anche se un documento o un prompt specifica un dominio concreto (es. nei file storici Blueprint/Plan), lo ignoro e continuo a trattare il dominio come da decidere, finché l'umano non lo fissa esplicitamente al deploy.
 
+REI-14 Toolbelt e Skills. Prima di ogni task non banale, consulto `docs/SKILLS_PLAYBOOK.md` per sapere QUALI skill/MCP/estensioni attivare per quella fase del progetto (mappa Fase BP ↔ tool). In particolare: per qualsiasi lavoro frontend (FASE 6) seguo la "Regola design top-down" del playbook (design-system → frontend-design → impeccable → ui-styling → shadcn MCP). Per agenti LangGraph (FASE 3) consulto `langchain-skills`. Per DB consulto `postgres` MCP (restricted). Se un tool/skill non è installato e mi servirebbe, lo segnalo all'umano (non lo invoco assumendone l'esistenza — REI-5).
+
+REI-15 Codegraph index — manutenzione automatica. Il MCP `codegraph` ha valore solo se l'indice riflette lo stato reale del codice. Mi impongo di rieseguire `npx @colbymchenry/codegraph index` (dalla root del progetto, in background se possibile) nei seguenti momenti: (a) la prima volta che app/ contiene file non vuoti (presumibilmente fine FASE 1); (b) al completamento di ogni FASE (subito prima dell'aggiornamento Tracker per REI-12); (c) dopo qualsiasi rinomina/spostamento di file Python o aggiunta di nuovi moduli in app/; (d) prima di un task che inizia con "modifica/refactor/sostituisci" su un file già esistente in app/. Non aspetto che l'umano me lo chieda. Se l'indicizzazione fallisce, lo segnalo e procedo senza, ma annoto nel Tracker che l'indice è stale.
+
 ## Comandi che eseguo a inizio sessione
 1. `ls -la` (verificare struttura)
 2. `cat .env.example` (capire contratto secrets)

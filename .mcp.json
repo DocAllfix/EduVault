@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json.schemastore.org/mcp.json",
+  "mcpServers": {
+    "github": {
+      "type": "http",
+      "url": "https://api.githubcopilot.com/mcp/",
+      "headers": {
+        "Authorization": "Bearer ${GITHUB_PERSONAL_ACCESS_TOKEN}"
+      },
+      "description": "Official GitHub MCP server (github/github-mcp-server). Set --read-only by default in this project; switch off for write ops on PRs/issues only when needed."
+    },
+    "shadcn": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "shadcn@latest", "mcp"],
+      "description": "Official shadcn/ui MCP server. Auto-activates when components.json is present in frontend/. REI-1 compliant."
+    },
+    "playwright": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@playwright/mcp@latest"],
+      "description": "Microsoft Playwright MCP. Browser automation via accessibility snapshots. Heavy on tokens; prefer @playwright/cli for batch runs."
+    },
+    "postgres": {
+      "type": "stdio",
+      "command": "uvx",
+      "args": [
+        "postgres-mcp",
+        "--access-mode=restricted"
+      ],
+      "env": {
+        "DATABASE_URI": "${DATABASE_URI}"
+      },
+      "description": "Postgres MCP Pro by Crystal DBA. RESTRICTED mode = read-only + EXPLAIN + schema introspection. pgvector support not officially confirmed on landing — verify before relying on it. Last release v0.3.0 (2025-05-16, >6 months at install time)."
+    },
+    "codegraph": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@colbymchenry/codegraph", "mcp"],
+      "description": "Pre-indexed code knowledge graph (tree-sitter -> SQLite FTS5). 100% local. Tools: codegraph_context / codegraph_search / codegraph_callers / codegraph_callees / codegraph_impact. Claude re-runs `npx @colbymchenry/codegraph index` automatically after any structural change (REI-15)."
+    },
+    "chrome-devtools": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "chrome-devtools-mcp@latest"],
+      "description": "Official Chrome DevTools MCP (40k+ stars). Gives Claude a real Chromium browser for inspect/debug/perf-trace/network. 6 companion skills installed in .claude/skills/cdt-*. Critical for PHASE 6 (frontend QA) and PHASE 7 (Core Web Vitals pre-deploy)."
+    }
+  }
+}
