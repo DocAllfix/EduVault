@@ -4,7 +4,7 @@
 **Cliente:** C.F.P. Montessori  
 **Fornitore:** Axialoop di Di Lonardo Alessandro  
 **Riferimento:** Execution Plan v4.0 + Blueprint v7.0  
-**Ultimo aggiornamento:** 2026-05-23 (Step A.1-A.2 + B.1-B.2-B.3 ✅ — toolbelt completo, REI-15 attivo)  
+**Ultimo aggiornamento:** 2026-05-23 (Step A + B + C ✅ — pre-sviluppo completo, pronti per FASE 0)  
 
 ---
 
@@ -50,8 +50,8 @@
 
 | # | Sotto-fase | Modello | Motivazione | Stato | Data | Note |
 |---|---|---|---|---|---|---|
-| C.1 | Stesura questionario | **S** | Template strutturato da spec | ⬜ | | |
-| C.2 | Tracking ricezione materiali | **S** | Tabella Markdown semplice | ⬜ | | |
+| C.1 | Stesura questionario | **S** | Template strutturato da spec | ✅ | 2026-05-23 | docs/CLIENT_INTAKE_QUESTIONNAIRE.md — 8 sezioni in italiano, ancorate a BP §00/§06/§13 (6 tipi corso + HACCP regionale Campania) + REI-13 (dominio TBD), 4 sezioni bloccanti go-live esplicitate. |
+| C.2 | Tracking ricezione materiali | **S** | Tabella Markdown semplice | ✅ | 2026-05-23 | docs/CLIENT_INTAKE_TRACKING.md — 27 item allineati al questionario (1.1→8.3 + voce semantica "5 VPS"), 4 bloccanti go-live evidenziati, path convention da BP §14.1, stati ⏳/🔄/✅/❌/⚪. |
 
 ---
 
