@@ -33,6 +33,8 @@ dependencies = [
     "pdfplumber>=0.11",            # Structured PDF parsing for normative docs
     "bcrypt>=4.1",                 # Password hashing
     "pyotp>=2.9",                  # TOTP (v1.1 ready, dormant in v1.0 per §1.1 note)
+    "pyjwt>=2.9",                  # JWT encode/decode (BP §08.1 uses `import jwt`)
+                                   # GAP REI-5: not in BP §1.1 row list but BP §08 requires it.
 
     # === BLUEPRINT §1.1 — service SDKs (no version pinned in §1.1) ===
     # Version constraint deliberately omitted: BLUEPRINT does not pin them.

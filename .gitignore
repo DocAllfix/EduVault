@@ -31,3 +31,7 @@ node_modules/
 
 # === Project-internal brainstorming material (not architecture) ===
 docs/screenshots/
+
+# === Local-only artifacts ===
+# codegraph SQLite knowledge-graph index — rebuilt locally via REI-15
+.codegraph/

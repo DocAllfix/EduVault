@@ -50,6 +50,12 @@ class Settings(BaseSettings):
     # === Branding ===
     organization_name: str = "corsi8108"
 
+    # === Seed (BP §02.7 + REI-13: domain NOT decided) ===
+    # Used by scripts/seed.py on first run only.
+    # Email host is intentionally a placeholder until PHASE 7 (REI-13).
+    admin_bootstrap_email: str = "admin@<DOMAIN_TBD>"
+    admin_bootstrap_password: str = "CHANGE_ME"
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

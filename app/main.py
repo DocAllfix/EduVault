@@ -16,9 +16,12 @@ import structlog
 import voyageai
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from slowapi import Limiter
-from slowapi.util import get_remote_address
 
+from slowapi.errors import RateLimitExceeded
+from slowapi import _rate_limit_exceeded_handler
+
+from app.api.dependencies import limiter
+from app.api.routes import auth as auth_routes
 from app.api.routes import health as health_routes
 from app.config import configure_logging, settings
 from app.db.connection import create_pool
@@ -33,8 +36,12 @@ logger = structlog.get_logger()
 app = FastAPI(title="Nexus EduVault API", version="6.0")
 
 # ═══ RATE LIMITING (BP §02.5) ═══
-limiter = Limiter(key_func=get_remote_address)
+# limiter instance lives in app.api.dependencies (shared with route modules).
 app.state.limiter = limiter
+# Note: slowapi's handler is typed for RateLimitExceeded, but Starlette's
+# add_exception_handler expects a generic Exception handler. Functionally
+# compatible at runtime — only the static signature differs.
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)  # type: ignore[arg-type]
 
 # ═══ CORS — explicit origin, NEVER wildcard (REI-10, BP §02.5) ═══
 app.add_middleware(
@@ -51,6 +58,7 @@ app.add_middleware(
 
 # ═══ ROUTES ═══
 app.include_router(health_routes.router)
+app.include_router(auth_routes.router)
 
 
 @app.on_event("startup")

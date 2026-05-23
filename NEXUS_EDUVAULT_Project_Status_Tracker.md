@@ -4,7 +4,7 @@
 **Cliente:** C.F.P. Montessori  
 **Fornitore:** Axialoop di Di Lonardo Alessandro  
 **Riferimento:** Execution Plan v4.0 + Blueprint v7.0  
-**Ultimo aggiornamento:** 2026-05-23 (Step A + B + C ✅ — pre-sviluppo completo, pronti per FASE 0)  
+**Ultimo aggiornamento:** 2026-05-23 (Step A+B+C + FASE 0 + FASE 1 ✅; 44 test green, audit_log immutable verified live; codegraph indexed 115 files; **handoff document at docs/HANDOFF_PHASE2.md** — read it first if starting a new session)  
 
 ---
 
@@ -61,12 +61,12 @@
 
 | # | Sotto-fase | Modello | Motivazione | Stato | Data | Note |
 |---|---|---|---|---|---|---|
-| 0.1 | `pyproject.toml` | **S** | Copia tabella dipendenze da BP §1.1, meccanico | ⬜ | | |
-| 0.2 | `Dockerfile` | **S** | Copia da BP §02.1 con adattamento minimo | ⬜ | | |
-| 0.3 | `docker-compose.yml` | **S** | Copia da BP §02.2, 4 servizi | ⬜ | | |
-| 0.4 | `main.py` + `config.py` + `dependencies.py` + `connection.py` | **S** | BP fornisce codice esatto, pydantic-settings è boilerplate | ⬜ | | |
-| 0.5 | Endpoint `/health` | **S** | Endpoint banale, 20 righe | ⬜ | | |
-| 0.6 | Verifica E2E Sprint 0 | **S** | Comandi docker + curl | ⬜ | | |
+| 0.1 | `pyproject.toml` | **S** | Copia tabella dipendenze da BP §1.1, meccanico | ✅ | 2026-05-23 | 22 runtime deps (BP §1.1 verbatim) + 4 OPT v3.0 (edge-tts/mutagen/pydantic-settings/Jinja2); openai assente. |
+| 0.2 | `Dockerfile` | **S** | Copia da BP §02.1 con adattamento minimo | ✅ | 2026-05-23 | BP letterale + pin a bookworm (libgdk-pixbuf2.0-dev trixie-removed) + COPY app/ pre pip install (hatchling). |
+| 0.3 | `docker-compose.yml` | **S** | Copia da BP §02.2, 4 servizi | ✅ | 2026-05-23 | 4 servizi BP §02.2 + profile "full" su frontend/nginx (PHASE 6+). postgres expose-only. |
+| 0.4 | `main.py` + `config.py` + `dependencies.py` + `connection.py` | **S** | BP fornisce codice esatto, pydantic-settings è boilerplate | ✅ | 2026-05-23 | OPT-2 (Settings) ovunque, zero os.environ[]. Lazy import generation_service (FASE 5). |
+| 0.5 | Endpoint `/health` | **S** | Endpoint banale, 20 righe | ✅ | 2026-05-23 | BP §10.1 via APIRouter, get_pool() centralizzato, fallback disk path host-friendly. 4 test integration verdi. |
+| 0.6 | Verifica E2E Sprint 0 | **S** | Comandi docker + curl | ✅ | 2026-05-23 | docker compose build+up OK; /health → {"status":"ok","database":"connected","disk_free_gb":948.9} HTTP 200. Tag v0.1.0-phase0. |
 
 **Stima costo FASE 0:** ~$2-4 (100% Sonnet)
 
@@ -76,11 +76,11 @@
 
 | # | Sotto-fase | Modello | Motivazione | Stato | Data | Note |
 |---|---|---|---|---|---|---|
-| 1.1 | Schema SQL `001_initial.sql` | **S** | Copia da BP §03, SQL dichiarativo | ⬜ | | |
-| 1.2 | Modelli Pydantic (4 file) | **S** | Copia da BP §04, Pydantic boilerplate con validator | ⬜ | | |
-| 1.3 | Servizio Auth (JWT + bcrypt) | **S** | BP §08 fornisce codice esatto, logica lineare | ⬜ | | |
-| 1.4 | Seed admin | **S** | Script semplice, idempotente | ⬜ | | |
-| 1.5 | Smoke test FASE 1 | **S** | Comandi sequenziali di verifica | ⬜ | | |
+| 1.1 | Schema SQL `001_initial.sql` | **S** | Copia da BP §03, SQL dichiarativo | ✅ | 2026-05-23 | BP §03 letterale + GAP-3 (audio_tracks dopo image_cache; courses.audio_manifest_path). 10 tabelle, HNSW, GIN. Applicato live: zero errori. |
+| 1.2 | Modelli Pydantic (4 file) | **S** | Copia da BP §04, Pydantic boilerplate con validator | ✅ | 2026-05-23 | BP §04 letterale + outputs=audio whitelist + fix lookup enum nel body validator. 19 unit test verdi. |
+| 1.3 | Servizio Auth (JWT + bcrypt) | **S** | BP §08 fornisce codice esatto, logica lineare | ✅ | 2026-05-23 | BP §08 + OPT-2 (settings) + karpathy-guidelines (assumptions A1-A14 dichiarate). pyjwt aggiunta. Limiter shared in api/dependencies. 15 integration test verdi (login, refresh, /me, type-check, is_active, no-enum). |
+| 1.4 | Seed admin | **S** | Script semplice, idempotente | ✅ | 2026-05-23 | BP §02.7 + OPT-2 + structlog. Refactored seed(pool) per testabilità. 6 unit test (incl. idempotenza split admin/brand). |
+| 1.5 | Smoke test FASE 1 | **S** | Comandi sequenziali di verifica | ✅ | 2026-05-23 | E2E live: down -v → up → migrations (10 tables) → setup_roles (nexus_app + REVOKE) → seed + idempotenza → login → /me (admin, is_active) → DELETE/UPDATE/TRUNCATE audit_log come nexus_app TUTTI permission_denied. .env rigenerato con hex (no padding =). codegraph reindex eseguito (115 file, 1415 nodi, REI-15). |
 
 **Stima costo FASE 1:** ~$3-5 (100% Sonnet)
 
