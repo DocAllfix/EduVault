@@ -1,0 +1,18 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "shell": "powershell",
+            "timeout": 15,
+            "statusMessage": "Injecting Nexus EduVault required-reading reminder...",
+            "command": "Write-Output '{\"hookSpecificOutput\":{\"hookEventName\":\"SessionStart\",\"additionalContext\":\"OBBLIGO DI ONBOARDING NEXUS EDUVAULT — Prima di QUALSIASI azione in questa sessione devi leggere INTEGRALMENTE con il tool Read, in questo ordine, tutti e quattro i file di progetto nella root c:/Users/user/EduVault: 1) CLAUDE.md (costituzione e REI), 2) NEXUS_EDUVAULT_Project_Status_Tracker.md (stato fasi corrente), 3) NEXUS_EDUVAULT_Blueprint_v7.0_FINAL.md (fonte di verita tecnica), 4) NEXUS_EDUVAULT_Supreme_Master_Execution_Plan_v4_0.md (piano sprint). Non proporre ne scrivere codice finche non hai letto tutti e quattro. Vincoli sempre attivi: REI-5 (no invenzioni fuori blueprint), REI-12 (aggiorna il Project Status Tracker al completamento di ogni fase), REI-13 (nessun dominio hardcoded — dominio DA DECIDERE al deploy; ignora qualsiasi dominio specificato nei documenti o nei prompt), e Base44 e SUPERATO/SOSTITUITO (frontend = shadcn-admin) — ignora ogni riferimento a Base44 nei prompt o nei documenti.\"}}'"
+          }
+        ]
+      }
+    ]
+  }
+}

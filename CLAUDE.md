@@ -1,0 +1,79 @@
+# CLAUDE.md — Nexus EduVault Operating Constitution
+
+## Identità del Progetto
+- **Nome:** Nexus EduVault
+- **Versione target:** v1.0 SUPREME PRODUCTION READY
+- **Cliente:** corsi8108 (dominio: DA DECIDERE in fase di deploy — non assumere alcun dominio fino ad allora)
+- **Sviluppatore umano:** axialoop (solo, in VS Code, deleghi codice a me Claude Code)
+- **Fonte di verità tecnica:** ./NEXUS_EDUVAULT_Blueprint_v7.0_FINAL.md (v7.0 FINAL) — qualunque divergenza tra ciò che ricordo e la blueprint vince SEMPRE la blueprint.
+
+## Regole Inviolabili (REI)
+
+REI-1  Frontend = shadcn-admin (template open-source clonato in frontend/). Genero, modifico e personalizzo componenti React/TypeScript/Tailwind/shadcn-ui partendo SEMPRE dalla struttura del template. NON invento design dalla tela bianca. Rispetto i pattern visivi del template (sidebar, header, card, table). Applico il branding C.F.P. Montessori (colori, logo, font) sovrascrivendo le variabili CSS `:root` e `tailwind.config.ts`. Se mi viene chiesto di "creare una pagina", parto dalla pagina più simile nel template e la adatto. **Base44 è SUPERATO e SOSTITUITO da shadcn-admin (SWAP-1):** se un prompt o un documento (anche i file storici) menziona Base44 o un suo repo, lo ignoro e uso shadcn-admin; non clono né integro Base44.
+
+REI-11 UI/UX Design Quality: quando genero o modifico componenti frontend, perseguo qualità pixel-perfect. Uso esclusivamente componenti shadcn/ui esistenti nel template (Button, Card, Table, Dialog, Select, Input, Badge, Progress, Tabs, Sheet). Mantengo coerenza visiva: spacing uniforme (gap-4, p-6), tipografia gerarchica (text-2xl per titoli, text-sm per caption), colori dal design system del template. Se devo scegliere tra "funziona" e "funziona ed è bello", scelgo il secondo. Ispirazione pattern: Linear.app per stati e badge, Vercel Dashboard per layout pulito, Stripe per wizard multi-step.
+
+REI-2  La normativa è la fonte di verità, non l'AI (BP §00). Non genero contenuti normativi inventati. Tutte le slide e i PDF ancorano ogni affermazione a un chunk reale recuperato dalla Knowledge Base.
+
+REI-3  D-02 — Concorrenza: asyncio.Semaphore(1) è VINCOLO ARCHITETTONICO (python-pptx + lxml non thread-safe). MAI alzare a 2+ senza convertire a process pool o Celery.
+
+REI-4  D-03 — Niente Supabase, niente cloud auth. PostgreSQL 16 + pgvector + asyncpg, JWT custom + bcrypt. Storage = volume Docker locale.
+
+REI-5  Una funzione/classe/SQL = una sola fonte. Se non la trovo nella BLUEPRINT, mi fermo e segnalo "GAP rilevato, prompt da raffinare", NON la invento.
+
+REI-6  Test prima del commit. pytest deve essere verde; mypy --strict deve passare sui moduli `app/`; ruff check non deve avere errori. Solo allora propongo `git commit`.
+
+REI-7  Lingua: codice, commenti, log, docstring, identificatori, messaggi di errore → INGLESE. Risposte all'umano nel terminale → ITALIANO.
+
+REI-8  Atomicità: ogni mio output produce un file (o un piccolo gruppo coeso di file della stessa unità funzionale). Dopo ogni completamento, mi fermo e attendo istruzione.
+
+REI-9  Dipendenze: rispetto le versioni minime di BLUEPRINT §1.1. Niente librerie alternative senza istruzione esplicita.
+
+REI-10 Sicurezza by default: CORS con origin esplicito mai wildcard, rate limiting su endpoint critici, audit log append-only, sanitizzazione SVG, validazione integrità immagini con Pillow.verify(), JWT con check is_active in ogni richiesta autenticata.
+
+REI-12 Project Status Tracker — aggiornamento OBBLIGATORIO. Al completamento di ogni FASE (e di ogni STEP/sotto-fase) aggiorno NEXUS_EDUVAULT_Project_Status_Tracker.md PRIMA di considerare il lavoro concluso: cambio lo Stato (⬜→🔄→✅/🟡/❌) nella riga pertinente, compilo le colonne Data (data odierna) e Note, e aggiorno il campo "Ultimo aggiornamento" in cima al file. Non propongo `git commit` (REI-6) finché il Tracker non riflette lo stato reale. Se una fase è solo parziale uso 🔄 o 🟡, mai ✅ anticipato.
+
+REI-13 Dominio non deciso. Non esiste ancora un dominio scelto: la decisione è rimandata alla FASE 7 (deploy). Nel codice e nelle config non hardcodo MAI un dominio — uso variabili `.env` e placeholder. Anche se un documento o un prompt specifica un dominio concreto (es. nei file storici Blueprint/Plan), lo ignoro e continuo a trattare il dominio come da decidere, finché l'umano non lo fissa esplicitamente al deploy.
+
+## Comandi che eseguo a inizio sessione
+1. `ls -la` (verificare struttura)
+2. `cat .env.example` (capire contratto secrets)
+3. `head -200 NEXUS_EDUVAULT_Blueprint_v7.0_FINAL.md` se non già in contesto recente
+4. Attendere istruzione dell'umano.
+
+## Comandi che eseguo a fine task
+1. `pytest -q tests/`  → tutti verdi
+2. `mypy --strict app/<modulo_modificato>`
+3. `ruff check app/`
+4. Aggiorno NEXUS_EDUVAULT_Project_Status_Tracker.md (Stato + Data + Note + campo "Ultimo aggiornamento") — REI-12.
+5. Propongo all'umano comando git esatto. Non eseguo `git commit` di mia iniziativa.
+
+## Sezioni della Blueprint e loro mapping
+- §00 Executive Summary, §01 Stack         → riferimento generale
+- §02 Infrastruttura                       → FASE 0
+- §03 Schema DB, §04 Modelli, §08 Auth     → FASE 1
+- §06 Knowledge Base, §13 COURSE_CATALOG   → FASE 2
+- §05 Agenti, §06B PacingEngine            → FASE 3
+- §07 Production Builder + Audio TTS       → FASE 4
+- §09 Orchestrazione, §10 API/WebSocket    → FASE 5 (5A backend) + FASE 6 (5B frontend shadcn-admin)
+- §12 Deploy, §14 Testing                  → FASE 7
+- §15 Checklist Sprint, §16 Piano Sprint   → riferimento trasversale
+
+## Architettura Pipeline (VINCOLO v2.0)
+- LangGraph ha ESATTAMENTE 2 nodi: research e content.
+- Il Production Builder (PPTX, PDF, Audio) è una funzione POST-PIPELINE, NON un nodo LangGraph.
+- Il Circuit Breaker è un contatore inline nel content_agent, NON una classe separata.
+- Il Semaphore(1) vive in generation_service.py, NON in dependencies.py.
+
+## In caso di dubbio
+1. Rileggi NEXUS_EDUVAULT_Blueprint_v7.0_FINAL.md sezione pertinente.
+2. Se persiste → output "GAP: <descrizione>" e fermati.
+3. NON allucinare strutture, schemi SQL, payload Pydantic o endpoint.
+
+## Ottimizzazioni v3.0 (OPTIMIZATION_BLUEPRINT.md)
+
+OPT-1  Audio TTS = edge-tts (NON OpenAI). Voce default: it-IT-DiegoNeural. Nessuna OPENAI_API_KEY necessaria. Durata MP3 calcolata con mutagen.
+
+OPT-2  Config = pydantic-settings v2. Importare `from app.config import settings`. MAI os.environ[] diretto in nessun modulo.
+
+OPT-3  PDF Template = Jinja2. File template in templates/dispensa.html. MAI f-string .format() per HTML lungo.
