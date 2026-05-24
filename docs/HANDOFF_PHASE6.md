@@ -1,9 +1,11 @@
 # Handoff to PHASE 6 — Nexus EduVault
 
 **Data handoff:** 2026-05-24
+**Ultimo aggiornamento:** 2026-05-24 (post-prompt 6.4 — aggiunto Bloccante #2 Docker pre-flight)
 **Sessione che consegna:** Claude Opus 4.7 (VS Code extension)
 **Fine ciclo:** Step A + B + C + FASE 0 + FASE 1 + FASE 2 + FASE 3 + FASE 4 + FASE 5 tutte chiuse ✅ (FASE 5 🟡 parziale su steps live, vedi sezione 4)
-**Da iniziare:** FASE 6 — Frontend shadcn-admin + Branding (Sprint 5B)
+**FASE 6 in corso:** 6.1 ✅, 6.2 ✅, 6.3 ✅, 6.4 ✅ (4/10 prompt completati)
+**Prossimo prompt:** 6.5 (api.ts + ws.ts client tipizzati)
 
 > **Per la sessione che riceve.** Questo documento è il briefing operativo che la blueprint, il Master Plan, il Tracker e l'HANDOFF_PHASE2 da soli **non** ti possono dare. Contiene lo stato post-FASE-5, i gotcha che si sono accumulati nelle FASI 2-5, l'inventario reale dei file backend, la mappa skill/MCP per FASE 6 (la più frontend-pesante del progetto), e le risorse mancanti per chiudere le pendenze. Leggilo subito dopo CLAUDE.md e prima di scrivere qualsiasi codice. L'hook SessionStart in `.claude/settings.json` te lo elenca tra i file obbligatori.
 
@@ -156,8 +158,24 @@ Vedi HANDOFF_PHASE2.md. `configure_logging()` chiamato in `main.startup()`.
 
 ## 3. Cosa fare PRIMA del primo prompt di FASE 6
 
-### Bloccante #1 — Niente (in teoria)
-FASE 6 è frontend puro su `frontend/`. Non tocca backend. Il backend può restare DOWN finché non serve l'integrazione vera (prompt 6.4 OpenAPI types, 6.5 client REST/WS).
+### Bloccante #1 — Niente fino al prompt 6.3 incluso
+FASE 6.1 (clone), 6.2 (inventario), 6.3 (branding) sono frontend puro. Il backend può restare DOWN.
+
+### Bloccante #2 — Docker Desktop + backend UP dal prompt 6.4 in poi (NUOVO)
+Dal prompt **6.4** (OpenAPI → TypeScript types) in avanti, ogni prompt FASE 6 richiede backend raggiungibile su `http://localhost:8000`. Il check è banale ma essenziale; senza di esso ogni tentativo di curl/fetch/openapi-typescript fallisce silenziosamente con `Connection refused`.
+
+**Pre-flight obbligatorio prima di iniziare 6.4+ (90s totali se freddo):**
+```bash
+# 1. Docker engine reachable?
+docker info >/dev/null 2>&1 && echo OK || echo "Avvia Docker Desktop dal menu Start"
+# 2. Backend container up?
+docker compose --project-directory <repo-root> ps backend
+# 3. /health risponde 200?
+curl -sf -o /dev/null -w "%{http_code}\n" http://localhost:8000/health
+```
+Se il check #3 ritorna `000` o `5xx` → procedi con la sezione "Rebuild Docker" qui sotto. Se ritorna `200` con `{"status":"ok","database":"connected"}` → procedi col prompt FASE 6.
+
+**Comportamento atteso dall'agente Claude:** se rileva backend DOWN prima di 6.4+, NON deve inventare workaround offline (es. importare `app.main` in-process per estrarre `openapi.json`) — deve chiedere all'utente di avviare Docker e attendere. Il workaround offline introduce divergenze sottili tra schema runtime e schema importato.
 
 ### Soft — Risorse residue per chiudere il debt
 Vedi sezione 5 di questo doc. Per chiudere ✅ FASE 5 (oggi 🟡), servono #R1+#R3+#R4 — non bloccanti per iniziare FASE 6.
