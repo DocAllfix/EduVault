@@ -37,6 +37,7 @@ dependencies = [
     "pyotp>=2.9",                  # TOTP (v1.1 ready, dormant in v1.0 per §1.1 note)
     "pyjwt>=2.9",                  # JWT encode/decode (BP §08.1 uses `import jwt`)
                                    # GAP REI-5: not in BP §1.1 row list but BP §08 requires it.
+    "python-multipart>=0.0.9",     # required by FastAPI for UploadFile/Form (regulations.py upload endpoint)
 
     # === BLUEPRINT §1.1 — service SDKs (no version pinned in §1.1) ===
     # Version constraint deliberately omitted: BLUEPRINT does not pin them.
@@ -78,7 +79,7 @@ python_version = "3.12"
 # Third-party packages that ship without py.typed / stubs.
 # These are runtime-correct but mypy cannot introspect them.
 [[tool.mypy.overrides]]
-module = ["asyncpg", "asyncpg.*", "voyageai", "voyageai.*"]
+module = ["asyncpg", "asyncpg.*", "voyageai", "voyageai.*", "pptx", "pptx.*", "cairosvg", "cairosvg.*", "weasyprint", "weasyprint.*", "psutil", "psutil.*"]
 ignore_missing_imports = true
 
 # === Pytest ===
