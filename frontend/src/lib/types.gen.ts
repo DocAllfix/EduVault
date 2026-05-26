@@ -514,6 +514,17 @@ export interface components {
             /** Created At */
             created_at: string;
         };
+        /** RecentCourse */
+        RecentCourse: {
+            /** Id */
+            id: string;
+            /** Title */
+            title: string;
+            /** Status */
+            status: string;
+            /** Created At */
+            created_at: string;
+        };
         /** DashboardStats */
         DashboardStats: {
             /** Courses Count */
@@ -522,6 +533,14 @@ export interface components {
             regulations_count: number;
             /** L2 Count */
             l2_count: number;
+            /** Status Breakdown — FASE 13 */
+            status_breakdown: Record<string, number>;
+            /** Recent Courses — FASE 13 */
+            recent_courses: components["schemas"]["RecentCourse"][];
+            /** Dirty Count — FASE 13 */
+            dirty_count: number;
+            /** Total Training Hours — FASE 13 */
+            total_training_hours: number;
         };
         /** HTTPValidationError */
         HTTPValidationError: {

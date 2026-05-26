@@ -192,7 +192,7 @@ function emitLogout(): void {
 // ─────────────────────────── Core request wrapper ──────────────────────
 
 interface RequestOpts {
-  method?: 'GET' | 'POST' | 'PUT' | 'DELETE'
+  method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
   /** JSON body — will be serialized. Mutually exclusive with `formData`. */
   json?: unknown
   /** Multipart body (file uploads). When set, do NOT add Content-Type. */
@@ -426,6 +426,115 @@ async function deleteRegulation(
   )
 }
 
+// ─────────────────────────── Course Studio (FASE 7) ───────────────────
+
+/**
+ * Slide deserializzata da `slide_contents_json` (FASE 7 Studio).
+ * Tipo loose: il backend ritorna il dict SlideContent verbatim.
+ */
+export interface StudioSlide {
+  index: number
+  module_index: number
+  slide_type: string
+  title: string
+  body: string
+  speaker_notes: string
+  normative_ref: string
+  source_chunk_ids: string[]
+  image: {
+    strategy: string
+    query?: string | null
+    query_url?: string | null
+    aspect_hint?: string | null
+    diagram_code?: string | null
+  }
+  quiz_options?: string[] | null
+  quiz_correct?: number | null
+}
+
+export interface SlidesResponse {
+  course_id: string
+  total: number
+  slides: StudioSlide[]
+}
+
+export interface SlidePatchBody {
+  title?: string
+  body?: string
+  speaker_notes?: string
+  normative_ref?: string
+  quiz_options?: string[]
+  quiz_correct?: number
+}
+
+async function getCourseSlides(id: string): Promise<SlidesResponse> {
+  return request<SlidesResponse>(`/api/courses/${encodeURIComponent(id)}/slides`)
+}
+
+async function getCourseSlide(id: string, idx: number): Promise<StudioSlide> {
+  return request<StudioSlide>(
+    `/api/courses/${encodeURIComponent(id)}/slides/${idx}`,
+  )
+}
+
+async function patchCourseSlide(
+  id: string,
+  idx: number,
+  patch: SlidePatchBody,
+): Promise<StudioSlide> {
+  return request<StudioSlide>(
+    `/api/courses/${encodeURIComponent(id)}/slides/${idx}`,
+    { method: 'PATCH', json: patch },
+  )
+}
+
+async function patchSlideImage(
+  id: string,
+  idx: number,
+  image: { strategy?: string; query?: string; query_url?: string; aspect_hint?: string },
+): Promise<StudioSlide> {
+  return request<StudioSlide>(
+    `/api/courses/${encodeURIComponent(id)}/slides/${idx}/image`,
+    { method: 'PATCH', json: image },
+  )
+}
+
+async function searchSlideImages(
+  id: string,
+  q: string,
+  orientation?: string,
+): Promise<{ candidates: string[] }> {
+  return request<{ candidates: string[] }>(
+    `/api/courses/${encodeURIComponent(id)}/image/search`,
+    { query: { q, orientation } },
+  )
+}
+
+/** URL diretto del singolo MP3 di una slide (per <audio src>). */
+function slideAudioUrl(id: string, idx: number): string {
+  return buildUrl(`/api/courses/${encodeURIComponent(id)}/audio/${idx}`)
+}
+
+async function regenerateSlide(
+  id: string,
+  idx: number,
+  instruction: string,
+): Promise<StudioSlide> {
+  return request<StudioSlide>(
+    `/api/courses/${encodeURIComponent(id)}/slides/${idx}/regenerate`,
+    { method: 'POST', json: { instruction } },
+  )
+}
+
+async function rebuildCourse(
+  id: string,
+): Promise<{ status: string; course_id: string }> {
+  return request<{ status: string; course_id: string }>(
+    `/api/courses/${encodeURIComponent(id)}/rebuild`,
+    { method: 'POST' },
+  )
+}
+
 // ─────────────────────────── Admin ─────────────────────────────────────
 
 async function getMetrics(days: number = 7): Promise<MetricsResponse> {
@@ -468,6 +577,15 @@ export const api = {
   certifyCourse,
   downloadCourse,
   deleteCourse,
+  // Course Studio (FASE 7)
+  getCourseSlides,
+  getCourseSlide,
+  patchCourseSlide,
+  patchSlideImage,
+  searchSlideImages,
+  slideAudioUrl,
+  regenerateSlide,
+  rebuildCourse,
   // Regulations
   uploadRegulation,
   getRegulations,

@@ -13,6 +13,7 @@ pydantic-settings default behavior (e.g. ``database_url`` <- ``DATABASE_URL``).
 from __future__ import annotations
 
 import logging
+from typing import Literal
 
 import structlog
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -29,6 +30,16 @@ class Settings(BaseSettings):
     anthropic_api_key: str
     voyage_api_key: str
     brave_search_api_key: str = ""
+    # Cluster F: Pexels primary image provider (free tier ~200/h, no attribution)
+    # https://www.pexels.com/api/new/
+    pexels_api_key: str = ""
+    # FIX #18 (2026-05-25): Pixabay fallback intermedio (5000/h free auth)
+    # Registrazione gratuita: https://pixabay.com/api/docs/
+    pixabay_api_key: str = ""
+    # FIX #22 (2026-05-25): Openverse OAuth2 (100/min, 10K/day vs 20/min anon)
+    # Registrazione gratuita: POST /v1/auth_tokens/register/ + verify email
+    openverse_client_id: str = ""
+    openverse_client_secret: str = ""
 
     # === Auth — single JWT secret, token type in payload (BP §08.1) ===
     jwt_secret: str
@@ -43,6 +54,49 @@ class Settings(BaseSettings):
     pipeline_timeout: int = 1800
     llm_request_timeout: int = 120
     max_concurrent_jobs: int = 1
+
+    # === LLM provider selection (FASE 0b vast-hopping-sketch) ===
+    # Default: Azure OpenAI gpt-4.1-mini (10× cheaper than Sonnet 4.6, JSON mode
+    # strict nativo, 200K TPM). Anthropic resta come L2 fallback emergenza.
+    llm_provider: Literal["anthropic", "azure_openai", "openai", "deepseek"] = "deepseek"
+
+    # OpenAI diretto (fallback L1)
+    openai_api_key: str = ""
+    openai_content_model: str = "gpt-4o"
+    openai_classify_model: str = "gpt-4o-mini"
+
+    # DeepSeek V4 — provider PRIMARY 2026-05-25.
+    # PRO è un REASONING model: ottimo per ragionare sui constraints ma:
+    # - 2-3× più costoso (token reasoning fatturati)
+    # - latenza 10-30s/call (vs 5-10s flash)
+    # - JSON mode talvolta conflitta (content vuoto, tutto reasoning)
+    # FLASH è il non-thinking, output diretto, 3× più economico, qualità OK
+    # per slide normative italiane. Pro resta L1 fallback (vedi chain in
+    # ingestion_service) e per override manuale corsi complessi.
+    deepseek_api_key: str = ""
+    deepseek_content_model: str = "deepseek-v4-flash"  # default non-thinking
+    deepseek_classify_model: str = "deepseek-v4-flash"
+    deepseek_premium_model: str = "deepseek-v4-pro"    # reasoning per override
+
+    # === Azure OpenAI (primary L0 + premium L1 fallback) ===
+    azure_openai_endpoint: str = ""
+    azure_openai_api_key: str = ""
+    azure_openai_api_version: str = "2024-10-21"
+    azure_openai_deployment_content: str = "gpt-4.1-mini"   # L0: primary
+    azure_openai_deployment_classify: str = "gpt-4.1-mini"  # classify_chunk
+    azure_openai_deployment_premium: str = "gpt-4o"         # L1: fallback premium
+
+    # === Anthropic (legacy + L2 fallback emergenza) ===
+    # llm_classify_model / llm_content_model = nomi dei modelli Anthropic usati SOLO
+    # quando llm_provider="anthropic" oppure quando il fallback raggiunge L2.
+    llm_classify_model: str = "claude-haiku-4-5-20251001"
+    llm_content_model: str = "claude-sonnet-4-6"
+    llm_content_model_fallback: str = "claude-sonnet-4-6"   # L2 emergenza content_agent
+
+    # === Parallelizzazione moduli (R6 mitigation, FASE 0b) ===
+    # DeepSeek V4 Flash ha 2500 concurrency, V4 Pro 500. Settiamo 100 paralleli:
+    # ben oltre 24 moduli del corso 8h (1 wave), margine 4× per SPLIT retry.
+    content_agent_concurrency: int = 100
 
     # === TTS — OPT-1: edge-tts, no API key required ===
     tts_voice: str = "it-IT-DiegoNeural"

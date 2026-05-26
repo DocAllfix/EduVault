@@ -141,33 +141,50 @@ def test_dashboard_stats_returns_403_for_operator(client: TestClient) -> None:
     assert r.status_code == 403
 
 
-def test_dashboard_stats_returns_three_counts_for_admin(
+def test_dashboard_stats_returns_counts_and_enrichment_for_admin(
     client: TestClient,
 ) -> None:
     pool = MagicMock()
     pool.fetchrow = AsyncMock(return_value=_user_row(ADMIN_ID, "admin"))
-    pool.fetchval = AsyncMock(side_effect=[12, 3, 1])  # courses, regs, l2
+    # fetchval order: courses, regs, l2, dirty_count, total_hours
+    pool.fetchval = AsyncMock(side_effect=[12, 3, 1, 2, 240.0])
+    # fetch order: status_breakdown rows, recent_courses rows
+    pool.fetch = AsyncMock(side_effect=[
+        [{"status": "completed", "n": 10}, {"status": "generating", "n": 2}],
+        [],  # no recent courses in this mock
+    ])
     _wire_pool(pool)
     r = client.get(
         "/api/dashboard/stats",
         headers={"Authorization": f"Bearer {_token(ADMIN_ID, 'admin')}"},
     )
     assert r.status_code == 200
-    assert r.json() == {"courses_count": 12, "regulations_count": 3, "l2_count": 1}
+    body = r.json()
+    assert body["courses_count"] == 12
+    assert body["regulations_count"] == 3
+    assert body["l2_count"] == 1
+    assert body["status_breakdown"] == {"completed": 10, "generating": 2}
+    assert body["dirty_count"] == 2
+    assert body["total_training_hours"] == 240.0
+    assert body["recent_courses"] == []
 
 
 def test_dashboard_stats_handles_null_counts(client: TestClient) -> None:
     """COUNT(*) never returns NULL but defensive coercion is in the route."""
     pool = MagicMock()
     pool.fetchrow = AsyncMock(return_value=_user_row(ADMIN_ID, "admin"))
-    pool.fetchval = AsyncMock(side_effect=[None, None, None])
+    pool.fetchval = AsyncMock(side_effect=[None, None, None, None, None])
+    pool.fetch = AsyncMock(side_effect=[[], []])
     _wire_pool(pool)
     r = client.get(
         "/api/dashboard/stats",
         headers={"Authorization": f"Bearer {_token(ADMIN_ID, 'admin')}"},
     )
     assert r.status_code == 200
-    assert r.json() == {"courses_count": 0, "regulations_count": 0, "l2_count": 0}
+    body = r.json()
+    assert body["courses_count"] == 0
+    assert body["dirty_count"] == 0
+    assert body["total_training_hours"] == 0
 
 
 # ─────────────── GET /api/brand-presets ───────────────
@@ -245,9 +262,10 @@ def test_catalog_returns_six_course_types_for_admin(client: TestClient) -> None:
     )
     assert r.status_code == 200
     body = r.json()
-    # The 6 BP §13 course types must be present
+    # FASE 1: catalog è ora ≥6 voci (BP §13 + extra per Cluster D / demo cliente).
+    # Verifichiamo solo che API ritorni TUTTE le voci del catalog source-of-truth.
     assert set(body.keys()) == set(COURSE_CATALOG.keys())
-    assert len(body) == 6
+    assert len(body) >= 6  # BP §13 baseline mantenuto
 
 
 # ─────────────── unauth surface ───────────────

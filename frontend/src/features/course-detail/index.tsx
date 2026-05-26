@@ -27,6 +27,7 @@ import {
   FileText,
   Headphones,
   Loader2,
+  Pencil,
   Presentation,
   ShieldCheck,
   Trash2,
@@ -299,7 +300,15 @@ export function CourseDetail() {
 
               {/* Actions */}
               <div className={cn('flex flex-wrap items-center justify-between gap-3')}>
-                <div>
+                <div className='flex gap-2'>
+                  <Button
+                    variant='outline'
+                    onClick={() =>
+                      navigate({ to: '/courses/$id/studio', params: { id } })
+                    }
+                  >
+                    <Pencil aria-hidden='true' /> Apri Studio
+                  </Button>
                   {canCertify && (
                     <Button onClick={handleCertify} disabled={certifying}>
                       {certifying ? (

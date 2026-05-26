@@ -38,10 +38,22 @@ class MetricsResponse(BaseModel):
     period_days: int
 
 
+class RecentCourse(BaseModel):
+    id: str
+    title: str
+    status: str
+    created_at: str
+
+
 class DashboardStats(BaseModel):
     courses_count: int
     regulations_count: int
     l2_count: int
+    # FASE 13 vast-hopping — 4 dati arricchimento dashboard
+    status_breakdown: dict[str, int]  # {generating: 2, completed: 10, ...}
+    recent_courses: list[RecentCourse]  # ultimi 5 corsi generati
+    dirty_count: int  # corsi con modifiche non rigenerate
+    total_training_hours: float  # somma duration_hours di tutti i corsi
 
 
 class BrandPresetSummary(BaseModel):
@@ -112,16 +124,53 @@ async def admin_metrics(
 async def dashboard_stats(
     user: dict[str, Any] = Depends(require_role("admin")),
 ) -> DashboardStats:
-    """Counts for the dashboard: courses (any status), regulations (any),
-    approved_courses (Level-2 patterns)."""
+    """Counts for the dashboard: courses, regulations, approved_courses (L2),
+    + FASE 13: status breakdown, recent 5 courses, dirty count, total hours."""
     pool = get_pool()
     courses_count = await pool.fetchval("SELECT COUNT(*) FROM courses")
     regulations_count = await pool.fetchval("SELECT COUNT(*) FROM regulations")
     l2_count = await pool.fetchval("SELECT COUNT(*) FROM approved_courses")
+
+    # 1. status breakdown
+    status_rows = await pool.fetch(
+        "SELECT status, COUNT(*) AS n FROM courses GROUP BY status"
+    )
+    status_breakdown = {str(r["status"]): int(r["n"]) for r in status_rows}
+
+    # 2. ultimi 5 corsi generati
+    recent_rows = await pool.fetch(
+        "SELECT id, title, status, created_at FROM courses "
+        "ORDER BY created_at DESC LIMIT 5"
+    )
+    recent_courses = [
+        RecentCourse(
+            id=str(r["id"]),
+            title=str(r["title"]),
+            status=str(r["status"]),
+            created_at=r["created_at"].isoformat() if r["created_at"] else "",
+        )
+        for r in recent_rows
+    ]
+
+    # 3. corsi con modifiche non rigenerate (dirty=true)
+    dirty_count = await pool.fetchval(
+        "SELECT COUNT(*) FROM courses WHERE dirty = true"
+    )
+
+    # 4. ore totali di formazione prodotte
+    total_hours = await pool.fetchval(
+        "SELECT COALESCE(SUM(duration_hours), 0) FROM courses "
+        "WHERE status IN ('completed', 'certified', 'reviewed')"
+    )
+
     return DashboardStats(
         courses_count=int(courses_count or 0),
         regulations_count=int(regulations_count or 0),
         l2_count=int(l2_count or 0),
+        status_breakdown=status_breakdown,
+        recent_courses=recent_courses,
+        dirty_count=int(dirty_count or 0),
+        total_training_hours=float(total_hours or 0),
     )
 
 

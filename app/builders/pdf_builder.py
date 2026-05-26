@@ -91,7 +91,19 @@ class PdfBuilder:
                 f"Expected {DEFAULT_TEMPLATE_NAME} inside."
             )
         self.brand_config = brand_config or {}
-        self.palette: dict[str, str] = self.brand_config.get("palette", {})
+        # FIX 2026-05-25: brand_config["palette"] da DB asyncpg arriva come
+        # JSON string (jsonb non auto-deserializzato in tutti i path). Parse
+        # difensivo per evitare AttributeError 'str' has no attribute 'get'.
+        import json as _json
+        _palette_raw = self.brand_config.get("palette", {})
+        if isinstance(_palette_raw, str):
+            try:
+                _palette_raw = _json.loads(_palette_raw)
+            except (_json.JSONDecodeError, TypeError):
+                _palette_raw = {}
+        self.palette: dict[str, str] = (
+            _palette_raw if isinstance(_palette_raw, dict) else {}
+        )
         self.output_dir = output_dir
         self.template_name = template_name
 

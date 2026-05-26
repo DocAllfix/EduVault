@@ -13,6 +13,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     fonts-open-sans \
     unzip \
     fontconfig \
+    libreoffice-impress \
+    libreoffice-core \
+    poppler-utils \
     && rm -rf /var/lib/apt/lists/*
 
 # Montserrat (non nei repo Debian — copia manuale da assets committati in git)

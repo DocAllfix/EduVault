@@ -96,15 +96,24 @@ def _fake_chunks(n: int = 40) -> list[NormativeChunk]:
 
 
 def _fake_llm_slides(module_index: int = 0) -> str:
-    """Return a JSON array of valid SlideContent slides for a module."""
+    """Return a JSON array of valid SlideContent slides per LAYOUT_CONSTRAINTS (FASE 1).
+
+    Body: 3 bullet brevi (≤6 max per CONTENT_TEXT).
+    Speaker notes: 80 parole (range 75-90 per CONTENT_TEXT, 25-35s TTS).
+    """
+    long_notes = " ".join(["parola"] * 80)
     slides = [
         {
             "index": i,
             "module_index": module_index,
             "slide_type": SlideType.CONTENT_TEXT.value,
             "title": f"Slide {i} modulo {module_index}",
-            "body": "Corpo della slide entro i limiti delle 90 parole previsti dal body validator.",
-            "speaker_notes": "Note per il relatore.",
+            "body": (
+                "Primo bullet del contenuto\n"
+                "Secondo bullet importante\n"
+                "Terzo punto da memorizzare"
+            ),
+            "speaker_notes": long_notes,
             "normative_ref": "Art. 1, DM 388/2003",
             "source_chunk_ids": [CHUNK_ID],
             "image": {"strategy": "none"},

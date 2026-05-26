@@ -171,13 +171,15 @@ async def _fake_pipeline_ctx(*_a: Any, **_kw: Any) -> AsyncIterator[Any]:
             "completed_modules": [
                 {
                     "slides": [
+                        # FASE 1: slide conforme LAYOUT_CONSTRAINTS (body 3 bullet,
+                        # notes 80 parole in range 75-90 per CONTENT_TEXT).
                         {
                             "index": 0,
                             "module_index": 0,
                             "slide_type": "CONTENT_TEXT",
-                            "title": "Slide 0",
-                            "body": "Body",
-                            "speaker_notes": "",
+                            "title": "Slide 0 titolo breve",
+                            "body": "Primo bullet\nSecondo bullet\nTerzo bullet",
+                            "speaker_notes": " ".join(["parola"] * 80),
                             "normative_ref": "Art. 1",
                             "source_chunk_ids": ["c1"],
                             "image": {"strategy": "none"},

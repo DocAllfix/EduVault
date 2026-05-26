@@ -23,20 +23,25 @@ from app.services.audio_service import AudioService
 def _slide(
     index: int,
     *,
-    speaker_notes: str = "Note del relatore per questa slide.",
-    body: str = "Corpo slide.",
+    speaker_notes: str | None = None,
+    body: str | None = None,
 ) -> SlideContent:
-    return SlideContent(
-        index=index,
-        module_index=0,
-        slide_type=SlideType.CONTENT_TEXT,
-        title=f"Slide {index}",
-        body=body,
-        speaker_notes=speaker_notes,
-        normative_ref="",
-        source_chunk_ids=[],
-        image=ImageStrategy(strategy="none"),
-    )
+    """FASE 1 vast-hopping: delega a make_slide centralizzato (constraints-safe).
+
+    Se vuoi testare il fallback body→narration (speaker_notes vuote), passa
+    ``speaker_notes=""`` esplicito e ``body="qualcosa di leggibile"``.
+    """
+    from tests._helpers import make_slide
+
+    overrides: dict[str, object] = {
+        "index": index,
+        "title": f"Slide {index}",
+    }
+    if body is not None:
+        overrides["body"] = body
+    if speaker_notes is not None:
+        overrides["speaker_notes"] = speaker_notes
+    return make_slide(SlideType.CONTENT_TEXT, **overrides)
 
 
 def _empty_pool() -> Any:
@@ -113,7 +118,10 @@ async def test_generate_narrations_produces_files_inserts_and_manifest(
         assert track["slide_index"] == i
         assert track["audio_file"] == f"slide_{i:04d}.mp3"
         assert track["duration_seconds"] == 12.5
-        assert track["narration_text"] == "Note del relatore per questa slide."
+        # FASE 1: narration text è speaker_notes della slide; default factory
+        # produce 80 "parola" parole (range valido CONTENT_TEXT 75-90).
+        assert isinstance(track["narration_text"], str)
+        assert len(track["narration_text"].split()) >= 75
 
     # 4. pool.execute: 5 INSERTs + 1 UPDATE courses.audio_manifest_path
     assert pool.execute.await_count == 6
@@ -141,20 +149,15 @@ async def test_generate_narrations_skips_slides_without_text(
 ) -> None:
     """Slides whose speaker_notes AND body are both empty/whitespace are
     skipped — they don't get an MP3, an INSERT, or a manifest entry."""
+    # FASE 1: bypass strict validator per slide intermedia "edge" (notes vuote
+    # da DB legacy o edit post-validation). Il codice runtime deve skipparla.
+    empty_slide = _slide(1)
+    object.__setattr__(empty_slide, "body", "   ")
+    object.__setattr__(empty_slide, "speaker_notes", "   ")
     slides = [
-        _slide(0, speaker_notes="con note"),
-        SlideContent(
-            index=1,
-            module_index=0,
-            slide_type=SlideType.CONTENT_TEXT,
-            title="senza testo",
-            body="   ",
-            speaker_notes="   ",
-            normative_ref="",
-            source_chunk_ids=[],
-            image=ImageStrategy(strategy="none"),
-        ),
-        _slide(2, speaker_notes="ancora con note"),
+        _slide(0),
+        empty_slide,
+        _slide(2),
     ]
     pool = _empty_pool()
     fake_mp3 = MagicMock()
@@ -179,7 +182,13 @@ async def test_generate_narrations_skips_slides_without_text(
 async def test_narration_falls_back_to_body_when_speaker_notes_empty(
     tmp_path: Path,
 ) -> None:
-    slides = [_slide(0, speaker_notes="", body="Testo del body usato come fallback.")]
+    # FASE 1: il validator strict non ammette speaker_notes vuote per CONTENT_TEXT,
+    # ma il codice runtime deve gestire questo edge case (slide da DB legacy o edit
+    # post-validation). Bypass via object.__setattr__.
+    slide = _slide(0)
+    object.__setattr__(slide, "speaker_notes", "")
+    object.__setattr__(slide, "body", "Testo del body usato come fallback.")
+    slides = [slide]
     pool = _empty_pool()
     fake_mp3 = MagicMock()
     fake_mp3.info.length = 4.0

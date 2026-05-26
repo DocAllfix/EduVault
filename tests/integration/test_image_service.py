@@ -43,20 +43,34 @@ def _slide(
     query_url: str | None = "https://example.com/img.png",
     diagram_code: str | None = None,
 ) -> SlideContent:
-    return SlideContent(
+    """FASE 1 vast-hopping: delega a make_slide centralizzato + override image.
+
+    Per strategy='diagram' usiamo SlideType.DIAGRAM; per altri (web_search/none)
+    usiamo CONTENT_IMAGE con aspect_hint richiesto.
+    """
+    from tests._helpers import make_slide
+
+    if strategy == "diagram" and diagram_code:
+        # DIAGRAM richiede viewBox 0 0 1760 800
+        if 'viewBox="0 0 1760 800"' not in diagram_code:
+            # se i test passano SVG generico, wrappo
+            diagram_code = (
+                f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1760 800">{diagram_code}</svg>'
+            )
+        return make_slide(
+            SlideType.DIAGRAM,
+            index=index,
+            image=ImageStrategy(strategy="diagram", diagram_code=diagram_code),
+        )
+    return make_slide(
+        SlideType.CONTENT_IMAGE,
         index=index,
-        module_index=0,
-        slide_type=SlideType.CONTENT_IMAGE,
-        title="t",
-        body="b",
-        speaker_notes="",
-        normative_ref="",
-        source_chunk_ids=[],
         image=ImageStrategy(
             strategy=strategy,
             query=query,
             query_url=query_url,
             diagram_code=diagram_code,
+            aspect_hint="landscape",
         ),
     )
 
@@ -315,11 +329,19 @@ async def test_prefetch_returns_empty_when_no_visual_strategies() -> None:
 
 @pytest.mark.asyncio
 async def test_prefetch_skips_web_slides_without_query_url() -> None:
+    """FASE 4: una web_search slide SENZA query NÉ query_url non viene
+    risolta (search_image ritorna None su query vuota) → nessun download.
+
+    NB: il comportamento è cambiato — se la slide ha ``query`` valorizzato,
+    FASE 4 risolve l'URL via search_image. Qui forziamo query vuota +
+    query_url None per testare lo skip.
+    """
     pool = _empty_pool()
-    slides = [_slide(0, strategy="web_search", query_url=None)]
-    # No httpx call should ever be made.
+    slide = _slide(0, strategy="web_search", query="primo soccorso", query_url=None)
+    # Svuoto query per simulare slide non-risolvibile (edge case)
+    object.__setattr__(slide.image, "query", None)
     with patch("app.services.image_service.httpx.AsyncClient") as cls:
-        result = await prefetch_images(slides, pool)
+        result = await prefetch_images([slide], pool)
     assert result == {}
     cls.assert_not_called()
 

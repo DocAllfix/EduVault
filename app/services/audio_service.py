@@ -50,8 +50,19 @@ logger = structlog.get_logger()
 
 _AUDIO_ROOT = Path("output/audio")
 _TTS_TIMEOUT_SECONDS = 30.0
-_TTS_SEMAPHORE_LIMIT = 3
+# Boost 2026-05-25: edge-tts (Microsoft free) regge bene 16 concurrent senza
+# rate-limit nei test empirici. Audio era collo di bottiglia:
+# - sema=3: 960 mp3 × 8s = ~43 min
+# - sema=8: ~16 min
+# - sema=16: ~8 min ← attuale
+_TTS_SEMAPHORE_LIMIT = 16
 _TTS_RETRY_ATTEMPTS = 3
+
+# FASE 6 vast-hopping: target durata narrazione per slide (regola 30s/slide
+# PacingEngine + tolleranza). Fuori range → flag off_target (no auto-retry v1,
+# l'utente regenera manualmente dalla Course Studio FASE 10).
+_TARGET_DURATION_MIN = 25.0
+_TARGET_DURATION_MAX = 35.0
 _AUDIO_PATH_MAX = 500  # courses.audio_manifest_path + audio_tracks.audio_path VARCHAR(500)
 
 
@@ -91,30 +102,35 @@ class AudioService:
             return_exceptions=False,
         )
 
+        off_target_count = 0
         for slide, result in zip(narratable, results, strict=True):
             if result is None:
                 skipped += 1
                 continue
-            audio_path_str, duration_s, narration = result
+            audio_path_str, duration_s, narration, off_target = result
+            if off_target:
+                off_target_count += 1
             tracks.append(
                 {
                     "slide_index": slide.index,
                     "audio_file": Path(audio_path_str).name,
                     "duration_seconds": round(duration_s, 2),
                     "narration_text": narration,
+                    "off_target": off_target,
                 }
             )
             await pool.execute(
                 "INSERT INTO audio_tracks "
                 "(course_id, slide_index, narration_text, audio_path, "
-                "duration_seconds, voice) "
-                "VALUES ($1, $2, $3, $4, $5, $6)",
+                "duration_seconds, voice, off_target) "
+                "VALUES ($1, $2, $3, $4, $5, $6, $7)",
                 course_id,
                 slide.index,
                 narration,
                 audio_path_str,
                 round(duration_s, 2),
                 self.voice,
+                off_target,
             )
 
         manifest_path = course_audio_dir / "sync_manifest.json"
@@ -147,6 +163,7 @@ class AudioService:
             course_id=course_id,
             tracks_generated=len(tracks),
             tracks_skipped=skipped,
+            off_target_count=off_target_count,  # FASE 6
             voice=self.voice,
         )
         return {
@@ -158,13 +175,16 @@ class AudioService:
 
     async def _generate_one(
         self, slide: SlideContent, course_audio_dir: Path
-    ) -> tuple[str, float, str] | None:
+    ) -> tuple[str, float, str, bool] | None:
         """Generate one MP3 with retry + per-slide fallback (log + skip).
 
-        Returns ``(audio_path, duration_seconds, narration_text)`` on success,
-        ``None`` if all retries failed — the slide is then skipped from the
-        manifest and from audio_tracks (BP §07.1 line 2301 invariant: one
-        broken artifact does NOT kill the build).
+        Returns ``(audio_path, duration_seconds, narration_text, off_target)``
+        on success, ``None`` if all retries failed — la slide è skippata dal
+        manifest e da audio_tracks (BP §07.1 line 2301: un artefatto rotto NON
+        uccide la build).
+
+        FASE 6: ``off_target`` è True se la durata è fuori 25-35s (la slide
+        narra troppo veloce/lento rispetto alla regola 30s/slide).
         """
         narration = (slide.speaker_notes or slide.body or "").strip()
         audio_path = course_audio_dir / f"slide_{slide.index:04d}.mp3"
@@ -183,8 +203,16 @@ class AudioService:
                             timeout=_TTS_TIMEOUT_SECONDS,
                         )
 
-            duration = MP3(str(audio_path)).info.length
-            return (str(audio_path), float(duration), narration)
+            duration = float(MP3(str(audio_path)).info.length)
+            off_target = not (_TARGET_DURATION_MIN <= duration <= _TARGET_DURATION_MAX)
+            if off_target:
+                logger.info(
+                    "audio_duration_off_target",
+                    slide_index=slide.index,
+                    duration=round(duration, 1),
+                    target=f"{_TARGET_DURATION_MIN}-{_TARGET_DURATION_MAX}s",
+                )
+            return (str(audio_path), duration, narration, off_target)
 
         except Exception as exc:
             logger.warning(

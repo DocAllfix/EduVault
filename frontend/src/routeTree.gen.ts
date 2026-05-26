@@ -40,6 +40,7 @@ import { Route as AuthenticatedSettingsAccountRouteImport } from './routes/_auth
 import { Route as AuthenticatedErrorsErrorRouteImport } from './routes/_authenticated/errors/$error'
 import { Route as AuthenticatedCoursesNewRouteImport } from './routes/_authenticated/courses/new'
 import { Route as AuthenticatedCoursesIdRouteImport } from './routes/_authenticated/courses/$id'
+import { Route as AuthenticatedCoursesIdStudioRouteImport } from './routes/_authenticated/courses/$id_.studio'
 import { Route as AuthenticatedCoursesIdProgressRouteImport } from './routes/_authenticated/courses/$id_.progress'
 
 const ClerkRouteRoute = ClerkRouteRouteImport.update({
@@ -204,6 +205,12 @@ const AuthenticatedCoursesIdRoute = AuthenticatedCoursesIdRouteImport.update({
   path: '/courses/$id',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
+const AuthenticatedCoursesIdStudioRoute =
+  AuthenticatedCoursesIdStudioRouteImport.update({
+    id: '/courses/$id_/studio',
+    path: '/courses/$id/studio',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const AuthenticatedCoursesIdProgressRoute =
   AuthenticatedCoursesIdProgressRouteImport.update({
     id: '/courses/$id_/progress',
@@ -241,6 +248,7 @@ export interface FileRoutesByFullPath {
   '/tasks/': typeof AuthenticatedTasksIndexRoute
   '/users/': typeof AuthenticatedUsersIndexRoute
   '/courses/$id/progress': typeof AuthenticatedCoursesIdProgressRoute
+  '/courses/$id/studio': typeof AuthenticatedCoursesIdStudioRoute
 }
 export interface FileRoutesByTo {
   '/clerk': typeof ClerkAuthenticatedRouteRouteWithChildren
@@ -271,6 +279,7 @@ export interface FileRoutesByTo {
   '/tasks': typeof AuthenticatedTasksIndexRoute
   '/users': typeof AuthenticatedUsersIndexRoute
   '/courses/$id/progress': typeof AuthenticatedCoursesIdProgressRoute
+  '/courses/$id/studio': typeof AuthenticatedCoursesIdStudioRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -306,6 +315,7 @@ export interface FileRoutesById {
   '/_authenticated/tasks/': typeof AuthenticatedTasksIndexRoute
   '/_authenticated/users/': typeof AuthenticatedUsersIndexRoute
   '/_authenticated/courses/$id_/progress': typeof AuthenticatedCoursesIdProgressRoute
+  '/_authenticated/courses/$id_/studio': typeof AuthenticatedCoursesIdStudioRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -339,6 +349,7 @@ export interface FileRouteTypes {
     | '/tasks/'
     | '/users/'
     | '/courses/$id/progress'
+    | '/courses/$id/studio'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/clerk'
@@ -369,6 +380,7 @@ export interface FileRouteTypes {
     | '/tasks'
     | '/users'
     | '/courses/$id/progress'
+    | '/courses/$id/studio'
   id:
     | '__root__'
     | '/_authenticated'
@@ -403,6 +415,7 @@ export interface FileRouteTypes {
     | '/_authenticated/tasks/'
     | '/_authenticated/users/'
     | '/_authenticated/courses/$id_/progress'
+    | '/_authenticated/courses/$id_/studio'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -635,6 +648,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedCoursesIdRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/courses/$id_/studio': {
+      id: '/_authenticated/courses/$id_/studio'
+      path: '/courses/$id/studio'
+      fullPath: '/courses/$id/studio'
+      preLoaderRoute: typeof AuthenticatedCoursesIdStudioRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/courses/$id_/progress': {
       id: '/_authenticated/courses/$id_/progress'
       path: '/courses/$id/progress'
@@ -683,6 +703,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedTasksIndexRoute: typeof AuthenticatedTasksIndexRoute
   AuthenticatedUsersIndexRoute: typeof AuthenticatedUsersIndexRoute
   AuthenticatedCoursesIdProgressRoute: typeof AuthenticatedCoursesIdProgressRoute
+  AuthenticatedCoursesIdStudioRoute: typeof AuthenticatedCoursesIdStudioRoute
 }
 
 const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
@@ -700,6 +721,7 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedTasksIndexRoute: AuthenticatedTasksIndexRoute,
   AuthenticatedUsersIndexRoute: AuthenticatedUsersIndexRoute,
   AuthenticatedCoursesIdProgressRoute: AuthenticatedCoursesIdProgressRoute,
+  AuthenticatedCoursesIdStudioRoute: AuthenticatedCoursesIdStudioRoute,
 }
 
 const AuthenticatedRouteRouteWithChildren =

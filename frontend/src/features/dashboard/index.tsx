@@ -36,6 +36,7 @@ import { ThemeSwitch } from '@/components/theme-switch'
 import { CoursesPrimaryButtons } from './components/courses-primary-buttons'
 import { CoursesTable } from './components/courses-table'
 import { DeleteCourseDialog } from './components/delete-course-dialog'
+import { EnrichedStats } from './components/enriched-stats'
 import { StatsCards } from './components/stats-cards'
 
 const STATS_QK = ['dashboard', 'stats'] as const
@@ -155,6 +156,9 @@ export function Dashboard() {
             isLoading={statsQuery.isLoading || generatingQuery.isLoading}
           />
         </div>
+
+        {/* FASE 13 — 4 dati arricchimento: status breakdown, dirty, ore, recenti */}
+        <EnrichedStats stats={statsQuery.data} />
 
         {/* Courses list */}
         <section aria-labelledby='courses-heading'>

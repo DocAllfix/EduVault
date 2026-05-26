@@ -18,6 +18,17 @@ storage/cache_images/*
 !storage/generated/.gitkeep
 !storage/cache_images/.gitkeep
 
+# === Generated output + work-in-progress binaries (never commit) ===
+output/
+extracted/
+*.bak
+*.pptx.bak*
+# Work PPTX dumped in repo root / frontend during debug (not source assets)
+/Health and Safety Workshop*.pptx
+/nexus_master_v2*.pptx
+frontend/*.pdf
+storage/pdfs/*.pdf
+
 # === Databases ===
 *.sqlite
 *.db
@@ -35,3 +46,5 @@ docs/screenshots/
 # === Local-only artifacts ===
 # codegraph SQLite knowledge-graph index — rebuilt locally via REI-15
 .codegraph/
+slidesgo_health_safety_original.pptx
+assets/templates/slidesgo_health_safety_original.pptx

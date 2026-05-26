@@ -25,9 +25,11 @@ import re
 from pathlib import Path
 
 import anthropic
+import openai
 import pdfplumber
 import structlog
 from tenacity import (
+    RetryError,
     retry,
     retry_if_exception_type,
     stop_after_attempt,
@@ -260,37 +262,222 @@ def compute_content_hash(body: str) -> str:
 
 
 # ─────────────────────────────────────────────────────────────────────
-# LLM call (BLUEPRINT §05.5) — defined here to unblock Stage 3 (see GAP
-# note in the module docstring). FASE 3.4 imports this instead of
-# redefining it.
+# LLM call (BLUEPRINT §05.5 + FASE 0b vast-hopping-sketch) — multi-provider
+# con fallback 3-livelli ricorsivo (Azure mini → Azure premium → Anthropic).
+# Definito qui per unblock Stage 3; content_agent (BP §05.5) lo importa.
 # ─────────────────────────────────────────────────────────────────────
+
+
+class LLMProviderError(RuntimeError):
+    """Raised when ALL fallback levels are exhausted (Azure + Anthropic down)."""
+
+
+# Fallback chain 2026-05-25: DeepSeek V4 Pro primary (qualità top + prezzo
+# promo confermato permanente $0.435/$0.87 per 1M tok = ~$0.02/corso 4h vs
+# $0.10 Azure mini = 5× più economico).
+#
+# CONTENT (slide normative):
+# - L0 = DeepSeek V4 Pro — PRIMARY
+# - L1 = Azure gpt-4.1-mini — fallback se DeepSeek down
+# - L2 = OpenAI gpt-4o — fallback premium se Azure pure down
+# - L3 = Anthropic Haiku — emergenza
+#
+# CLASSIFY (chunk normativi — strutturato semplice):
+# - L0 = DeepSeek V4 Flash ($0.14/$0.28) — il più economico
+# - L1 = Azure gpt-4.1-mini
+# - L2 = OpenAI gpt-4o-mini
+# - L3 = Anthropic Haiku
+_FALLBACK_CHAIN_CONTENT: list[tuple[str, str, str]] = [
+    ("deepseek",     "deepseek_content_model",            "L0_deepseek_v4_pro"),
+    ("azure_openai", "azure_openai_deployment_content",   "L1_azure_mini"),
+    ("openai",       "openai_content_model",              "L2_openai_4o"),
+    ("anthropic",    "llm_classify_model",                "L3_anthropic_haiku"),
+]
+
+_FALLBACK_CHAIN_CLASSIFY: list[tuple[str, str, str]] = [
+    ("deepseek",     "deepseek_classify_model",           "L0_deepseek_v4_flash"),
+    ("azure_openai", "azure_openai_deployment_classify",  "L1_azure_classify"),
+    ("openai",       "openai_classify_model",             "L2_openai_4o_mini"),
+    ("anthropic",    "llm_classify_model",                "L3_anthropic_haiku"),
+]
+
+
+# Eccezioni transienti che triggerano retry tenacity DENTRO un singolo provider
+# (3 attempts, exp backoff 5-60s, PRIMA di scalare al fallback successivo).
+_TRANSIENT_EXCEPTIONS: tuple[type[Exception], ...] = (
+    openai.RateLimitError,
+    openai.APIStatusError,        # 5xx, request id errors
+    openai.APIConnectionError,    # network drop
+    anthropic.RateLimitError,
+    anthropic.InternalServerError,
+    anthropic.APIStatusError,
+)
+
+# Eccezioni "provider down per noi" che fanno SUBITO scalare al fallback successivo
+# senza retry tenacity interno (sono errori non transienti — wrong key, deployment
+# non esiste, account sospeso, ecc.). Sintomo: il provider non risponderà mai
+# correttamente con questi parametri.
+_FALLBACK_EXCEPTIONS: tuple[type[Exception], ...] = (
+    openai.AuthenticationError,
+    openai.PermissionDeniedError,
+    openai.NotFoundError,         # deployment mancante
+    openai.BadRequestError,       # config invalida lato nostro
+    anthropic.AuthenticationError,
+    anthropic.PermissionDeniedError,
+    anthropic.NotFoundError,
+    anthropic.BadRequestError,
+    RetryError,                   # tenacity esaurito su _TRANSIENT_EXCEPTIONS
+)
 
 
 @retry(
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=5, min=5, max=60),
-    retry=retry_if_exception_type((
-        anthropic.RateLimitError,
-        anthropic.InternalServerError,
-        anthropic.APIStatusError,
-    )),
+    retry=retry_if_exception_type(_TRANSIENT_EXCEPTIONS),
 )
-async def call_llm(messages: list[dict[str, str]], system: str) -> str:
-    """LLM call with automatic retry on 429/500/529.
+async def _call_llm_single(
+    provider: str, model: str, messages: list[dict[str, str]], system: str
+) -> str:
+    """Single-provider call con tenacity retry (3 attempts) interno.
 
-    The client is created inside the function, never as a global
-    (BP §05.5). Timeout comes from settings (OPT-2) instead of the BP's
-    hardcoded 120.0.
+    Quando tenacity esaurisce i 3 tentativi su questo provider, l'eccezione
+    propaga al chiamante ``call_llm`` che attiva il fallback al livello successivo.
     """
-    client = anthropic.AsyncAnthropic(timeout=float(settings.llm_request_timeout))
-    response = await client.messages.create(
-        model="claude-sonnet-4-20250514",
-        max_tokens=8000,
-        system=system,
-        messages=messages,  # type: ignore[arg-type]
-    )
-    block = response.content[0]
-    return block.text if isinstance(block, anthropic.types.TextBlock) else ""
+    if provider == "deepseek":
+        # DeepSeek V4 (Flash default, Pro per reasoning) — provider PRIMARY 2026-05-25
+        # OpenAI-compatible: stesso SDK, base_url custom.
+        # max_tokens=16000 per dare spazio sia al reasoning di V4 Pro (può usare
+        # 5-10K token interni) sia all'output finale (slide JSON 6-8K). Costo
+        # trascurabile (~$0.014 per chiamata anche al peggio).
+        ds_client = openai.AsyncOpenAI(
+            api_key=settings.deepseek_api_key,
+            base_url="https://api.deepseek.com",
+            timeout=float(settings.llm_request_timeout),
+        )
+        ds_messages: list[dict[str, str]] = [{"role": "system", "content": system}, *messages]
+        ds_resp = await ds_client.chat.completions.create(
+            model=model,
+            messages=ds_messages,  # type: ignore[arg-type]
+            response_format={"type": "json_object"},
+            max_tokens=16000,
+            temperature=0.3,
+        )
+        return ds_resp.choices[0].message.content or ""
+
+    if provider == "openai":
+        # OpenAI diretto (fallback L1)
+        oai_client = openai.AsyncOpenAI(
+            api_key=settings.openai_api_key,
+            timeout=float(settings.llm_request_timeout),
+        )
+        oai_messages: list[dict[str, str]] = [{"role": "system", "content": system}, *messages]
+        oai_resp = await oai_client.chat.completions.create(
+            model=model,
+            messages=oai_messages,  # type: ignore[arg-type]
+            response_format={"type": "json_object"},
+            max_tokens=8000,
+            temperature=0.3,
+        )
+        return oai_resp.choices[0].message.content or ""
+
+    if provider == "azure_openai":
+        client = openai.AsyncAzureOpenAI(
+            azure_endpoint=settings.azure_openai_endpoint,
+            api_key=settings.azure_openai_api_key,
+            api_version=settings.azure_openai_api_version,
+            timeout=float(settings.llm_request_timeout),
+        )
+        oa_messages: list[dict[str, str]] = [{"role": "system", "content": system}, *messages]
+        response = await client.chat.completions.create(
+            model=model,
+            messages=oa_messages,  # type: ignore[arg-type]
+            response_format={"type": "json_object"},
+            max_tokens=8000,
+        )
+        return response.choices[0].message.content or ""
+
+    if provider == "anthropic":
+        a_client = anthropic.AsyncAnthropic(timeout=float(settings.llm_request_timeout))
+        a_response = await a_client.messages.create(
+            model=model,
+            max_tokens=8000,
+            system=system,
+            messages=messages,  # type: ignore[arg-type]
+        )
+        block = a_response.content[0]
+        return block.text if isinstance(block, anthropic.types.TextBlock) else ""
+
+    raise LLMProviderError(f"unknown provider: {provider}")
+
+
+async def call_llm(
+    messages: list[dict[str, str]],
+    system: str,
+    *,
+    model: str | None = None,
+    task: str = "content",
+    _fallback_level: int = 0,
+) -> str:
+    """LLM call con sistema di fallback automatico (FASE 0b vast-hopping-sketch).
+
+    Fallback chain per ``task="content"`` (default):
+      L0 → Azure OpenAI gpt-4.1-mini  (primary, ~$0.50/corso 4h)
+      L1 → Azure OpenAI gpt-4o        (premium, 5× costo, qualità ↑)
+      L2 → Anthropic Sonnet 4.6       (emergenza Azure-down)
+
+    Fallback chain per ``task="classify"``:
+      L0 → Azure OpenAI gpt-4.1-mini  (classify deployment)
+      L1 → Anthropic Haiku 4.5        (emergenza, no Azure premium per task semplice)
+
+    Ogni livello ha 3 retry tenacity interni (5-60s backoff exp) sulle eccezioni
+    transienti. Solo dopo aver esaurito i retry interni scaliamo al livello successivo.
+
+    Il parametro ``model`` (legacy) viene IGNORATO se ``llm_provider="azure_openai"``
+    (il modello effettivo è scelto dal fallback chain). Quando
+    ``llm_provider="anthropic"``, ``model`` mantiene il vecchio comportamento.
+
+    ``task`` distingue content_agent (chain a 3 livelli) da classify_chunk (2 livelli).
+    ``_fallback_level`` è uso interno ricorsione — NON passare manualmente.
+    """
+    # Modalità legacy Anthropic-only: bypass chain, comportamento storico.
+    if settings.llm_provider == "anthropic":
+        default_model = (
+            settings.llm_classify_model if task == "classify" else settings.llm_content_model
+        )
+        return await _call_llm_single("anthropic", model or default_model, messages, system)
+
+    # Modalità con fallback chain (OpenAI primary o Azure primary).
+    chain = _FALLBACK_CHAIN_CLASSIFY if task == "classify" else _FALLBACK_CHAIN_CONTENT
+    if _fallback_level >= len(chain):
+        raise LLMProviderError(
+            f"all fallback levels exhausted for task={task} (Azure + Anthropic both down)"
+        )
+
+    provider, deployment_attr, label = chain[_fallback_level]
+    eff_model = getattr(settings, deployment_attr)
+
+    try:
+        return await _call_llm_single(provider, eff_model, messages, system)
+    except _FALLBACK_EXCEPTIONS as exc:
+        # Provider down/misconfigured — scala al prossimo livello (no retry interno).
+        next_label = chain[_fallback_level + 1][2] if _fallback_level + 1 < len(chain) else "EXHAUSTED"
+        # Se RetryError, unwrappa l'eccezione originale per logging più chiaro.
+        underlying = exc.last_attempt.exception() if isinstance(exc, RetryError) and exc.last_attempt else exc  # type: ignore[union-attr]
+        logger.warning(
+            "llm_fallback_triggered",
+            task=task,
+            from_level=label,
+            next_level=next_label,
+            error_class=type(underlying).__name__ if underlying else type(exc).__name__,
+            error_msg=str(underlying)[:200] if underlying else str(exc)[:200],
+        )
+        return await call_llm(
+            messages,
+            system,
+            model=None,  # forza re-pick dal chain
+            task=task,
+            _fallback_level=_fallback_level + 1,
+        )
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -314,6 +501,24 @@ Regole:
 """
 
 
+def _strip_json_fences(raw: str) -> str:
+    """Strip optional ```json ... ``` markdown fences from an LLM reply.
+
+    Haiku 4.5 wraps JSON in fences ~50% of the time despite the
+    "SOLO JSON" system instruction. Sonnet 4 (legacy) usually doesn't.
+    This helper accepts both fenced and bare JSON so the parser is robust.
+    """
+    cleaned = raw.strip()
+    if cleaned.startswith("```"):
+        cleaned = cleaned.split("```", 2)[1]
+        if cleaned.startswith("json"):
+            cleaned = cleaned[4:]
+        cleaned = cleaned.strip()
+    if cleaned.endswith("```"):
+        cleaned = cleaned[:-3].strip()
+    return cleaned
+
+
 @retry(stop=stop_after_attempt(2), wait=wait_exponential(multiplier=2, min=2, max=10))
 async def classify_chunk(body: str) -> dict[str, object]:
     """Classify a normative chunk via LLM, with a rule-based SANZIONE guard.
@@ -324,7 +529,9 @@ async def classify_chunk(body: str) -> dict[str, object]:
     raw = await call_llm(
         messages=[{"role": "user", "content": CLASSIFICATION_PROMPT.format(body=body[:1000])}],
         system="Sei un classificatore di testi normativi. Rispondi SOLO con JSON.",
+        task="classify",  # FASE 0b: usa fallback chain classify (Azure mini → Anthropic Haiku)
     )
+    raw = _strip_json_fences(raw)
     result: dict[str, object] = json.loads(raw)
     if result["type"] == "SANZIONE" and not any(
         w in body.lower() for w in ["ammenda", "arresto", "sanzione", "euro", "pena"]
@@ -338,17 +545,80 @@ async def classify_chunk(body: str) -> dict[str, object]:
 # ─────────────────────────────────────────────────────────────────────
 
 
-@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=2, min=2, max=30))
-async def embed_batch(texts: list[str]) -> list[list[float]]:
-    """Embed a batch of texts via Voyage AI (max 50 per batch, rate limit).
+# Voyage AI limits (verified 2026-05-25 via 400 error response):
+# - Max 1000 documents per submitted batch
+# - Max 320,000 tokens per submitted batch (HARD limit, returns 400)
+# - voyage-3: 32K context per single document, 1024 embedding dim
+# Margine sicurezza: 280K (12% under hard limit, copre underestimate token).
+_VOYAGE_MAX_TOKENS_PER_BATCH = 280_000
+_VOYAGE_MAX_DOCS_PER_BATCH = 1000
 
-    Uses ``get_voyage_client()`` from dependencies.py — never a global
-    (BP §06.1.1 Stage 4).
+
+def _estimate_tokens(text: str) -> int:
+    """Rough estimate: 1 token ≈ 4 chars (mixed Italian text, tiktoken-class).
+    Conservative overestimate to stay safely under Voyage hard limit."""
+    return max(1, len(text) // 4 + 1)
+
+
+def _split_to_sub_batches(texts: list[str]) -> list[list[str]]:
+    """Pack texts into sub-batches respecting Voyage token + doc limits.
+
+    Greedy first-fit: appende a sub-batch corrente finché sta sotto i limiti,
+    altrimenti chiude e ne apre uno nuovo. Un singolo text che da solo
+    supera il token limit viene comunque inviato (Voyage tronca internamente
+    fino a 32K token per voyage-3, oltre raisa 400 sul singolo doc).
     """
+    sub_batches: list[list[str]] = []
+    current: list[str] = []
+    current_tokens = 0
+    for t in texts:
+        toks = _estimate_tokens(t)
+        # Se aggiungere supera i limiti, chiudi sub-batch e apri nuovo
+        if current and (
+            current_tokens + toks > _VOYAGE_MAX_TOKENS_PER_BATCH
+            or len(current) >= _VOYAGE_MAX_DOCS_PER_BATCH
+        ):
+            sub_batches.append(current)
+            current = []
+            current_tokens = 0
+        current.append(t)
+        current_tokens += toks
+    if current:
+        sub_batches.append(current)
+    return sub_batches
+
+
+@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=2, min=2, max=30))
+async def _embed_single_sub_batch(texts: list[str]) -> list[list[float]]:
+    """Embed UN sub-batch già validato per stare sotto i limiti Voyage."""
     client = get_voyage_client()
     response = await client.embed(texts, model="voyage-3")
     embeddings: list[list[float]] = response.embeddings
     return embeddings
+
+
+async def embed_batch(texts: list[str]) -> list[list[float]]:
+    """Embed a batch of texts via Voyage AI con auto-split su token limit.
+
+    Voyage Tier 1: 2000 RPM, 3M TPM, max 1000 docs/batch, max 320K token/batch.
+    Se il caller passa una lista che supererebbe il limite token, qui dentro
+    viene splittata in sub-batch e ricomposta nello stesso ordine.
+    Aggiornato 2026-05-25: scoperto 400 "366320 tokens after truncation" su
+    batch da 500 articoli D.Lgs 81 lunghi.
+    """
+    sub_batches = _split_to_sub_batches(texts)
+    if len(sub_batches) > 1:
+        logger.info(
+            "embed_batch_auto_split",
+            input_docs=len(texts),
+            sub_batches=len(sub_batches),
+            sub_batch_sizes=[len(s) for s in sub_batches],
+        )
+    all_embs: list[list[float]] = []
+    for sb in sub_batches:
+        embs = await _embed_single_sub_batch(sb)
+        all_embs.extend(embs)
+    return all_embs
 
 
 async def voyage_embed_with_retry(text: str) -> list[float]:
@@ -358,13 +628,15 @@ async def voyage_embed_with_retry(text: str) -> list[float]:
 
 
 async def index_chunks(chunks: list[dict[str, object]], pool: object) -> None:
-    """Index classified chunks with embeddings in batches of 50.
+    """Index classified chunks with embeddings.
 
+    Boost 2026-05-25: batch_size 50→500 (Voyage ammette 1000/batch, 500 è
+    margine sicurezza per token totali). D.Lgs 81 1831 chunks: 4 batch vs 37
+    precedenti = ~10× faster sull'embed phase.
     Dedup via ``content_hash``: a chunk whose body already exists with
-    ``is_current = true`` is skipped (BP §06.1.1 Stage 4). Each input chunk
-    must already carry a ``classification`` dict from ``classify_chunk``.
+    ``is_current = true`` is skipped (BP §06.1.1 Stage 4).
     """
-    batch_size = 50
+    batch_size = 500
     for i in range(0, len(chunks), batch_size):
         batch = chunks[i:i + batch_size]
         texts = [str(c["body"]) for c in batch]
@@ -388,17 +660,44 @@ async def index_chunks(chunks: list[dict[str, object]], pool: object) -> None:
             # asyncpg has no native vector codec → pass the pgvector text
             # literal and cast with ::vector (same interop as knowledge_repo).
             embedding_literal = "[" + ",".join(str(x) for x in embedding) + "]"
-            await pool.execute(  # type: ignore[attr-defined]
-                "INSERT INTO regulation_chunks "
-                "(regulation_id, article, paragraph, hierarchy_path, body, "
-                "chunk_type, tags, embedding, content_hash) "
-                "VALUES ($1,$2,$3,$4,$5,$6,$7,$8::vector,$9)",
-                chunk["regulation_id"], chunk["article"], chunk["paragraph"],
-                chunk["hierarchy_path"], chunk["body"],
-                classification["type"],
-                classification["tags"],
-                embedding_literal, content_hash,
-            )
+
+            # Defensive truncation: regulation_chunks schema has VARCHAR(50) on
+            # article and paragraph + VARCHAR(500) on hierarchy_path. Bizarre
+            # PDF regex matches (e.g. "1-bis-ter-quater-...-decies" recursive)
+            # can exceed those limits and explode the entire ingest with
+            # asyncpg.exceptions.StringDataRightTruncationError. Truncate
+            # quietly here — the body text (which carries the real content)
+            # is TEXT and stays full-length.
+            art = chunk["article"]
+            par = chunk["paragraph"]
+            hpath = chunk["hierarchy_path"]
+            art_trunc = str(art)[:50] if art is not None else None
+            par_trunc = str(par)[:50] if par is not None else None
+            hpath_trunc = str(hpath)[:500] if hpath is not None else None
+
+            try:
+                await pool.execute(  # type: ignore[attr-defined]
+                    "INSERT INTO regulation_chunks "
+                    "(regulation_id, article, paragraph, hierarchy_path, body, "
+                    "chunk_type, tags, embedding, content_hash) "
+                    "VALUES ($1,$2,$3,$4,$5,$6,$7,$8::vector,$9)",
+                    chunk["regulation_id"], art_trunc, par_trunc,
+                    hpath_trunc, chunk["body"],
+                    classification["type"],
+                    classification["tags"],
+                    embedding_literal, content_hash,
+                )
+            except Exception as exc:
+                # Skip THIS chunk only — don't abort the whole batch (REI: un
+                # singolo INSERT rotto NON deve uccidere l'ingest di 1831 chunks).
+                logger.warning(
+                    "chunk_insert_failed",
+                    article=art_trunc,
+                    paragraph=par_trunc,
+                    hash=content_hash[:16],
+                    error_class=type(exc).__name__,
+                    error=str(exc)[:200],
+                )
         logger.info("chunks_indexed", batch=i // batch_size + 1, count=len(batch))
 
 
@@ -436,12 +735,46 @@ async def ingest_regulation_file(
     full_text = parse_regulation_pdf(pdf_path)
     chunks = chunk_regulation(full_text, regulation_id)
 
-    classified: list[dict[str, object]] = []
-    for chunk in chunks:
-        classification = await classify_chunk(str(chunk["body"]))
-        classified.append({**chunk, "classification": classification})
+    # Boost 2026-05-25: classify_chunk PARALLELIZZATO con Semaphore(50).
+    # DeepSeek V4 Flash ha 2500 concurrency limit (classify task usa Flash).
+    # D.Lgs 81 1831 chunks: 1831/50 = 37 wave × ~1s = ~40s vs 30 min sequenziale.
+    import asyncio as _asyncio
+    sem = _asyncio.Semaphore(50)
 
-    await index_chunks(classified, pool)
+    async def _classify_one(chunk: dict[str, object]) -> dict[str, object]:
+        async with sem:
+            try:
+                cl = await classify_chunk(str(chunk["body"]))
+            except BaseException as exc:  # cattura ANCHE RetryError tenacity
+                logger.warning(
+                    "classify_chunk_failed",
+                    chunk_hash=str(chunk.get("body", ""))[:30],
+                    error_class=type(exc).__name__,
+                    error=str(exc)[:200],
+                )
+                # Fallback: classifica come GENERALE per non perdere chunk
+                cl = {"type": "GENERALE", "tags": []}
+            return {**chunk, "classification": cl}
+
+    # return_exceptions=True per non far propagare un singolo RuntimeError
+    classified_raw = await _asyncio.gather(
+        *(_classify_one(c) for c in chunks),
+        return_exceptions=True,
+    )
+    classified = []
+    for c, r in zip(chunks, classified_raw):
+        if isinstance(r, BaseException):
+            logger.warning("classify_gather_exception", error=str(r)[:200])
+            classified.append({**c, "classification": {"type": "GENERALE", "tags": []}})
+        else:
+            classified.append(r)
+    logger.info(
+        "chunks_classified",
+        total=len(classified),
+        sequential_estimate_min=round(len(classified) / 60, 1),
+    )
+
+    await index_chunks(list(classified), pool)
 
     logger.info(
         "regulation_ingested",

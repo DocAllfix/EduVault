@@ -13,13 +13,20 @@ EXPECTED_SLUGS = {
     "sicurezza_lavoratori_generale",
     "sicurezza_lavoratori_specifica_basso",
     "primo_soccorso_gruppo_b_c",
+    "primo_soccorso_gruppo_a",  # demo cliente 2026-05-25 (10h, profilo rischio alto)
+    "primo_soccorso_test_dm388_only",  # Cluster D smoke test (1h corso, DM 388 only)
     "antincendio_livello_1",
     "haccp_addetto",
     "preposti",
 }
 
 
-def test_catalog_has_exactly_six_types() -> None:
+def test_catalog_has_expected_course_types() -> None:
+    """Verifica che il catalog abbia esattamente i course_type attesi.
+
+    Aggiornare ``EXPECTED_SLUGS`` quando si aggiunge un course_type
+    (es. ``primo_soccorso_gruppo_a`` post-FASE 1 per demo cliente).
+    """
     assert set(COURSE_CATALOG.keys()) == EXPECTED_SLUGS
 
 

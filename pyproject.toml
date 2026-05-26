@@ -42,8 +42,9 @@ dependencies = [
     # === BLUEPRINT §1.1 — service SDKs (no version pinned in §1.1) ===
     # Version constraint deliberately omitted: BLUEPRINT does not pin them.
     # Lock the floor when actual integration code lands (FASE 3+).
-    "anthropic",                   # Claude Sonnet 4 SDK
+    "anthropic",                   # Claude Sonnet 4 SDK (L2 fallback emergenza)
     "voyageai",                    # Voyage AI SDK (voyage-3, 1024 dim)
+    "openai>=1.50",                # Azure OpenAI SDK (gpt-4.1-mini primary, FASE 0b)
 
     # === v3.0 Optimizations (CLAUDE.md OPT-1 / OPT-2 / OPT-3 / OPT-4) ===
     "edge-tts>=6.1",               # OPT-1: free TTS (replaces openai), it-IT-DiegoNeural

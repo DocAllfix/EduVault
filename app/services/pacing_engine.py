@@ -32,12 +32,15 @@ class PacingEngine:
     # GAP-1 v2.0: fixed metric rule.
     SECONDS_PER_SLIDE = 30
 
-    # FIX-8 v1.0: no DIAGRAM. Sums to 1.00.
+    # FASE 5 vast-hopping: DIAGRAM riabilitato al 7% (era 0% in FIX-8 v1.0).
+    # Il validator FASE 1 + viewBox fisso 1760x800 rendono ora gli SVG affidabili.
+    # Sums to 1.00.
     DISTRIBUTION: dict[str, float] = {
-        "CONTENT_TEXT": 0.50,
-        "CONTENT_IMAGE": 0.22,
+        "CONTENT_TEXT": 0.45,
+        "CONTENT_IMAGE": 0.20,
         "QUIZ": 0.12,
         "CASE_STUDY": 0.06,
+        "DIAGRAM": 0.07,
         "RECAP": 0.10,
     }
 

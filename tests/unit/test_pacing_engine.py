@@ -61,24 +61,25 @@ def test_density_defaults_to_standard() -> None:
     assert plan_default.total_slides == plan_explicit.total_slides
 
 
-# ─────────── FIX-8 v1.0: DIAGRAM excluded ───────────
+# ─────────── FASE 5 vast-hopping: DIAGRAM re-enabled (was FIX-8 excluded) ───────────
 
 
-def test_diagram_not_in_class_distribution() -> None:
-    """The class-level DISTRIBUTION must NOT contain DIAGRAM (FIX-8)."""
-    assert "DIAGRAM" not in PacingEngine.DISTRIBUTION
+def test_diagram_in_class_distribution() -> None:
+    """FASE 5: DIAGRAM ora è nella DISTRIBUTION al 7% (era escluso FIX-8 v1.0)."""
+    assert "DIAGRAM" in PacingEngine.DISTRIBUTION
+    assert PacingEngine.DISTRIBUTION["DIAGRAM"] == 0.07
 
 
-def test_diagram_not_in_any_module_distribution() -> None:
-    """No emitted module's per-type breakdown contains DIAGRAM."""
+def test_diagram_in_module_distribution() -> None:
+    """FASE 5: i moduli ora includono DIAGRAM nel breakdown per-tipo."""
     plan = PacingEngine().calculate(8.0, SlideDensity.STANDARD)
-    for m in plan.modules:
-        assert "DIAGRAM" not in m.slide_distribution
+    # Almeno un modulo deve avere DIAGRAM ≥ 1 (8h = 960 slide, 7% = ~67 diagram)
+    assert any("DIAGRAM" in m.slide_distribution for m in plan.modules)
 
 
 def test_distribution_sums_to_one() -> None:
     """DISTRIBUTION must total 1.00 (no slide budget is silently lost)."""
-    assert sum(PacingEngine.DISTRIBUTION.values()) == 1.00
+    assert abs(sum(PacingEngine.DISTRIBUTION.values()) - 1.00) < 1e-9
 
 
 # ─────────── Per-module distribution invariants ───────────

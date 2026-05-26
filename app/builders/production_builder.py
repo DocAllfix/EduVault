@@ -35,7 +35,7 @@ import structlog
 
 from app.builders.pdf_builder import PdfBuilder
 from app.builders.pptx_validator import PptxValidator
-from app.builders.slide_builder import SlideBuilder
+from app.builders.slide_builder_v2 import SlideBuilderV2  # FASE 3: drop-in v2 (XML find/replace)
 from app.models.pipeline import GenerationReport, SlideContent
 
 logger = structlog.get_logger()
@@ -104,7 +104,7 @@ class ProductionBuilder:
     def __init__(self, brand_config: dict[str, Any] | None = None) -> None:
         cfg = brand_config or {}
         self.brand_config = cfg
-        self.slide_builder = SlideBuilder(brand_config=cfg)
+        self.slide_builder = SlideBuilderV2(brand_config=cfg)
         self.pdf_builder = PdfBuilder(brand_config=cfg)
         self.validator = PptxValidator()
 

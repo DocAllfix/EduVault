@@ -37,7 +37,9 @@ logger = structlog.get_logger()
 
 # BP §07.0 line 2056 — guards python-pptx-unrelated I/O concurrency,
 # NOT the python-pptx Semaphore(1) REI-3 (that one lives in generation_service).
-_image_semaphore = asyncio.Semaphore(5)
+_image_semaphore = asyncio.Semaphore(40)  # boost 2026-05-25 (#15): cache + simplify
+# riducono call duplicate; 40 paralleli reggono Pexels (5 req/sec sostenuti
+# burst, cache hit immediati). Tempo prefetch corso 8h: ~3min → ~30s.
 
 # BP §07.0 line 2059 — prevents OOM from absurd image downloads.
 MAX_IMAGE_BYTES = 5_000_000
@@ -46,8 +48,25 @@ IMAGES_DIR = "output/images"
 DIAGRAMS_DIR = "output/diagrams"
 
 DOWNLOAD_TIMEOUT_SECONDS = 10.0
-DIAGRAM_OUTPUT_WIDTH = 1200
+# FASE 5 vast-hopping: viewBox SVG fisso "0 0 1760 800" → render 1:1 col box
+# nx_diagram_box del template. Aspect 2.2:1 (landscape wide).
+DIAGRAM_OUTPUT_WIDTH = 1760
 DIAGRAM_OUTPUT_HEIGHT = 800
+
+# FIX #25 (2026-05-26): zero-placeholder guarantee. Brand colours C.F.P.
+# Montessori — used by the branded fallback when every external provider
+# is exhausted, so a CONTENT_IMAGE/DIAGRAM box never renders the literal
+# "[ query ]" placeholder text from the template.
+BRAND_PINK = (0xC8, 0x2E, 0x6E)   # #C82E6E
+BRAND_GREEN = (0x76, 0x9E, 0x2E)  # #769E2E
+FALLBACK_DIR = "output/fallbacks"
+
+# Backfill budget: max wall-clock spent retrying providers for the holes
+# before giving up and using the branded fallback (user choice: ~2-3 min).
+BACKFILL_MAX_SECONDS = 150.0
+# Pause between backfill waves to let per-minute provider quotas recover
+# (Openverse 100/min, Pixabay 100/min). One short wait, then fallback.
+BACKFILL_WAVE_PAUSE_SECONDS = 20.0
 
 
 def sanitize_svg(svg_code: str) -> str:
@@ -76,10 +95,16 @@ def sanitize_svg(svg_code: str) -> str:
 
 
 async def _download_one_image(
-    slide: SlideContent, pool: Any, client: httpx.AsyncClient
+    pos: int, slide: SlideContent, pool: Any, client: httpx.AsyncClient
 ) -> tuple[int, str | None]:
     """Download one image under the global semaphore, with cache lookup
     and Pillow integrity validation. BP §07.0 line 2076-2122.
+
+    ``pos`` is the GLOBAL position of the slide in the prefetch list — the
+    key used by image_map. FIX #26 (2026-05-26): slide.index is module-local
+    (up to 14 slides share one index), so it CANNOT key image_map without
+    collisions. Both prefetch and the builder enumerate the same ordered
+    list, so position is the stable shared key.
 
     The httpx client is the SHARED one created by ``prefetch_images`` —
     no new client per call (connection-pool reuse).
@@ -94,7 +119,7 @@ async def _download_one_image(
                 "UPDATE image_cache SET usage_count = usage_count + 1 WHERE query=$1",
                 slide.image.query,
             )
-            return (slide.index, cached["local_path"])
+            return (pos, cached["local_path"])
 
         try:
             assert slide.image.query_url is not None  # guarded by prefetch_images
@@ -108,7 +133,7 @@ async def _download_one_image(
                     slide=slide.index,
                     size_mb=round(len(raw_bytes) / 1_000_000, 1),
                 )
-                return (slide.index, None)
+                return (pos, None)
 
             # BP §07.0 line 2106-2107: img.load() forces full decode and
             # raises on corrupt streams — strictly stronger than verify()
@@ -127,25 +152,120 @@ async def _download_one_image(
                 str(slide.image.query_url),
                 local_path,
             )
-            return (slide.index, local_path)
+            return (pos, local_path)
 
         except Exception as exc:
             logger.warning(
                 "image_download_failed", slide=slide.index, error=str(exc)
             )
-            return (slide.index, None)
+            return (pos, None)
 
 
-def _render_diagram_sync(slide: SlideContent) -> tuple[int, str | None]:
+def fit_image_to_box(
+    image_path: str, box_w_px: int, box_h_px: int
+) -> str:
+    """FASE 4: ridimensiona l'immagine per ENTRARE nel box preservando aspect
+    ratio (NO crop, NO squish). Letterboxing con padding bianco se l'aspect
+    reale non matcha quello del box.
+
+    Restituisce il path della versione fitted (``<orig>_fitted.png``). Se Pillow
+    fallisce, ritorna il path originale (degradazione graziosa).
+    """
+    try:
+        from PIL import ImageOps
+
+        img = Image.open(image_path).convert("RGB")
+        # ImageOps.pad scala-to-fit dentro (box_w, box_h) e riempie con color
+        fitted = ImageOps.pad(
+            img,
+            (box_w_px, box_h_px),
+            method=Image.Resampling.LANCZOS,
+            color=(255, 255, 255),
+            centering=(0.5, 0.5),
+        )
+        fitted_path = image_path.rsplit(".", 1)[0] + "_fitted.png"
+        fitted.save(fitted_path, "PNG")
+        return fitted_path
+    except Exception as exc:
+        logger.warning("image_fit_failed", path=image_path, error=str(exc))
+        return image_path
+
+
+def _autofix_svg(svg: str) -> str:
+    """FIX #23 (2026-05-25): auto-fix SVG malformati dall'LLM prima di cairosvg.
+
+    Problemi comuni LLM:
+    - Entità HTML &amp;nbsp; / &quot; non valide in XML strict
+    - <br> non chiusi
+    - Caratteri unicode &#xA0; non escapati
+    - Missing xmlns
+    - viewBox malformato
+    """
+    import re as _re
+
+    # 1. Assicura xmlns SVG
+    if "xmlns=" not in svg:
+        svg = svg.replace("<svg", '<svg xmlns="http://www.w3.org/2000/svg"', 1)
+
+    # 2. Assicura viewBox (cairosvg lo richiede)
+    if "viewBox" not in svg:
+        svg = svg.replace("<svg", '<svg viewBox="0 0 1760 800"', 1)
+
+    # 3. Rimuovi entità HTML problematiche
+    bad_entities = {
+        "&nbsp;": " ",
+        "&quot;": '"',
+        "&apos;": "'",
+        "&#160;": " ",
+        "&#xA0;": " ",
+        "&trade;": "(TM)",
+        "&copy;": "(C)",
+        "&reg;": "(R)",
+        "&hellip;": "...",
+        "&mdash;": "-",
+        "&ndash;": "-",
+        "&rsquo;": "'",
+        "&lsquo;": "'",
+        "&rdquo;": '"',
+        "&ldquo;": '"',
+    }
+    for bad, good in bad_entities.items():
+        svg = svg.replace(bad, good)
+
+    # 4. Auto-close tag self-chiusi mancanti (br, hr, img, line, rect, circle, path, polyline, polygon, ellipse, use)
+    for tag in ["br", "hr", "img"]:
+        svg = _re.sub(rf"<{tag}([^>]*?)(?<!/)>", rf"<{tag}\1/>", svg)
+
+    return svg
+
+
+def _render_diagram_sync(pos: int, slide: SlideContent) -> tuple[int, str | None]:
     """Render inline-SVG diagram → PNG. SYNCHRONOUS (cairosvg). BP §07.0 §2125.
 
+    ``pos`` is the global image_map key (FIX #26 — see _download_one_image).
+
     The Content Agent (FASE 3.4) emits SVG directly (NOT Mermaid). The SVG is
-    sanitized before reaching cairosvg.
+    sanitized + auto-fixed before reaching cairosvg.
     """
     if not slide.image.diagram_code:
-        return (slide.index, None)
+        return (pos, None)
     try:
         safe_svg = sanitize_svg(slide.image.diagram_code)
+        # FIX #23: auto-fix SVG malformati (entità HTML, xmlns mancante, ecc.)
+        safe_svg = _autofix_svg(safe_svg)
+        # FIX #16 (2026-05-25): forza background bianco se l'SVG non ne ha uno.
+        # Senza questo cairosvg renderizza su trasparente che LibreOffice mostra
+        # come NERO. Inserisco un <rect> bianco full-area subito dopo <svg>.
+        if 'fill="white"' not in safe_svg and "background" not in safe_svg.lower():
+            # Estraggo viewBox per dimensioni rect, default 0 0 1760 800
+            import re as _re
+            vb_match = _re.search(r'viewBox="([\d.\s]+)"', safe_svg)
+            if vb_match:
+                vb_parts = vb_match.group(1).split()
+                if len(vb_parts) == 4:
+                    x, y, w, h = vb_parts
+                    bg_rect = f'<rect x="{x}" y="{y}" width="{w}" height="{h}" fill="white"/>'
+                    safe_svg = _re.sub(r"(<svg[^>]*>)", rf"\1{bg_rect}", safe_svg, count=1)
         os.makedirs(DIAGRAMS_DIR, exist_ok=True)
         local_path = f"{DIAGRAMS_DIR}/{uuid.uuid4()}.png"
         cairosvg.svg2png(
@@ -153,13 +273,288 @@ def _render_diagram_sync(slide: SlideContent) -> tuple[int, str | None]:
             write_to=local_path,
             output_width=DIAGRAM_OUTPUT_WIDTH,
             output_height=DIAGRAM_OUTPUT_HEIGHT,
+            background_color="white",  # belt + braces
         )
-        return (slide.index, local_path)
+        return (pos, local_path)
     except Exception as exc:
         logger.warning(
             "diagram_render_failed", slide=slide.index, error=str(exc)
         )
-        return (slide.index, None)
+        return (pos, None)
+
+
+async def _resolve_query_urls(slides: list[SlideContent]) -> None:
+    """FASE 4: per le slide web_search con query ma SENZA query_url, risolve
+    l'URL via search_image (Pexels orientation + Wikimedia fallback).
+
+    Muta in-place ``slide.image.query_url``. L'aspect_hint dell'LLM viene
+    passato come orientation a Pexels per ottenere l'immagine con il giusto
+    rapporto d'aspetto.
+
+    FIX #9 (2026-05-25): l'LLM emette strategy con valori diversi da quanto
+    documentato — visti in produzione: "pexels", "search", "generate",
+    "with_query", "auto". Accetto QUALSIASI strategy non-vuota/non-"none"
+    PURCHÉ ci sia image.query → l'intent è chiaro, cerchiamo l'immagine.
+    """
+    from app.services.image_search import search_image
+
+    _IMAGE_SEARCH_STRATEGIES = {
+        "web_search", "pexels", "search", "generate", "with_query", "auto",
+        "image", "photo", "stock",
+    }
+
+    to_resolve = [
+        s
+        for s in slides
+        if s.image.query
+        and not s.image.query_url
+        and (s.image.strategy in _IMAGE_SEARCH_STRATEGIES or s.image.strategy not in (None, "", "none", "diagram", "inline_svg"))
+    ]
+    if not to_resolve:
+        return
+
+    async def _one(s: SlideContent) -> None:
+        url = await search_image(s.image.query or "", orientation=s.image.aspect_hint)
+        if url:
+            object.__setattr__(s.image, "query_url", url)
+
+    await asyncio.gather(*(_one(s) for s in to_resolve), return_exceptions=True)
+
+
+# ─────────────────────────────────────────────────────────────────────
+# FIX #25 (2026-05-26): zero-placeholder guarantee — backfill + branded
+# fallback. Detection mirrors scripts/verify_course_slides.py: a
+# CONTENT_IMAGE/DIAGRAM slide whose index is absent from image_map would
+# render the template's "[ query ]" placeholder text. We close that gap
+# in two stages, entirely inside prefetch_images so both generation and
+# rebuild benefit without touching their call sites.
+# ─────────────────────────────────────────────────────────────────────
+
+# Theme keyword → pictogram glyph. Picked from the query so the fallback
+# looks intentional ("designed this way"), not like a broken image. Pure
+# stdlib drawing (Pillow) — no font dependency beyond the default bitmap.
+# Glyphs restricted to characters guaranteed present in DejaVuSans (the
+# container font) — emoji (🔥⛑☣) render as tofu □ there, so we use plain
+# Unicode symbols that always resolve.
+_FALLBACK_GLYPHS: tuple[tuple[tuple[str, ...], str], ...] = (
+    (("soccorso", "medic", "sanitar", "ferit", "emorrag", "cassetta", "118", "112"), "✚"),
+    (("incendi", "antincendio", "fiamm", "estintore", "ustion"), "▲"),
+    (("dpi", "casco", "protezion", "guant", "mascher", "occhial", "calzatur"), "◆"),
+    (("segnal", "cartell", "divieto", "obbligo", "avvert"), "⚠"),
+    (("elettric", "tension", "folgor"), "⚡"),
+    (("chimic", "sostanz", "tossic", "veleno"), "●"),
+    (("rumore", "vibrazion", "acustic"), "♪"),
+    (("formazion", "corso", "aula", "lezion", "didatt"), "★"),
+    (("document", "registr", "verbal", "modulo", "normativ", "legge", "decreto"), "§"),
+)
+
+
+def _pick_glyph(query: str) -> str:
+    q = (query or "").lower()
+    for keywords, glyph in _FALLBACK_GLYPHS:
+        if any(k in q for k in keywords):
+            return glyph
+    return "■"  # neutral geometric mark (always in DejaVuSans)
+
+
+def _make_branded_fallback(
+    query: str, *, is_diagram: bool = False
+) -> str | None:
+    """Render a branded C.F.P. placeholder PNG for one image/diagram box.
+
+    Diagonal pink→green gradient + a thematic pictogram + the query as a
+    small caption at the bottom. The slide already carries its own title /
+    body / caption text, so the caption here stays discreet (it only labels
+    the visual, never repeats the slide title).
+
+    Returns the local path, or None if Pillow drawing fails (caller then
+    leaves the slide without an image — still no crash).
+    """
+    try:
+        from PIL import Image as _PILImage
+        from PIL import ImageDraw, ImageFont
+
+        w, h = (DIAGRAM_OUTPUT_WIDTH, DIAGRAM_OUTPUT_HEIGHT) if is_diagram else (1280, 960)
+        img = _PILImage.new("RGB", (w, h), BRAND_PINK)
+        draw = ImageDraw.Draw(img)
+
+        # Vertical gradient inside the pink family only (deep → light pink) so
+        # it never veers to the muddy olive midpoint a pink→green blend gives.
+        # The green stays as a brand accent bar at the bottom, not in the wash.
+        top = BRAND_PINK
+        bottom = (0xF2, 0xD6, 0xE3)  # light tint of #C82E6E
+        step = max(1, h // 320)
+        for y in range(0, h, step):
+            t = y / h
+            draw.rectangle(
+                [0, y, w, y + step],
+                fill=(
+                    int(top[0] + (bottom[0] - top[0]) * t),
+                    int(top[1] + (bottom[1] - top[1]) * t),
+                    int(top[2] + (bottom[2] - top[2]) * t),
+                ),
+            )
+
+        # Centred brand disc holding the pictogram (filled, high contrast).
+        cx = w // 2
+        cy = int(h * 0.40)
+        disc_r = int(min(w, h) * 0.20)
+        draw.ellipse(
+            [cx - disc_r, cy - disc_r, cx + disc_r, cy + disc_r],
+            fill=(255, 255, 255),
+        )
+        draw.ellipse(
+            [cx - disc_r, cy - disc_r, cx + disc_r, cy + disc_r],
+            outline=BRAND_PINK, width=max(8, w // 120),
+        )
+
+        # Try a TTF for the glyph + caption; degrade to default bitmap font.
+        glyph = _pick_glyph(query)
+        font_glyph = None
+        font_caption = None
+        for candidate in (
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        ):
+            try:
+                font_glyph = ImageFont.truetype(candidate, size=int(disc_r * 1.1))
+                font_caption = ImageFont.truetype(candidate, size=max(22, w // 30))
+                break
+            except OSError:
+                continue
+        if font_glyph is not None:
+            draw.text((cx, cy), glyph, fill=BRAND_PINK, anchor="mm", font=font_glyph)
+        else:
+            draw.text((cx, cy), glyph, fill=BRAND_PINK, anchor="mm")
+
+        # Brand accent bar at the bottom (green) carrying the discreet caption.
+        bar_h = int(h * 0.16)
+        bar_top = h - bar_h
+        draw.rectangle([0, bar_top, w, h], fill=BRAND_GREEN)
+        label = (query or "").strip()
+        if label:
+            label = (label[0].upper() + label[1:])
+            if len(label) > 58:
+                label = label[:55] + "…"
+            ty = bar_top + bar_h // 2
+            if font_caption is not None:
+                draw.text((cx, ty), label, fill=(255, 255, 255), anchor="mm", font=font_caption)
+            else:
+                draw.text((cx, ty), label, fill=(255, 255, 255), anchor="mm")
+
+        os.makedirs(FALLBACK_DIR, exist_ok=True)
+        out_path = f"{FALLBACK_DIR}/{uuid.uuid4()}.png"
+        img.save(out_path, "PNG")
+        return out_path
+    except Exception as exc:
+        logger.warning("branded_fallback_failed", query=query[:40], error=str(exc))
+        return None
+
+
+def _visual_holes(
+    slides: list[SlideContent], image_map: dict[int, str]
+) -> list[tuple[int, SlideContent]]:
+    """Slides that NEED a visual but have no local path yet → would placeholder.
+
+    Returns ``(pos, slide)`` pairs where ``pos`` is the global position
+    (image_map key — FIX #26). A slide needs a visual when its strategy is a
+    web-image search or a diagram. Position absent from image_map = the box
+    stays empty = template placeholder text shows. Same criterion as the
+    verify script's detector.
+    """
+    holes: list[tuple[int, SlideContent]] = []
+    for pos, s in enumerate(slides):
+        strat = s.image.strategy
+        # FIX #27.6: un diagram = ha diagram_code (qualunque strategy). Una web
+        # image = ha query e NON è un diagram.
+        is_diagram = bool(s.image.diagram_code)
+        needs_visual = is_diagram or bool(
+            s.image.query and strat not in (None, "", "none", "inline_svg")
+        )
+        if needs_visual and pos not in image_map:
+            holes.append((pos, s))
+    return holes
+
+
+async def _backfill_missing_images(
+    slides: list[SlideContent], image_map: dict[int, str], pool: Any
+) -> None:
+    """Fill every visual hole so image_map covers all image/diagram slides.
+
+    Stage 1 — retry providers for the holes (web slides only; diagrams that
+    failed cairosvg can't be re-fetched). One throttled wave with a short
+    pause to let per-minute quotas recover, capped at BACKFILL_MAX_SECONDS.
+
+    Stage 2 — for whatever is still missing, render a branded C.F.P.
+    fallback so the box is never empty. Mutates image_map in place.
+    """
+    from app.services.image_search import search_image
+
+    deadline = asyncio.get_event_loop().time() + BACKFILL_MAX_SECONDS
+    holes = _visual_holes(slides, image_map)
+    if not holes:
+        return
+
+    logger.info("backfill_started", holes=len(holes))
+
+    # ── Stage 1: throttled provider retry (web slides only) ──
+    # FIX #27.6: i diagram (diagram_code presente) non si ri-cercano sui
+    # provider — vanno direttamente al fallback brandizzato se mancano.
+    web_holes = [(pos, s) for pos, s in holes if not s.image.diagram_code]
+    waves = 0
+    while web_holes and asyncio.get_event_loop().time() < deadline:
+        waves += 1
+        async with httpx.AsyncClient(timeout=DOWNLOAD_TIMEOUT_SECONDS) as client:
+            async def _retry_one(pos: int, s: SlideContent) -> tuple[int, str | None]:
+                # Re-resolve URL from any provider (cache-aware in image_search),
+                # then download + persist exactly like the main path.
+                url = await search_image(
+                    s.image.query or "", orientation=s.image.aspect_hint
+                )
+                if not url:
+                    return (pos, None)
+                object.__setattr__(s.image, "query_url", url)
+                return await _download_one_image(pos, s, pool, client)
+
+            results = await asyncio.gather(
+                *(_retry_one(pos, s) for pos, s in web_holes), return_exceptions=True
+            )
+        filled_now = 0
+        for r in results:
+            if isinstance(r, tuple) and r[1] is not None:
+                image_map[r[0]] = r[1]
+                filled_now += 1
+        web_holes = [(pos, s) for pos, s in web_holes if pos not in image_map]
+        logger.info(
+            "backfill_wave", wave=waves, filled=filled_now, remaining=len(web_holes)
+        )
+        if not web_holes:
+            break
+        # One short pause to let per-minute quotas recover, then stop waiting.
+        if asyncio.get_event_loop().time() + BACKFILL_WAVE_PAUSE_SECONDS < deadline:
+            await asyncio.sleep(BACKFILL_WAVE_PAUSE_SECONDS)
+        else:
+            break
+
+    # ── Stage 2: branded fallback for everything still missing ──
+    still_missing = _visual_holes(slides, image_map)
+    fallback_count = 0
+    for pos, s in still_missing:
+        is_diagram = bool(s.image.diagram_code)  # FIX #27.6
+        fb = await asyncio.to_thread(
+            _make_branded_fallback, s.image.query or s.title or "", is_diagram=is_diagram
+        )
+        if fb:
+            image_map[pos] = fb
+            fallback_count += 1
+
+    logger.info(
+        "backfill_done",
+        holes_initial=len(holes),
+        filled_by_provider=len(holes) - len(still_missing),
+        branded_fallbacks=fallback_count,
+        unresolved=len(_visual_holes(slides, image_map)),
+    )
 
 
 async def prefetch_images(
@@ -167,35 +562,54 @@ async def prefetch_images(
 ) -> dict[int, str]:
     """Resolve every slide's visual to a LOCAL PATH before sync PPTX build.
 
+    FASE 4: prima del download, risolve query → query_url via search_image
+    (Pexels orientation + Wikimedia). Poi:
     - Web images (``strategy='web_search'`` AND ``query_url`` present) are
-      downloaded under the shared httpx client.
+      downloaded under the shared httpx client + fit-to-box.
     - Diagram slides (``strategy='diagram'``) are rendered via cairosvg
       wrapped in ``asyncio.to_thread``.
 
-    The SlideBuilder (FASE 4.2) MUST receive only local paths — invariant
-    BP §07.0 line 2148.
+    The SlideBuilder MUST receive only local paths — invariant BP §07.0 line 2148.
     """
+    # FIX #26 (2026-05-26): image_map is keyed by GLOBAL position (enumerate),
+    # NOT slide.index — the latter is module-local and collides (up to 14
+    # slides per index). The builder enumerates the same ordered list, so
+    # position is the stable shared key.
     image_map: dict[int, str] = {}
 
+    # FASE 4: risolvi gli URL mancanti (l'LLM emette query, non query_url)
+    await _resolve_query_urls(slides)
+
+    # FIX #27.6 (2026-05-26): il discriminante DIAGRAM è la PRESENZA di
+    # diagram_code, NON strategy=="diagram". L'LLM emette strategy variabili
+    # ("code", "diagram", "inline_svg", "generate"...) — visto in produzione
+    # slide DIAGRAM con strategy="code" che NON venivano renderizzate → box
+    # vuoto. Un diagram = ha diagram_code. Una web image = ha query/query_url
+    # e NON ha diagram_code.
+    diagram_slides = [
+        (pos, s) for pos, s in enumerate(slides) if s.image.diagram_code
+    ]
+    diagram_positions = {pos for pos, _ in diagram_slides}
+
+    # FIX #9 + #27.6: web slide = query_url presente, NON è un diagram.
     web_slides = [
-        s
-        for s in slides
-        if s.image.strategy == "web_search" and s.image.query_url
+        (pos, s)
+        for pos, s in enumerate(slides)
+        if s.image.query_url and pos not in diagram_positions
     ]
     web_requested = len(web_slides)
 
     if web_slides:
         async with httpx.AsyncClient(timeout=DOWNLOAD_TIMEOUT_SECONDS) as client:
-            web_tasks = [_download_one_image(s, pool, client) for s in web_slides]
+            web_tasks = [_download_one_image(pos, s, pool, client) for pos, s in web_slides]
             web_results = await asyncio.gather(*web_tasks, return_exceptions=True)
         for result in web_results:
             if isinstance(result, tuple) and result[1] is not None:
                 image_map[result[0]] = result[1]
 
-    diagram_slides = [s for s in slides if s.image.strategy == "diagram"]
     if diagram_slides:
         diagram_tasks = [
-            asyncio.to_thread(_render_diagram_sync, s) for s in diagram_slides
+            asyncio.to_thread(_render_diagram_sync, pos, s) for pos, s in diagram_slides
         ]
         diagram_results = await asyncio.gather(*diagram_tasks, return_exceptions=True)
         for result in diagram_results:
@@ -208,6 +622,14 @@ async def prefetch_images(
         diagrams=len(diagram_slides),
         total_resolved=len(image_map),
     )
+
+    # FIX #25 (2026-05-26): zero-placeholder guarantee. Retry the holes with
+    # throttling, then fill any residual with a branded C.F.P. fallback so no
+    # CONTENT_IMAGE/DIAGRAM box ever renders the template's "[ query ]" text.
+    logger.info("backfill_entry", slides=len(slides), resolved=len(image_map))
+    await _backfill_missing_images(slides, image_map, pool)
+    logger.info("backfill_exit", final_resolved=len(image_map))
+
     return image_map
 
 

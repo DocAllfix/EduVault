@@ -145,13 +145,16 @@ def _module(idx: int, title: str = "Modulo") -> ModuleSpec:
 
 
 def _slide_json(index: int, module_index: int = 0) -> dict[str, Any]:
+    # FIX 2026-05-25: speaker_notes 80 parole per superare validator strict FASE 1
+    # (75-90 parole = range TTS 25-35s @180 wpm CONTENT_TEXT).
+    notes = " ".join(["parola"] * 80)
     return {
         "index": index,
         "module_index": module_index,
         "slide_type": SlideType.CONTENT_TEXT.value,
         "title": f"Slide {index}",
         "body": "Corpo della slide entro i limiti delle 90 parole.",
-        "speaker_notes": "",
+        "speaker_notes": notes,
         "normative_ref": "Art. 1, D.Lgs 81/08",
         "source_chunk_ids": [CHUNK_ID],
         "image": {"strategy": "none"},

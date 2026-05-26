@@ -78,7 +78,7 @@ class KnowledgeRepository:
             JOIN regulations r ON rc.regulation_id = r.id
             WHERE rc.regulation_id = ANY($2::uuid[])
               AND rc.is_current = true
-              AND (r.region = 'NAZIONALE' OR ($3 IS NOT NULL AND r.region = $3))
+              AND (r.region = 'NAZIONALE' OR ($3::text IS NOT NULL AND r.region = $3::text))
             ORDER BY rc.embedding <=> $1::vector
             LIMIT $4
         """

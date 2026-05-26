@@ -39,6 +39,7 @@ function Button({
   variant,
   size,
   asChild = false,
+  type,
   ...props
 }: React.ComponentProps<'button'> &
   VariantProps<typeof buttonVariants> & {
@@ -46,9 +47,16 @@ function Button({
   }) {
   const Comp = asChild ? Slot : 'button'
 
+  // Default type="button" per evitare submit accidentale in form annidati.
+  // Best practice React + accessibilità: i submit vanno espressi esplicitamente
+  // dove servono (es. <Button type="submit"> nei form di login/edit).
+  // Quando asChild=true, lo Slot rende un elemento custom (es. <a>) → no type.
+  const computedType = asChild ? undefined : (type ?? 'button')
+
   return (
     <Comp
       data-slot='button'
+      type={computedType}
       className={cn(buttonVariants({ variant, size, className }))}
       {...props}
     />

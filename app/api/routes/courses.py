@@ -29,9 +29,11 @@ from pydantic import BaseModel
 from app.api.dependencies import get_current_user, limiter, require_role
 from app.models.core import SlideDensity
 from app.models.requests import CourseRequest, CourseResponse
+from app.services import studio_service
 from app.services.certification_service import certify_course
 from app.services.dependencies import get_pool
 from app.services.generation_service import run_pipeline
+from app.services.image_search import search_image
 from app.services.pacing_engine import PacingEngine
 
 logger = structlog.get_logger()
@@ -69,6 +71,32 @@ class CourseDetail(BaseModel):
 
 class CertifyResponse(BaseModel):
     approved_course_id: str
+
+
+# ─── FASE 7 Course Studio body models ───
+
+
+class SlidePatch(BaseModel):
+    """Campi editabili di una slide via Studio (tutti opzionali)."""
+
+    title: str | None = None
+    body: str | None = None
+    speaker_notes: str | None = None
+    normative_ref: str | None = None
+    quiz_options: list[str] | None = None
+    quiz_correct: int | None = None
+
+
+class ImagePatch(BaseModel):
+    strategy: str | None = None
+    query: str | None = None
+    query_url: str | None = None
+    aspect_hint: str | None = None
+    diagram_code: str | None = None
+
+
+class ImageSearchResult(BaseModel):
+    candidates: list[str]
 
 
 # ─────────────── helpers ───────────────
@@ -352,3 +380,188 @@ async def delete_course(
         uuid_mod.UUID(course_id),
     )
     return {"status": "archived", "course_id": course_id}
+
+
+# ─────────────── FASE 7 — Course Studio endpoints ───────────────
+
+
+@router.get("/{course_id}/slides")
+async def get_course_slides(
+    course_id: str,
+    user: dict[str, Any] = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Ritorna l'array di slide del corso (deserializzato da slide_contents_json).
+
+    409 se il corso non ha ancora slide (es. legacy o generazione fallita).
+    """
+    pool = get_pool()
+    course = await _load_course_or_404(course_id, pool)
+    _enforce_ownership(course, user)
+    try:
+        slides = await studio_service.get_slides(course_id, pool)
+    except LookupError as exc:
+        raise HTTPException(404, "Corso non trovato") from exc
+    if not slides:
+        raise HTTPException(409, "Corso non editabile: nessuna slide generata")
+    return {"course_id": course_id, "total": len(slides), "slides": slides}
+
+
+@router.get("/{course_id}/slides/{idx}")
+async def get_course_slide(
+    course_id: str,
+    idx: int,
+    user: dict[str, Any] = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Ritorna una singola slide per index."""
+    pool = get_pool()
+    course = await _load_course_or_404(course_id, pool)
+    _enforce_ownership(course, user)
+    try:
+        return await studio_service.get_slide_by_idx(course_id, idx, pool)
+    except LookupError as exc:
+        raise HTTPException(404, f"Slide {idx} non trovata") from exc
+
+
+@router.patch("/{course_id}/slides/{idx}")
+async def patch_course_slide(
+    course_id: str,
+    idx: int,
+    patch: SlidePatch,
+    user: dict[str, Any] = Depends(require_role("admin", "reviewer")),
+) -> dict[str, Any]:
+    """Aggiorna i campi specificati di una slide. Ri-valida strict (422 se viola
+    i constraints FASE 1). Marca il corso dirty=true (RebuildBanner)."""
+    pool = get_pool()
+    course = await _load_course_or_404(course_id, pool)
+    _enforce_ownership(course, user)
+    changes = {k: v for k, v in patch.model_dump().items() if v is not None}
+    if not changes:
+        raise HTTPException(400, "Nessun campo da aggiornare")
+    try:
+        updated = await studio_service.update_slide(course_id, idx, changes, pool)
+    except LookupError as exc:
+        raise HTTPException(404, f"Slide {idx} non trovata") from exc
+    except Exception as exc:  # Pydantic ValidationError → 422
+        raise HTTPException(422, f"Slide non valida dopo modifica: {exc}") from exc
+    return updated
+
+
+@router.patch("/{course_id}/slides/{idx}/image")
+async def patch_course_slide_image(
+    course_id: str,
+    idx: int,
+    patch: ImagePatch,
+    user: dict[str, Any] = Depends(require_role("admin", "reviewer")),
+) -> dict[str, Any]:
+    """Aggiorna il sub-doc image di una slide (query/url/aspect/diagram)."""
+    pool = get_pool()
+    course = await _load_course_or_404(course_id, pool)
+    _enforce_ownership(course, user)
+    image_changes = {k: v for k, v in patch.model_dump().items() if v is not None}
+    if not image_changes:
+        raise HTTPException(400, "Nessun campo immagine da aggiornare")
+    try:
+        return await studio_service.set_slide_image(course_id, idx, image_changes, pool)
+    except LookupError as exc:
+        raise HTTPException(404, f"Slide {idx} non trovata") from exc
+    except Exception as exc:
+        raise HTTPException(422, f"Immagine non valida: {exc}") from exc
+
+
+@router.get("/{course_id}/audio/{idx}")
+async def get_course_slide_audio(
+    course_id: str,
+    idx: int,
+    user: dict[str, Any] = Depends(get_current_user),
+) -> FileResponse:
+    """Stream del singolo MP3 della slide (per AudioPlayer in-app FASE 10)."""
+    pool = get_pool()
+    course = await _load_course_or_404(course_id, pool)
+    _enforce_ownership(course, user)
+    row = await pool.fetchrow(
+        "SELECT audio_path FROM audio_tracks WHERE course_id = $1 AND slide_index = $2",
+        uuid_mod.UUID(course_id),
+        idx,
+    )
+    if not row or not row["audio_path"]:
+        raise HTTPException(404, f"Audio slide {idx} non trovato")
+    audio_path = Path(row["audio_path"])
+    if not audio_path.is_file():
+        raise HTTPException(404, "File audio mancante su disco")
+    return FileResponse(str(audio_path), media_type="audio/mpeg",
+                        filename=f"slide_{idx:04d}.mp3")
+
+
+@router.get("/{course_id}/image/search", response_model=ImageSearchResult)
+@limiter.limit("30/minute")
+async def search_slide_images(
+    request: Request,
+    course_id: str,
+    q: str = Query(..., min_length=2),
+    orientation: str | None = Query(None),
+    user: dict[str, Any] = Depends(require_role("admin", "reviewer")),
+) -> ImageSearchResult:
+    """Cerca immagini candidate (Pexels orientation + Wikimedia) per ImagePicker.
+
+    Rate-limit 30/min (FASE 7 R3 mitigation). Ritorna fino a 1 URL per ora
+    (search_image cascade ritorna il best match); estendibile a multi-result
+    in v2.
+    """
+    pool = get_pool()
+    course = await _load_course_or_404(course_id, pool)
+    _enforce_ownership(course, user)
+    url = await search_image(q, orientation=orientation)
+    return ImageSearchResult(candidates=[url] if url else [])
+
+
+# ─────────────── FASE 11 — Regenerate + Rebuild ───────────────
+
+
+class RegenerateBody(BaseModel):
+    instruction: str
+
+
+@router.post("/{course_id}/slides/{idx}/regenerate")
+async def regenerate_slide(
+    course_id: str,
+    idx: int,
+    body: RegenerateBody,
+    user: dict[str, Any] = Depends(require_role("admin", "reviewer")),
+) -> dict[str, Any]:
+    """Rigenera UNA slide via LLM secondo l'istruzione utente (FASE 11).
+
+    Mantiene source_chunk_ids (provenance) e slide_type. Ri-valida strict.
+    Marca dirty=true.
+    """
+    pool = get_pool()
+    course = await _load_course_or_404(course_id, pool)
+    _enforce_ownership(course, user)
+    try:
+        updated = await studio_service.regenerate_slide(
+            course_id, idx, body.instruction, pool
+        )
+    except LookupError as exc:
+        raise HTTPException(404, f"Slide {idx} non trovata") from exc
+    except Exception as exc:
+        raise HTTPException(422, f"Rigenerazione fallita: {exc}") from exc
+    return updated
+
+
+@router.post("/{course_id}/rebuild")
+async def rebuild_course(
+    course_id: str,
+    user: dict[str, Any] = Depends(require_role("admin", "reviewer")),
+) -> dict[str, str]:
+    """Ricostruisce PPTX/PDF/audio dal slide_contents_json corrente (FASE 11).
+
+    Async fire-and-forget sotto il Semaphore(1) di generation_service (REI-3).
+    Dopo la rebuild il corso torna dirty=false.
+    """
+    pool = get_pool()
+    course = await _load_course_or_404(course_id, pool)
+    _enforce_ownership(course, user)
+    from app.services.rebuild_service import rebuild_course as do_rebuild
+
+    asyncio.create_task(do_rebuild(course_id, str(user["id"]), pool))
+    return {"status": "rebuilding", "course_id": course_id}
+

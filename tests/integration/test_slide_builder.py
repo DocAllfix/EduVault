@@ -90,25 +90,34 @@ def _slide(
     index: int,
     stype: SlideType,
     title: str = "Title",
-    body: str = "Body text",
+    body: str | None = None,
     *,
-    speaker_notes: str = "",
+    speaker_notes: str | None = None,
     quiz_options: list[str] | None = None,
     quiz_correct: int | None = None,
 ) -> SlideContent:
-    return SlideContent(
-        index=index,
-        module_index=0,
-        slide_type=stype,
-        title=title,
-        body=body,
-        speaker_notes=speaker_notes,
-        normative_ref="Art. 1, DM 388/2003",
-        source_chunk_ids=[],
-        image=ImageStrategy(strategy="none"),
-        quiz_options=quiz_options,
-        quiz_correct=quiz_correct,
-    )
+    """FASE 1 vast-hopping: delega a make_slide centralizzato per essere
+    automaticamente conforme a LAYOUT_CONSTRAINTS (no soft-truncate)."""
+    from tests._helpers import make_slide
+
+    overrides: dict[str, object] = {
+        "index": index,
+        "module_index": 0,
+        "normative_ref": "Art. 1, DM 388/2003",
+        "source_chunk_ids": [],
+    }
+    # Title sotto i 70 char default
+    if title and title != "Title":
+        overrides["title"] = title
+    if body is not None:
+        overrides["body"] = body
+    if speaker_notes is not None and speaker_notes != "":
+        overrides["speaker_notes"] = speaker_notes
+    if quiz_options is not None:
+        overrides["quiz_options"] = quiz_options
+    if quiz_correct is not None:
+        overrides["quiz_correct"] = quiz_correct
+    return make_slide(stype, **overrides)
 
 
 def _builder(
@@ -218,13 +227,19 @@ def test_build_writes_speaker_notes(
     synthetic_template: Path, output_dir: Path
 ) -> None:
     builder = _builder(synthetic_template, output_dir)
-    slides = [
-        _slide(
-            0,
-            SlideType.CONTENT_TEXT,
-            speaker_notes="Soffermarsi 30 secondi sul ruolo del preposto.",
-        )
-    ]
+    # FASE 1: speaker_notes valido per CONTENT_TEXT (75-90 parole) + contiene "preposto"
+    notes = (
+        "Soffermarsi sul ruolo strategico del preposto in azienda secondo quanto "
+        "previsto dall'articolo trentasette del decreto legislativo ottantuno del "
+        "duemilaotto. Il preposto deve vigilare sull'attuazione concreta delle "
+        "misure di sicurezza, segnalare prontamente i comportamenti non conformi "
+        "tra i lavoratori, dare istruzioni operative chiare e specifiche per "
+        "ciascuna mansione, comunicare immediatamente al dirigente le deficienze "
+        "tecniche rilevate sui mezzi e sulle attrezzature. Tali obblighi sono "
+        "sanzionati penalmente in caso di grave omissione, anche solo reiterata "
+        "nel tempo. Quindi il ruolo del preposto è fondamentale."
+    )
+    slides = [_slide(0, SlideType.CONTENT_TEXT, speaker_notes=notes)]
     out = builder.build(slides, {"id": "notes"}, image_map={})
 
     prs = Presentation(out)
@@ -335,12 +350,12 @@ def test_build_quiz_renders_options_and_marks_correct(
     synthetic_template: Path, output_dir: Path
 ) -> None:
     builder = _builder(synthetic_template, output_dir)
+    # FASE 1: QUIZ non ha body (è options-only). title=domanda, options=4.
     slides = [
         _slide(
             0,
             SlideType.QUIZ,
             title="Quante persone formano la squadra di primo soccorso?",
-            body="Il numero minimo varia per tipologia di azienda.",
             quiz_options=["1", "2", "3 o piu", "Dipende dal RSPP"],
             quiz_correct=2,
         )
@@ -363,8 +378,13 @@ def test_build_quiz_renders_options_and_marks_correct(
 def test_build_quiz_without_options_does_not_crash(
     synthetic_template: Path, output_dir: Path
 ) -> None:
+    """FASE 1: il validator ora rigetta QUIZ senza options. Verifichiamo che
+    una slide CONTENT_TEXT renderizzata sul layout QUIZ (mismatch) non crashi
+    il SlideBuilder."""
     builder = _builder(synthetic_template, output_dir)
-    slides = [_slide(0, SlideType.QUIZ, title="Domanda", body="Testo")]
+    # CONTENT_TEXT minimale (non QUIZ): il builder applica layout QUIZ comunque,
+    # ma non crasha quando quiz_options=None.
+    slides = [_slide(0, SlideType.CONTENT_TEXT, title="Domanda")]
     out = builder.build(slides, {"id": "quiz-empty"}, image_map={})
     prs = Presentation(out)
     assert len(prs.slides) == 1

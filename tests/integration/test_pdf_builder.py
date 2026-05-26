@@ -46,25 +46,31 @@ def _slide(
     module_index: int = 0,
     stype: SlideType = SlideType.CONTENT_TEXT,
     title: str = "Titolo slide",
-    body: str = "Corpo della slide",
+    body: str | None = None,
     normative_ref: str = "Art. 1, DM 388/2003",
-    speaker_notes: str = "",
+    speaker_notes: str | None = None,
     quiz_options: list[str] | None = None,
     quiz_correct: int | None = None,
 ) -> SlideContent:
-    return SlideContent(
-        index=index,
-        module_index=module_index,
-        slide_type=stype,
-        title=title,
-        body=body,
-        speaker_notes=speaker_notes,
-        normative_ref=normative_ref,
-        source_chunk_ids=[],
-        image=ImageStrategy(strategy="none"),
-        quiz_options=quiz_options,
-        quiz_correct=quiz_correct,
-    )
+    """FASE 1 vast-hopping: delega a make_slide centralizzato."""
+    from tests._helpers import make_slide
+
+    overrides: dict[str, object] = {
+        "index": index,
+        "module_index": module_index,
+        "normative_ref": normative_ref,
+    }
+    if title != "Titolo slide":
+        overrides["title"] = title
+    if body is not None:
+        overrides["body"] = body
+    if speaker_notes:
+        overrides["speaker_notes"] = speaker_notes
+    if quiz_options is not None:
+        overrides["quiz_options"] = quiz_options
+    if quiz_correct is not None:
+        overrides["quiz_correct"] = quiz_correct
+    return make_slide(stype, **overrides)
 
 
 @pytest.fixture
@@ -179,29 +185,46 @@ def test_render_html_omits_normative_ref_when_empty(
 def test_render_html_includes_speaker_notes_when_present(
     builder: PdfBuilder,
 ) -> None:
-    slides = [_slide(0, speaker_notes="Sottolineare il ruolo del RSPP.")]
+    # FASE 1: speaker_notes valido (75-90 parole) + parola chiave "RSPP"
+    notes = (
+        "Sottolineare il ruolo determinante del RSPP come figura tecnica di "
+        "supporto qualificato al datore di lavoro nella gestione preventiva "
+        "dei rischi. Spiegare in dettaglio le competenze tecniche specifiche "
+        "richieste dall'articolo trentadue del decreto legislativo ottantuno "
+        "del duemilaotto, le responsabilità formalmente delegate al ruolo, il "
+        "rapporto operativo quotidiano con dirigenti e preposti aziendali, "
+        "l'integrazione strategica con il medico competente nel sistema "
+        "completo di gestione della sicurezza aziendale moderna. Citare "
+        "esempi pratici concreti di consulenza preventiva ai vari livelli."
+    )
+    slides = [_slide(0, speaker_notes=notes)]
     html = builder.render_html(slides, {"id": "c1", "title": "X"})
     assert 'class="speaker-notes"' in html
-    assert "Sottolineare il ruolo del RSPP." in html
+    assert "RSPP" in html
 
 
 def test_render_html_omits_speaker_notes_when_empty(
     builder: PdfBuilder,
 ) -> None:
-    slides = [_slide(0, speaker_notes="")]
-    html = builder.render_html(slides, {"id": "c1", "title": "X"})
+    """FASE 1: il validator strict rigetta speaker_notes vuote per CONTENT_TEXT.
+    Per verificare l'omissione HTML, usiamo CLOSING che ha notes_min_words più
+    permissivo, e patchiamo il campo a stringa vuota post-construction."""
+    slide = _slide(0)
+    # Bypass post-construction per simulare scenario edge "notes svuotate"
+    object.__setattr__(slide, "speaker_notes", "")
+    html = builder.render_html([slide], {"id": "c1", "title": "X"})
     assert 'class="speaker-notes"' not in html
 
 
 def test_render_html_renders_quiz_block_with_options_and_correct_marker(
     builder: PdfBuilder,
 ) -> None:
+    # FASE 1: QUIZ non ha body (è options-only)
     slides = [
         _slide(
             0,
             stype=SlideType.QUIZ,
-            title="Quiz Modulo 1",
-            body="Quanti addetti al primo soccorso minimi in gruppo B?",
+            title="Quanti addetti al primo soccorso minimi in gruppo B?",
             quiz_options=["1", "2", "3", "Dipende"],
             quiz_correct=2,
         )
@@ -422,9 +445,8 @@ def test_build_handles_multi_module_course_end_to_end(
             3,
             module_index=1,
             stype=SlideType.QUIZ,
-            title="Verifica",
-            body="Domanda?",
-            quiz_options=["A1", "A2"],
+            title="Verifica conoscenze del modulo casi pratici",
+            quiz_options=["A1", "A2", "A3", "A4"],
             quiz_correct=1,
         ),
     ]

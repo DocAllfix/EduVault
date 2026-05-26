@@ -69,6 +69,10 @@ def build_normative_fingerprint(slides: list[dict[str, Any]]) -> dict[str, Any]:
     seen_refs: set[str] = set()
     all_chunk_ids: set[str] = set()
     for slide in slides:
+        # Difensivo: a volte LangGraph reducer può restituire str invece di dict
+        # se la pipeline ha avuto recovery parziale. Skippiamo silenziosamente.
+        if not isinstance(slide, dict):
+            continue
         ref = slide.get("normative_ref", "") or ""
         if ref and ref not in seen_refs:
             refs.append(ref)
@@ -115,12 +119,14 @@ async def run_pipeline(job_id: str, course_id: str) -> None:
             )
             raise
         except Exception as e:
-            logger.error("pipeline_failed", job_id=job_id, error=str(e))
+            import traceback
+            tb = traceback.format_exc()
+            logger.error("pipeline_failed", job_id=job_id, error=str(e), traceback=tb[-2000:])
             db = get_pool()
             await db.execute(
                 "UPDATE generation_jobs SET status='failed', "
                 "error_message=$1 WHERE id=$2",
-                str(e)[:500],
+                (str(e) + " | " + tb[-300:])[:500],
                 job_id,
             )
 
@@ -146,9 +152,18 @@ async def _run_pipeline_inner(job_id: str, course_id: str) -> None:
         raise ValueError(f"Brand preset {course['brand_preset_id']} not found")
     brand = dict(brand_row)
 
+    # FIX 2026-05-25: asyncpg deserializza UUID columns come uuid.UUID native,
+    # ma Pydantic CourseRequest vuole brand_preset_id come str. Coercione esplicita
+    # qui evita "Input should be a valid string" sul rebuild in research/content agent.
+    import uuid as _uuid_mod
+    course_request_dict = {
+        k: (str(v) if isinstance(v, _uuid_mod.UUID) else v)
+        for k, v in course.items()
+    }
+
     # ═══ LANGGRAPH INITIAL STATE (BP §05.2 — 8 fields, no extras) ═══
     initial_state: dict[str, Any] = {
-        "course_request": course,
+        "course_request": course_request_dict,
         "brand_config": brand,
         "course_context": None,
         "pacing_plan": None,
@@ -180,7 +195,20 @@ async def _run_pipeline_inner(job_id: str, course_id: str) -> None:
             cast(NexusPipelineState, initial_state), config=pipeline_config
         )
 
-    all_slides = [s for m in result["completed_modules"] for s in m["slides"]]
+    # FIX #27.1 (2026-05-26): modules are produced in PARALLEL (asyncio.gather in
+    # content_agent) and arrive in COMPLETION order, not module order. Without
+    # sorting, "Modulo N" labels and the global page_num (enumerate position in
+    # the builder) get scrambled — a Module 5 slide can appear before Module 2.
+    # Sort by module_index, then each module's slides by their local index, so
+    # the assembled deck is strictly module→slide ordered.
+    modules_sorted = sorted(
+        result["completed_modules"], key=lambda m: m["module_index"]
+    )
+    all_slides = [
+        s
+        for m in modules_sorted
+        for s in sorted(m["slides"], key=lambda sl: sl["index"])
+    ]
 
     # ═══ CRASH-SAFE SAVE (slides JSON + fingerprint BEFORE the build) ═══
     await db.execute(
@@ -191,7 +219,12 @@ async def _run_pipeline_inner(job_id: str, course_id: str) -> None:
 
     fingerprint = build_normative_fingerprint(all_slides)
     chunk_ids = sorted(
-        {cid for s in all_slides for cid in (s.get("source_chunk_ids") or [])}
+        {
+            cid
+            for s in all_slides
+            if isinstance(s, dict)
+            for cid in (s.get("source_chunk_ids") or [])
+        }
     )
     await db.execute(
         "UPDATE courses SET normative_fingerprint=$1, source_chunk_ids=$2 WHERE id=$3",

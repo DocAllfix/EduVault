@@ -22,16 +22,13 @@ from app.services.audio_service import AudioService
 
 
 def _slide(index: int) -> SlideContent:
-    return SlideContent(
+    """FASE 1 vast-hopping: delega a make_slide centralizzato (constraints-safe)."""
+    from tests._helpers import make_slide
+
+    return make_slide(
+        SlideType.CONTENT_TEXT,
         index=index,
-        module_index=0,
-        slide_type=SlideType.CONTENT_TEXT,
         title=f"Slide {index}",
-        body="Body slide.",
-        speaker_notes=f"Note speaker {index}.",
-        normative_ref="",
-        source_chunk_ids=[],
-        image=ImageStrategy(strategy="none"),
     )
 
 
@@ -52,8 +49,9 @@ async def test_one_failing_slide_does_not_block_the_other_four(
     fake_mp3.info.length = 8.0
 
     async def fake_tts(self: Any, narration: str, audio_path: str) -> None:
-        # The failing slide is index 2 — its narration mentions "2"
-        if "Note speaker 2." in narration:
+        # FASE 1: detect failing slide by audio_path filename (es. slide_0002.mp3)
+        # invece che dal contenuto narration (ora è "parola"*80 default).
+        if "slide_0002" in audio_path:
             raise RuntimeError("simulated edge-tts failure")
         Path(audio_path).write_bytes(b"\x00fake\x00")
 

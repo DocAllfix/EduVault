@@ -154,48 +154,35 @@ def test_style_pattern_has_no_text_block_fields() -> None:
 # ─────────────────────── SlideContent ───────────────────────────
 
 
-def _slide(body: str, slide_type: SlideType = SlideType.CONTENT_TEXT) -> SlideContent:
-    return SlideContent(
-        index=0,
-        module_index=0,
-        slide_type=slide_type,
-        title="Titolo",
-        body=body,
-    )
+# FASE 1 vast-hopping-sketch — i 3 test "soft-truncate" pre-esistenti sono stati
+# riscritti per testare il nuovo strict reject (no truncation). Per i casi
+# completi vedi tests/unit/test_slide_constraints.py.
 
 
-def test_slide_content_body_short_not_truncated() -> None:
-    short_body = " ".join(["parola"] * 30)
-    slide = _slide(short_body)
-    assert slide.body == short_body
+def test_slide_content_valid_passes_strict_validator() -> None:
+    """Slide CONTENT_TEXT entro LAYOUT_CONSTRAINTS → istanziabile, niente '…'."""
+    from tests._helpers import make_slide
+
+    slide = make_slide(SlideType.CONTENT_TEXT)
     assert not slide.body.endswith("…")
+    assert slide.slide_type == SlideType.CONTENT_TEXT
 
 
-def test_slide_content_body_over_limit_is_truncated_softly() -> None:
-    """CONTENT_TEXT cap is 90 words → body of 200 words gets truncated to 90 + '…'."""
-    long_body = " ".join(["parola"] * 200)
-    slide = _slide(long_body, SlideType.CONTENT_TEXT)
-    truncated_words = slide.body.rstrip("…").split()
-    assert len(truncated_words) == 90
-    assert slide.body.endswith("…")
+def test_slide_content_body_over_limit_is_rejected_strict() -> None:
+    """FASE 1: CONTENT_TEXT body > 6 bullets → ValueError (no truncation)."""
+    from tests._helpers import make_slide
 
-
-def test_slide_content_quiz_has_tighter_limit() -> None:
-    long_body = " ".join(["parola"] * 200)
-    slide = _slide(long_body, SlideType.QUIZ)
-    truncated_words = slide.body.rstrip("…").split()
-    assert len(truncated_words) == 60  # QUIZ limit
+    too_many_bullets = "\n".join(f"bullet {i}" for i in range(7))
+    with pytest.raises(ValidationError):
+        make_slide(SlideType.CONTENT_TEXT, body=too_many_bullets)
 
 
 def test_slide_content_title_max_length_enforced() -> None:
+    """FASE 1: title > 70 char (CONTENT_TEXT default) → rigettato dal validator."""
+    from tests._helpers import make_slide
+
     with pytest.raises(ValidationError):
-        SlideContent(
-            index=0,
-            module_index=0,
-            slide_type=SlideType.TITLE,
-            title="x" * 81,  # exceeds max_length=80
-            body="ok",
-        )
+        make_slide(SlideType.CONTENT_TEXT, title="x" * 71)
 
 
 # ───────────────── PacingPlan / ModuleContent / Context ─────────

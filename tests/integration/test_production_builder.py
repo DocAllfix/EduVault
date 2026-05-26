@@ -64,19 +64,20 @@ def _slide(
     module_index: int = 0,
     stype: SlideType = SlideType.CONTENT_TEXT,
     title: str | None = None,
-    body: str = "Corpo della slide entro 90 parole.",
+    body: str | None = None,
 ) -> SlideContent:
-    return SlideContent(
-        index=index,
-        module_index=module_index,
-        slide_type=stype,
-        title=title or f"Slide {index}",
-        body=body,
-        speaker_notes="Note per il relatore.",
-        normative_ref="Art. 1, DM 388/2003",
-        source_chunk_ids=[],
-        image=ImageStrategy(strategy="none"),
-    )
+    """FASE 1 vast-hopping: delega a make_slide centralizzato."""
+    from tests._helpers import make_slide
+
+    overrides: dict[str, object] = {
+        "index": index,
+        "module_index": module_index,
+        "title": title or f"Slide {index}",
+        "normative_ref": "Art. 1, DM 388/2003",
+    }
+    if body is not None:
+        overrides["body"] = body
+    return make_slide(stype, **overrides)
 
 
 # Use a layout map valid for the python-pptx default template (mirrors
