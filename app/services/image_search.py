@@ -60,20 +60,25 @@ SEARCH_TIMEOUT = 8.0
     wait=wait_exponential(multiplier=1, min=1, max=4),
     retry=retry_if_exception_type((httpx.TimeoutException, httpx.HTTPError)),
 )
-async def _search_pexels(query: str, orientation: str | None = None) -> str | None:
-    """Pexels REST: GET /v1/search?query=...&per_page=1[&orientation=...].
+async def _search_pexels(
+    query: str, orientation: str | None = None
+) -> list[str]:
+    """Pexels REST: GET /v1/search?query=...&per_page=5[&orientation=...].
 
-    Returns the URL of the largest available size (``src.original``).
-    None se 0 risultati o key mancante.
+    FIX #31 MOSSA 2 (2026-05-27): ritorna fino a 5 URL candidati invece di
+    1. Il caller (search_image) fa dedup intra-corso via seen_urls,
+    scegliendo il primo non già usato due volte. Zero RTT extra: Pexels
+    risponde con la lista in una singola chiamata. None hits → lista
+    vuota (compat: bool(lista vuota) = False).
 
     ``orientation`` (FASE 4 vast-hopping): 'landscape'|'portrait'|'square',
     passato come parametro nativo Pexels per ottenere immagini con l'aspect
     ratio richiesto dall'LLM (image.aspect_hint).
     """
     if not settings.pexels_api_key:
-        return None
+        return []
 
-    params: dict[str, Any] = {"query": query, "per_page": 1, "locale": "it-IT"}
+    params: dict[str, Any] = {"query": query, "per_page": 5, "locale": "it-IT"}
     if orientation in ("landscape", "portrait", "square"):
         params["orientation"] = orientation
 
@@ -94,20 +99,19 @@ async def _search_pexels(query: str, orientation: str | None = None) -> str | No
                     query=query,
                     status=exc.response.status_code,
                 )
-            return None
+            return []
 
         data: dict[str, Any] = resp.json()
         photos = data.get("photos") or []
-        if not photos:
-            return None
-        # Pexels src dict: original, large2x, large, medium, small, portrait, ...
-        # Usiamo "large" — buon compromesso qualità/dimensione (~2000px wide).
-        src = photos[0].get("src") or {}
-        url = src.get("large") or src.get("original")
-        if not isinstance(url, str):
-            return None
-        logger.info("pexels_hit", query=query, url=url)
-        return url
+        urls: list[str] = []
+        for p in photos:
+            src = p.get("src") or {}
+            u = src.get("large") or src.get("original")
+            if isinstance(u, str):
+                urls.append(u)
+        if urls:
+            logger.info("pexels_hits", query=query, count=len(urls))
+        return urls
 
 
 @retry(
@@ -322,7 +326,20 @@ async def _search_wikimedia(query: str) -> str | None:
 # a Pexels (rate-limit 200/h). Su corso 8h con 176 CONTENT_IMAGE molte query
 # si ripetono (es. "DPI cantiere" appare in 3 moduli diversi). Cache invalidata
 # al restart del backend (è OK, non serve persistente).
-_IMAGE_SEARCH_CACHE: dict[tuple[str, str | None], str | None] = {}
+#
+# FIX #31 MOSSA 2 (2026-05-27): cache shape cambiata da `str | None` a
+# `list[str]` per supportare dedup intra-corso (search_image sceglie il
+# primo URL non già usato da `seen_urls`). Lista vuota = nessun risultato
+# da nessun provider, lista non vuota = candidati ordinati per preferenza.
+# Cache resta in-memory pura (svuotata al restart del processo backend) →
+# nessuna gestione retrocompat necessaria, vedi PIANO FIX #31 verifica
+# pre-MOSSA 2.
+_IMAGE_SEARCH_CACHE: dict[tuple[str, str | None], list[str]] = {}
+
+# FIX #31 MOSSA 2: budget di riuso massimo di una singola URL nello stesso
+# corso. Sopra questo, search_image scala al candidato successivo dalla
+# lista Pexels (o cade al provider successivo se la lista è esaurita).
+_PER_COURSE_URL_REUSE_BUDGET = 2
 
 
 def _simplify_query(query: str) -> str | None:
@@ -343,8 +360,14 @@ def _simplify_query(query: str) -> str | None:
     return " ".join(tokens[:2])
 
 
-async def search_image(query: str, orientation: str | None = None) -> str | None:
-    """Cerca un'immagine in cascata: cache → Pexels → Wikimedia → Pexels(simplified).
+async def search_image(
+    query: str,
+    orientation: str | None = None,
+    *,
+    seen_urls: dict[str, int] | None = None,
+) -> str | None:
+    """Cerca un'immagine in cascata: cache → Pexels → Pixabay → Openverse →
+    Wikimedia → Pexels(simplified).
 
     Restituisce l'URL del primo match, None se nessun provider trova
     risultati. Errori HTTP / timeout sono catturati e degradati a None
@@ -354,47 +377,89 @@ async def search_image(query: str, orientation: str | None = None) -> str | None
     FIX #10 (2026-05-25): aggiunta cache in-memory + retry con query semplificata
     dopo 0 risultati. Target: salire da 22% a 80%+ resolved rate.
 
+    FIX #31 MOSSA 2 (2026-05-27): nuovo kwarg ``seen_urls`` per dedup
+    deterministica intra-corso. Il caller (``_resolve_query_urls``) crea
+    un dict locale al corso che muta in-place: chiave=URL, valore=conteggio
+    riusi. La funzione interna ``_pick(urls)`` sceglie il primo URL con
+    ``seen_urls.get(u, 0) < _PER_COURSE_URL_REUSE_BUDGET`` (cap=2 riusi),
+    poi incrementa il counter. Se la lista candidati di Pexels è
+    interamente satura, scala al provider successivo. Compat: se
+    ``seen_urls is None`` il comportamento è identico al pre-fix (primo
+    URL della lista vince sempre).
+
     Argomenti:
         query: 2-4 parole italiane descrittive del concetto (es.
             "casco protezione cantiere"). L'LLM le genera nel content_agent.
         orientation (FASE 4): 'landscape'|'portrait'|'square' da
             ``slide.image.aspect_hint`` — passato a Pexels per aspect matching.
+        seen_urls (FIX #31): dict[url, reuse_count] mutato in-place dal
+            caller. None → no dedup (backward compat).
     """
     if not query or not query.strip():
         return None
     q = query.strip()
+    cache_key = (q.lower(), orientation)
+
+    def _pick(urls: list[str]) -> str | None:
+        """Sceglie il primo URL non saturo per il corso. Aggiorna seen_urls
+        in-place. Se seen_urls è None, ritorna il primo URL della lista
+        (= comportamento backward-compat pre-fix)."""
+        if not urls:
+            return None
+        if seen_urls is None:
+            return urls[0]
+        for u in urls:
+            if seen_urls.get(u, 0) < _PER_COURSE_URL_REUSE_BUDGET:
+                seen_urls[u] = seen_urls.get(u, 0) + 1
+                return u
+        return None  # tutti i candidati saturati dal budget per il corso
 
     # 0. Cache hit (la stessa query ripetuta in slide diverse non spende quota)
-    cache_key = (q.lower(), orientation)
     if cache_key in _IMAGE_SEARCH_CACHE:
         cached = _IMAGE_SEARCH_CACHE[cache_key]
-        logger.debug("image_search_cache_hit", query=q, hit=bool(cached))
-        return cached
+        picked = _pick(cached)
+        logger.debug("image_search_cache_hit", query=q, picked=bool(picked))
+        if picked:
+            return picked
+        # cache esaurita dal budget per questo corso → non spendere quota,
+        # vai diretto agli altri provider (NON ritornare None: gli altri
+        # provider potrebbero avere URL diversi non ancora saturi)
 
-    # 1. Pexels (preferito) con orientation hint
+    # 1. Pexels (preferito) con orientation hint — fino a 5 candidati
     try:
-        url = await _search_pexels(q, orientation=orientation)
-        if url:
-            _IMAGE_SEARCH_CACHE[cache_key] = url
-            return url
+        urls = await _search_pexels(q, orientation=orientation)
+        if urls:
+            _IMAGE_SEARCH_CACHE[cache_key] = urls
+            picked = _pick(urls)
+            if picked:
+                return picked
     except Exception as exc:
         logger.warning("pexels_unexpected_error", query=q, error=str(exc))
 
-    # 2. Pixabay (FIX #18 2026-05-25): provider intermedio gratuito 5000/h
+    # 2. Pixabay: single-URL provider, wrappiamo in lista [url] per
+    #    riusare _pick uniformemente
     try:
         url = await _search_pixabay(q, orientation=orientation)
         if url:
-            _IMAGE_SEARCH_CACHE[cache_key] = url
-            return url
+            existing = _IMAGE_SEARCH_CACHE.setdefault(cache_key, [])
+            if url not in existing:
+                existing.append(url)
+            picked = _pick([url])
+            if picked:
+                return picked
     except Exception as exc:
         logger.warning("pixabay_unexpected_error", query=q, error=str(exc))
 
-    # 3. Openverse (FIX #19 2026-05-25): NO-KEY 200/day, aggregatore 800M+ CC
+    # 3. Openverse: stessa logica single-URL wrappato in lista
     try:
         url = await _search_openverse(q, orientation=orientation)
         if url:
-            _IMAGE_SEARCH_CACHE[cache_key] = url
-            return url
+            existing = _IMAGE_SEARCH_CACHE.setdefault(cache_key, [])
+            if url not in existing:
+                existing.append(url)
+            picked = _pick([url])
+            if picked:
+                return picked
     except Exception as exc:
         logger.warning("openverse_unexpected_error", query=q, error=str(exc))
 
@@ -402,25 +467,31 @@ async def search_image(query: str, orientation: str | None = None) -> str | None
     try:
         url = await _search_wikimedia(q)
         if url:
-            _IMAGE_SEARCH_CACHE[cache_key] = url
-            return url
+            existing = _IMAGE_SEARCH_CACHE.setdefault(cache_key, [])
+            if url not in existing:
+                existing.append(url)
+            picked = _pick([url])
+            if picked:
+                return picked
     except Exception as exc:
         logger.warning("wikimedia_unexpected_error", query=q, error=str(exc))
 
-    # 3. Retry Pexels con query semplificata (FIX #10)
+    # 5. Retry Pexels con query semplificata (FIX #10)
     simplified = _simplify_query(q)
     if simplified and simplified != q.lower():
         logger.info("image_search_simplify_retry", original=q, simplified=simplified)
         try:
-            url = await _search_pexels(simplified, orientation=orientation)
-            if url:
-                _IMAGE_SEARCH_CACHE[cache_key] = url
-                return url
+            urls = await _search_pexels(simplified, orientation=orientation)
+            if urls:
+                _IMAGE_SEARCH_CACHE[cache_key] = urls
+                picked = _pick(urls)
+                if picked:
+                    return picked
         except Exception as exc:
             logger.warning("pexels_retry_error", query=simplified, error=str(exc))
 
-    # 4. Memo del fallimento (evita ripetere le stesse fallite query)
-    _IMAGE_SEARCH_CACHE[cache_key] = None
+    # 6. Memo del fallimento (evita ripetere le stesse fallite query)
+    _IMAGE_SEARCH_CACHE.setdefault(cache_key, [])
     logger.info("image_search_no_results", query=q)
     return None
 

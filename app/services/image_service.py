@@ -22,6 +22,7 @@ from __future__ import annotations
 import asyncio
 import io
 import os
+import random
 import re
 import uuid
 from typing import Any
@@ -61,12 +62,15 @@ BRAND_PINK = (0xC8, 0x2E, 0x6E)   # #C82E6E
 BRAND_GREEN = (0x76, 0x9E, 0x2E)  # #769E2E
 FALLBACK_DIR = "output/fallbacks"
 
-# Backfill budget: max wall-clock spent retrying providers for the holes
-# before giving up and using the branded fallback (user choice: ~2-3 min).
-BACKFILL_MAX_SECONDS = 150.0
-# Pause between backfill waves to let per-minute provider quotas recover
-# (Openverse 100/min, Pixabay 100/min). One short wait, then fallback.
-BACKFILL_WAVE_PAUSE_SECONDS = 20.0
+# FIX #31 MOSSA 1 (2026-05-27): backfill waves ELIMINATE. Analista
+# 2026-05-27: "il retry ha senso solo se qualcosa può essere cambiato
+# tra un tentativo e l'altro. Stessa query, stesso istante, stesso Pexels
+# → niente cambia → niente retry". Le costanti BACKFILL_MAX_SECONDS e
+# BACKFILL_WAVE_PAUSE_SECONDS sono state rimosse. Il glitch di rete
+# transitorio è ora catturato dal singolo retry-with-jitter dentro
+# _download_one_image (caso unico dove il retry porta informazione nuova).
+DOWNLOAD_RETRY_JITTER_MIN = 0.3
+DOWNLOAD_RETRY_JITTER_MAX = 1.2
 
 
 def sanitize_svg(svg_code: str) -> str:
@@ -121,44 +125,63 @@ async def _download_one_image(
             )
             return (pos, cached["local_path"])
 
-        try:
-            assert slide.image.query_url is not None  # guarded by prefetch_images
-            resp = await client.get(slide.image.query_url)
-            resp.raise_for_status()
+        # FIX #31 MOSSA 1 (2026-05-27): 1 try + 1 retry con jitter cattura
+        # il glitch di rete transitorio (l'UNICO caso dove ritentare porta
+        # informazione nuova: la rete cambia tra t0 e t0+jitter). Su 2
+        # failure consecutivi → branded fallback. Niente backfill waves
+        # a fine pipeline (sleep 20s × N tentativi cieco eliminato).
+        assert slide.image.query_url is not None  # guarded by prefetch_images
+        for attempt in range(2):  # 1 try + 1 retry, max 2 chiamate
+            try:
+                resp = await client.get(slide.image.query_url)
+                resp.raise_for_status()
 
-            raw_bytes = resp.content
-            if len(raw_bytes) > MAX_IMAGE_BYTES:
+                raw_bytes = resp.content
+                if len(raw_bytes) > MAX_IMAGE_BYTES:
+                    logger.warning(
+                        "image_too_large",
+                        slide=slide.index,
+                        size_mb=round(len(raw_bytes) / 1_000_000, 1),
+                    )
+                    return (pos, None)
+
+                # BP §07.0 line 2106-2107: img.load() forces full decode and
+                # raises on corrupt streams — strictly stronger than verify()
+                # which only checks the header.
+                img = Image.open(io.BytesIO(raw_bytes))
+                img.load()
+
+                os.makedirs(IMAGES_DIR, exist_ok=True)
+                local_path = f"{IMAGES_DIR}/{uuid.uuid4()}.png"
+                img.convert("RGB").save(local_path, "PNG")
+
+                await pool.execute(
+                    "INSERT INTO image_cache (query, image_url, local_path, format) "
+                    "VALUES ($1, $2, $3, 'png')",
+                    slide.image.query,
+                    str(slide.image.query_url),
+                    local_path,
+                )
+                return (pos, local_path)
+
+            except Exception as exc:
+                if attempt == 0:
+                    jitter = random.uniform(
+                        DOWNLOAD_RETRY_JITTER_MIN, DOWNLOAD_RETRY_JITTER_MAX
+                    )
+                    logger.info(
+                        "image_download_retry",
+                        slide=slide.index,
+                        error=str(exc)[:120],
+                        jitter_s=round(jitter, 2),
+                    )
+                    await asyncio.sleep(jitter)
+                    continue
                 logger.warning(
-                    "image_too_large",
-                    slide=slide.index,
-                    size_mb=round(len(raw_bytes) / 1_000_000, 1),
+                    "image_download_failed", slide=slide.index, error=str(exc)
                 )
                 return (pos, None)
-
-            # BP §07.0 line 2106-2107: img.load() forces full decode and
-            # raises on corrupt streams — strictly stronger than verify()
-            # which only checks the header.
-            img = Image.open(io.BytesIO(raw_bytes))
-            img.load()
-
-            os.makedirs(IMAGES_DIR, exist_ok=True)
-            local_path = f"{IMAGES_DIR}/{uuid.uuid4()}.png"
-            img.convert("RGB").save(local_path, "PNG")
-
-            await pool.execute(
-                "INSERT INTO image_cache (query, image_url, local_path, format) "
-                "VALUES ($1, $2, $3, 'png')",
-                slide.image.query,
-                str(slide.image.query_url),
-                local_path,
-            )
-            return (pos, local_path)
-
-        except Exception as exc:
-            logger.warning(
-                "image_download_failed", slide=slide.index, error=str(exc)
-            )
-            return (pos, None)
+        return (pos, None)  # unreachable, for type checker
 
 
 def fit_image_to_box(
@@ -348,8 +371,21 @@ async def _resolve_query_urls(slides: list[SlideContent]) -> None:
     if not to_resolve:
         return
 
+    # FIX #31 MOSSA 2 (2026-05-27): dedup deterministica intra-corso.
+    # _resolve_query_urls è chiamata UNA volta per corso (via
+    # prefetch_images in generation_service.py), quindi `seen_urls`
+    # locale a questa funzione = 1 corso = 1 set. search_image rispetta
+    # un budget di max 2 riusi per URL: oltre, sceglie il successivo
+    # candidato Pexels (o fallisce → branded). Risolve la regressione
+    # "stessa foto DPI 8 volte su 100 CONTENT_IMAGE" vista in E2E #18.
+    seen_urls: dict[str, int] = {}
+
     async def _one(s: SlideContent) -> None:
-        url = await search_image(s.image.query or "", orientation=s.image.aspect_hint)
+        url = await search_image(
+            s.image.query or "",
+            orientation=s.image.aspect_hint,
+            seen_urls=seen_urls,
+        )
         if url:
             object.__setattr__(s.image, "query_url", url)
 
@@ -526,71 +562,33 @@ def _visual_holes(
 async def _backfill_missing_images(
     slides: list[SlideContent], image_map: dict[int, str], pool: Any
 ) -> None:
-    """Fill every visual hole so image_map covers all image/diagram slides.
+    """Fill every visual hole with a branded C.F.P. fallback.
 
-    Stage 1 — retry providers for the holes (web slides only; diagrams that
-    failed cairosvg can't be re-fetched). One throttled wave with a short
-    pause to let per-minute quotas recover, capped at BACKFILL_MAX_SECONDS.
+    FIX #31 MOSSA 1 (2026-05-27, analista): Stage 1 (provider retry waves)
+    ELIMINATO. Era retry cieco — stessa query, stesso istante, stesso
+    Pexels → niente cambia → nessuna informazione nuova → 8 wave × 20s
+    = 160s buttati per ``filled_now=0`` su tutto il loop. Il glitch di
+    rete transitorio (l'unico caso dove ritentare ha senso) è ora
+    catturato dal singolo retry-with-jitter dentro ``_download_one_image``.
 
-    Stage 2 — for whatever is still missing, render a branded C.F.P.
-    fallback so the box is never empty. Mutates image_map in place.
+    Qui resta SOLO il fallback brandizzato per i buchi residui — zero
+    attese, zero waves, zero quota recovery sleep. Mutates image_map in
+    place.
     """
-    from app.services.image_search import search_image
-
-    deadline = asyncio.get_event_loop().time() + BACKFILL_MAX_SECONDS
     holes = _visual_holes(slides, image_map)
     if not holes:
         return
 
-    logger.info("backfill_started", holes=len(holes))
+    logger.info("backfill_started", holes=len(holes), stage="branded_only")
 
-    # ── Stage 1: throttled provider retry (web slides only) ──
-    # FIX #27.6: i diagram (diagram_code presente) non si ri-cercano sui
-    # provider — vanno direttamente al fallback brandizzato se mancano.
-    web_holes = [(pos, s) for pos, s in holes if not s.image.diagram_code]
-    waves = 0
-    while web_holes and asyncio.get_event_loop().time() < deadline:
-        waves += 1
-        async with httpx.AsyncClient(timeout=DOWNLOAD_TIMEOUT_SECONDS) as client:
-            async def _retry_one(pos: int, s: SlideContent) -> tuple[int, str | None]:
-                # Re-resolve URL from any provider (cache-aware in image_search),
-                # then download + persist exactly like the main path.
-                url = await search_image(
-                    s.image.query or "", orientation=s.image.aspect_hint
-                )
-                if not url:
-                    return (pos, None)
-                object.__setattr__(s.image, "query_url", url)
-                return await _download_one_image(pos, s, pool, client)
-
-            results = await asyncio.gather(
-                *(_retry_one(pos, s) for pos, s in web_holes), return_exceptions=True
-            )
-        filled_now = 0
-        for r in results:
-            if isinstance(r, tuple) and r[1] is not None:
-                image_map[r[0]] = r[1]
-                filled_now += 1
-        web_holes = [(pos, s) for pos, s in web_holes if pos not in image_map]
-        logger.info(
-            "backfill_wave", wave=waves, filled=filled_now, remaining=len(web_holes)
-        )
-        if not web_holes:
-            break
-        # One short pause to let per-minute quotas recover, then stop waiting.
-        if asyncio.get_event_loop().time() + BACKFILL_WAVE_PAUSE_SECONDS < deadline:
-            await asyncio.sleep(BACKFILL_WAVE_PAUSE_SECONDS)
-        else:
-            break
-
-    # ── Stage 2: branded fallback for everything still missing ──
-    still_missing = _visual_holes(slides, image_map)
     fallback_count = 0
-    for pos, s in still_missing:
+    for pos, s in holes:
         # FIX #30.9f (2026-05-27): include diagram_filling.
         is_diagram = bool(s.image.diagram_code or s.image.diagram_filling)
         fb = await asyncio.to_thread(
-            _make_branded_fallback, s.image.query or s.title or "", is_diagram=is_diagram
+            _make_branded_fallback,
+            s.image.query or s.title or "",
+            is_diagram=is_diagram,
         )
         if fb:
             image_map[pos] = fb
@@ -599,7 +597,6 @@ async def _backfill_missing_images(
     logger.info(
         "backfill_done",
         holes_initial=len(holes),
-        filled_by_provider=len(holes) - len(still_missing),
         branded_fallbacks=fallback_count,
         unresolved=len(_visual_holes(slides, image_map)),
     )

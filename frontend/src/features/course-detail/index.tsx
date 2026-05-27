@@ -95,6 +95,17 @@ const DOWNLOADS: { format: DownloadFormat; label: string; icon: React.ComponentT
   { format: 'audio', label: 'Audio (ZIP)', icon: Headphones },
 ]
 
+// FIX #31 MOSSA 3 (2026-05-27): audio TTS spostato in background dopo
+// pipeline. Il corso può essere `status=completed` con `audio_manifest_path`
+// ancora NULL (audio in elaborazione bg, 2-3 min). Il polling qui sotto
+// rileva quando arriva. Timeout duro 5 min: oltre, l'utente vede "audio
+// non disponibile" invece di uno spinner infinito (caso fallimento bg
+// silenzioso — non distinguibile da "in corso" senza migration apposita).
+// NB: 5 min copre il caso 4h. Per corsi 8h alzare a 8-10 min — vedi
+// #R-audio-fe-timeout-4h-only in docs/VERIFICATION_DEBT.md.
+const AUDIO_POLL_INTERVAL_MS = 5_000  // 5s tra un check e il successivo
+const AUDIO_POLL_TIMEOUT_MS = 5 * 60_000  // 5 min totali di attesa
+
 export function CourseDetail() {
   const { id } = useParams({ from: '/_authenticated/courses/$id' })
   const navigate = useNavigate()
@@ -103,10 +114,31 @@ export function CourseDetail() {
   const [downloadingFmt, setDownloadingFmt] = useState<DownloadFormat | null>(null)
   const [certifying, setCertifying] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  // FIX #31 MOSSA 3: timestamp inizio polling audio + flag timeout scaduto
+  const [audioPollStart] = useState<number>(() => Date.now())
+  const [audioTimedOut, setAudioTimedOut] = useState(false)
 
   const courseQ = useQuery({
     queryKey: ['course', id] as const,
     queryFn: () => api.getCourse(id),
+    // FIX #31 MOSSA 3: polling automatico quando il corso è completed ma
+    // l'audio manifest non è ancora pronto (= bg task in elaborazione).
+    // Stop polling se: status non completed, OR audio già pronto, OR
+    // timeout 5 min superato.
+    refetchInterval: (query) => {
+      const data = query.state.data
+      if (!data) return false
+      const isCompleted = data.status === 'completed' || data.status === 'certified'
+      const audioReady = Boolean(data.audio_manifest_path)
+      const elapsed = Date.now() - audioPollStart
+      if (!isCompleted) return false  // ancora in generation: lascio WS
+      if (audioReady) return false  // audio arrivato: stop polling
+      if (elapsed >= AUDIO_POLL_TIMEOUT_MS) {
+        if (!audioTimedOut) setAudioTimedOut(true)
+        return false  // timeout 5 min: stop
+      }
+      return AUDIO_POLL_INTERVAL_MS  // continua a pollare
+    },
   })
 
   async function handleDownload(fmt: DownloadFormat, title: string) {
@@ -226,16 +258,27 @@ export function CourseDetail() {
                     {DOWNLOADS.map((d) => {
                       const Icon = d.icon
                       const busy = downloadingFmt === d.format
+                      // FIX #31 MOSSA 3: audio è pronto solo quando
+                      // course.audio_manifest_path è popolato (background
+                      // task completato). Finché è null, mostra "in
+                      // elaborazione" — o "non disponibile" se timeout 5 min.
+                      const audioReady = Boolean(course.audio_manifest_path)
+                      const audioPending =
+                        d.format === 'audio' && downloadable && !audioReady
+                      const audioFailed = audioPending && audioTimedOut
+                      const audioDisabled = d.format === 'audio' && !audioReady
                       return (
                         <Button
                           key={d.format}
                           variant='outline'
                           className='h-auto justify-start gap-3 p-4'
-                          disabled={!downloadable || busy}
+                          disabled={!downloadable || busy || audioDisabled}
                           onClick={() => handleDownload(d.format, course.title)}
                         >
                           {busy ? (
                             <Loader2 className='size-5 animate-spin' aria-hidden='true' />
+                          ) : audioPending && !audioFailed ? (
+                            <Loader2 className='size-5 animate-spin text-muted-foreground' aria-hidden='true' />
                           ) : (
                             <Icon className='size-5 text-muted-foreground' aria-hidden='true' />
                           )}
@@ -244,7 +287,9 @@ export function CourseDetail() {
                             <span className='text-xs text-muted-foreground'>
                               {d.format === 'pptx' && 'Presentazione PowerPoint'}
                               {d.format === 'pdf' && 'Dispensa stampabile'}
-                              {d.format === 'audio' && 'Narrazione MP3'}
+                              {d.format === 'audio' && audioReady && 'Narrazione MP3'}
+                              {d.format === 'audio' && !audioReady && !audioFailed && 'In elaborazione…'}
+                              {d.format === 'audio' && audioFailed && 'Audio non disponibile'}
                             </span>
                           </div>
                         </Button>

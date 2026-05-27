@@ -45,6 +45,17 @@ _job_semaphore = asyncio.Semaphore(MAX_CONCURRENT_JOBS)
 # ═══ TIMEOUT GLOBALE PIPELINE (OPT-2 — settings.pipeline_timeout) ═══
 PIPELINE_TIMEOUT_SECONDS = settings.pipeline_timeout
 
+# ═══ BACKGROUND TASKS REGISTRY (FIX #31 MOSSA 3) ═══
+# Set di riferimenti forti per i task spawnati con asyncio.create_task DOPO
+# che la pipeline ha settato status=completed (audio TTS in background).
+# Senza questo set, il GC porta via i task perché nessuno tiene un
+# riferimento forte → audio non parte mai → audio_manifest_path=NULL per
+# sempre. Gotcha asyncio documentato. Il done_callback rimuove il task
+# alla fine (vedi _bg_audio in _run_pipeline_inner), così il set non
+# cresce indefinitamente in batch notturno.
+# REI-3 NON violato: edge-tts è I/O HTTP, non tocca python-pptx.
+_BACKGROUND_TASKS: set[asyncio.Task[Any]] = set()
+
 
 async def send_ws_progress(job_id: str, percent: int, step: str) -> None:
     """Update job progress in the DB. The WebSocket reads it via
@@ -359,7 +370,7 @@ async def _run_pipeline_inner(job_id: str, course_id: str) -> None:
     slide_models = [SlideContent(**s) for s in all_slides]
     image_map = await prefetch_images(slide_models, db)
 
-    # ═══ PRODUCTION BUILD (PPTX + PDF + optional audio) ═══
+    # ═══ PRODUCTION BUILD (PPTX + PDF — audio spostato in background, FIX #31 MOSSA 3) ═══
     builder = ProductionBuilder(brand_config=brand)
     pptx_path, pdf_path, _report = await builder.build(
         slides=slide_models,
@@ -372,7 +383,9 @@ async def _run_pipeline_inner(job_id: str, course_id: str) -> None:
 
     elapsed = time.time() - start_time
 
-    # ═══ FINAL DB STATE (FIX #29.4: status può essere 'completed' o 'partial') ═══
+    # ═══ FINAL DB STATE per PPTX/PDF — utente può scaricare SUBITO ═══
+    # (FIX #29.4: status può essere 'completed' o 'partial'; FIX #31 MOSSA 3:
+    #  l'audio non è più nel percorso critico, parte come task background dopo)
     await db.execute(
         "UPDATE courses SET pptx_path=$1, pdf_path=$2, status=$4 WHERE id=$3",
         str(pptx_path),
@@ -387,15 +400,17 @@ async def _run_pipeline_inner(job_id: str, course_id: str) -> None:
     )
 
     # ═══ TELEMETRY → audit_log ═══
+    audio_requested = "audio" in course.get("outputs", [])
     await db.execute(
         "INSERT INTO audit_log (action, entity_type, entity_id, details) "
         "VALUES ('pipeline_metrics', 'course', $1, $2)",
         course_id,
         json.dumps(
             {
-                "elapsed_seconds": round(elapsed, 1),
+                "elapsed_seconds": round(elapsed, 1),  # SOLO PPTX+PDF, audio escluso
                 "total_slides": len(all_slides),
                 "images_resolved": len(image_map),
+                "audio_in_background": audio_requested,
             }
         ),
     )
@@ -405,7 +420,53 @@ async def _run_pipeline_inner(job_id: str, course_id: str) -> None:
         job_id=job_id,
         slides=len(all_slides),
         elapsed_seconds=round(elapsed, 1),
+        audio_in_background=audio_requested,
     )
+
+    # ═══ AUDIO BACKGROUND TASK (FIX #31 MOSSA 3) ═══
+    # L'utente ora vede PPTX/PDF immediatamente. audio_manifest_path resta
+    # NULL fino al completamento (front-end polla ogni 5s, timeout 5 min).
+    # Eccezioni dentro la task NON propagano: vengono loggate con course_id
+    # e classe errore, è l'UNICA osservabilità su NULL=fallito (limite
+    # accettato analista — vedi #R-audio-bg-no-recovery in VERIFICATION_DEBT).
+    # Strong-ref tramite _BACKGROUND_TASKS set + done_callback per prevenire
+    # GC silent-death del task.
+    if audio_requested:
+        from app.services.audio_service import AudioService
+
+        audio_service = AudioService(voice=settings.tts_voice)
+
+        async def _bg_audio() -> None:
+            bg_start = time.time()
+            try:
+                logger.info(
+                    "audio_bg_started",
+                    course_id=str(course_id),
+                    slides=len(slide_models),
+                )
+                await audio_service.generate_narrations(
+                    slide_models, str(course_id), db
+                )
+                logger.info(
+                    "audio_bg_completed",
+                    course_id=str(course_id),
+                    elapsed_seconds=round(time.time() - bg_start, 1),
+                )
+            except Exception as exc:
+                logger.error(
+                    "audio_bg_failed",
+                    course_id=str(course_id),
+                    error_class=type(exc).__name__,
+                    error_msg=str(exc)[:300],
+                    elapsed_before_failure=round(time.time() - bg_start, 1),
+                )
+                # audio_manifest_path resta NULL → FE timeout 5 min mostrerà
+                # "audio non disponibile". Il log qui è l'unica fonte per
+                # capire COSA è fallito.
+
+        task = asyncio.create_task(_bg_audio(), name=f"audio_bg_{course_id}")
+        _BACKGROUND_TASKS.add(task)
+        task.add_done_callback(_BACKGROUND_TASKS.discard)
 
 
 async def recover_interrupted_jobs(pool: asyncpg.Pool) -> None:

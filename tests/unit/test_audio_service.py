@@ -302,3 +302,15 @@ def test_audio_service_does_not_import_openai() -> None:
         "OPT-1 violation: OpenAI reference found in production code"
     )
     assert "import edge_tts" in stripped
+
+
+# ─────────────── FIX #31 MOSSA 3 — sem 16→6 invariant ───────────────
+
+
+def test_tts_semaphore_limit_is_six_after_fix31() -> None:
+    """FIX #31 MOSSA 3 (2026-05-27, analista): edge-tts gratuito non
+    ufficiale, sotto raffica >6 concurrent dà reset/403 silenziosi che
+    tenacity vede come errore generico. Sweet-spot empirico = 6."""
+    assert svc._TTS_SEMAPHORE_LIMIT == 6, (
+        f"Expected sem=6 (FIX #31), got {svc._TTS_SEMAPHORE_LIMIT}"
+    )

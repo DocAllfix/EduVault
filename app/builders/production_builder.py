@@ -121,9 +121,16 @@ class ProductionBuilder:
         image_map: dict[int, str],
         db: Any | None = None,
     ) -> tuple[str, str, dict[str, Any]]:
-        """Run the full build: memory check → PPTX → validate → PDF →
-        (optional audio) → cleanup. ``db`` is required when ``course["outputs"]``
-        contains ``"audio"`` (used by AudioService for INSERTs)."""
+        """Run the full build: memory check → PPTX → validate → PDF → cleanup.
+
+        FIX #31 MOSSA 3 (2026-05-27): la generazione audio NON viene più
+        eseguita qui. Il caller (``generation_service._run_pipeline_inner``)
+        la spawna come ``asyncio.create_task`` DOPO il return dei path
+        PPTX/PDF, così l'utente riceve gli artefatti immediati e l'audio
+        arriva 2-3 min dopo via polling di ``courses.audio_manifest_path``.
+        Il parametro ``db`` resta nella signature per backward compat
+        (no-op rispetto a questo metodo).
+        """
         check_memory_before_build(len(slides))
         check_disk_before_build()
 
@@ -139,18 +146,6 @@ class ProductionBuilder:
 
         await ws_callback(job_id, 95, "Generazione PDF dispensa...")
         pdf_path = await asyncio.to_thread(self.pdf_builder.build, slides, course)
-
-        if "audio" in course.get("outputs", []):
-            await ws_callback(job_id, 96, "Generazione narrazione audio...")
-            from app.config import settings
-            from app.services.audio_service import AudioService
-
-            if db is None:
-                raise ValueError(
-                    "ProductionBuilder.build requires `db` when 'audio' is in outputs"
-                )
-            audio_service = AudioService(voice=settings.tts_voice)
-            await audio_service.generate_narrations(slides, course["id"], db)
 
         await asyncio.to_thread(self._cleanup_tmp)
 

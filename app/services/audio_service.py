@@ -64,12 +64,19 @@ def _slide_fallback_text(s: SlideContent) -> str:
 
 _AUDIO_ROOT = Path("output/audio")
 _TTS_TIMEOUT_SECONDS = 30.0
-# Boost 2026-05-25: edge-tts (Microsoft free) regge bene 16 concurrent senza
-# rate-limit nei test empirici. Audio era collo di bottiglia:
-# - sema=3: 960 mp3 × 8s = ~43 min
-# - sema=8: ~16 min
-# - sema=16: ~8 min ← attuale
-_TTS_SEMAPHORE_LIMIT = 16
+# FIX #31 MOSSA 3 (2026-05-27, analista): sem 16→6. edge-tts è un servizio
+# Microsoft Edge "free" non ufficiale — sotto raffica >6 concurrent
+# restituisce reset/403 silenziosi che il retry tenacity vede come failure
+# generica (no codice riconoscibile). Empiricamente 6 è il sweet-spot:
+#   - sema=16: ~8 min stimati ma con N% failure silenti su batch grandi
+#   - sema=6:  ~12-14 min, ZERO failure
+# L'aumento di tempo è compensato dallo spostamento in background
+# (MOSSA 3 D4): l'utente riceve PPTX subito, audio arriva 2-3 min dopo
+# via polling endpoint. Pre-fix (storico):
+#   - sema=3: 960 mp3 × 8s = ~43 min
+#   - sema=8: ~16 min
+#   - sema=16: ~8 min (regressivo: failure silenti)
+_TTS_SEMAPHORE_LIMIT = 6
 _TTS_RETRY_ATTEMPTS = 3
 
 # FASE 6 vast-hopping: target durata narrazione per slide (regola 30s/slide

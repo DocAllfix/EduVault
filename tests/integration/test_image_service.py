@@ -430,3 +430,142 @@ def test_sanitize_svg_is_inline_in_image_service() -> None:
 
     assert hasattr(image_service, "sanitize_svg")
     assert image_service.sanitize_svg.__module__ == "app.services.image_service"
+
+
+# ─────────────── 6. FIX #31 MOSSA 1 — backfill waves removed + retry jitter ───────────────
+#
+# These tests don't rely on _slide() helper because the pre-existing helper is
+# broken vs current validator (D38 in VERIFICATION_DEBT). We build minimal valid
+# slides inline.
+
+
+def _valid_content_image_slide(idx: int, query: str = "test") -> SlideContent:
+    """Minimal CONTENT_IMAGE slide that satisfies current validator
+    (body_min_bullets=3, notes_min_words=55). Independent of _slide().
+    """
+    return SlideContent(
+        index=idx,
+        module_index=0,
+        slide_type=SlideType.CONTENT_IMAGE,
+        title="Titolo slide test",
+        bullets=["Primo punto", "Secondo punto", "Terzo punto"],
+        sezioni=[],
+        speaker_notes=(
+            "Note narrative sufficienti per superare il floor di "
+            "cinquantacinque parole richiesto dal validator pydantic; "
+            "questo testo serve solo a soddisfare il vincolo nel test "
+            "MOSSA uno senza coinvolgere alcuna logica reale. Riempiamo "
+            "con parole fino al numero adatto giusto giusto."
+        ),
+        normative_ref="art. 1",
+        source_chunk_ids=["chunk-1"],
+        image=ImageStrategy(
+            strategy="web_search",
+            query=query,
+            query_url="https://example.com/img.png",
+            aspect_hint="landscape",
+        ),
+    )
+
+
+@pytest.mark.asyncio
+async def test_download_one_image_retries_once_on_transient_error(
+    tmp_path: Path,
+) -> None:
+    """MOSSA 1: _download_one_image fa 1 retry con jitter sul singolo
+    fallimento HTTP transitorio, poi salva. Verifica che il SECONDO
+    tentativo abbia successo dopo asyncio.sleep(jitter)."""
+    pool = _empty_pool()
+    slide = _valid_content_image_slide(7, query="retry test")
+
+    # First call raises (transient), second call returns valid PNG
+    call_count = {"n": 0}
+    def get_side_effect(*_a: Any, **_kw: Any) -> Any:
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            raise httpx.ConnectError("transient", request=MagicMock())
+        return _mock_response(_png_bytes())
+
+    client = MagicMock()
+    client.get = AsyncMock(side_effect=get_side_effect)
+
+    # Mock asyncio.sleep to avoid actually waiting
+    with patch.object(svc, "IMAGES_DIR", str(tmp_path / "images")), \
+         patch("app.services.image_service.asyncio.sleep", new=AsyncMock()):
+        idx, path = await _download_one_image(0, slide, pool, client)
+
+    assert idx == 0
+    assert path is not None, "second attempt should succeed"
+    assert Path(path).is_file()
+    assert call_count["n"] == 2, "expected exactly 1 retry"
+
+
+@pytest.mark.asyncio
+async def test_download_one_image_no_third_attempt(tmp_path: Path) -> None:
+    """MOSSA 1: 2 failure consecutivi → return (pos, None), NESSUNA terza
+    chiamata. Niente loop di retry illimitato."""
+    pool = _empty_pool()
+    slide = _valid_content_image_slide(9, query="dead network")
+
+    call_count = {"n": 0}
+    def get_side_effect(*_a: Any, **_kw: Any) -> Any:
+        call_count["n"] += 1
+        raise httpx.ConnectError("dead", request=MagicMock())
+
+    client = MagicMock()
+    client.get = AsyncMock(side_effect=get_side_effect)
+
+    with patch.object(svc, "IMAGES_DIR", str(tmp_path / "images")), \
+         patch("app.services.image_service.asyncio.sleep", new=AsyncMock()):
+        idx, path = await _download_one_image(3, slide, pool, client)
+
+    assert (idx, path) == (3, None)
+    assert call_count["n"] == 2, "must NOT do a 3rd attempt"
+
+
+@pytest.mark.asyncio
+async def test_backfill_no_waves_only_branded_fallback(tmp_path: Path) -> None:
+    """MOSSA 1: _backfill_missing_images NON chiama più search_image né
+    crea httpx.AsyncClient. Per ogni buco, chiama solo _make_branded_fallback
+    (Stage 2 di prima, ora unico stage)."""
+    from app.services.image_service import _backfill_missing_images
+
+    pool = _empty_pool()
+    slides = [_valid_content_image_slide(i, query=f"q{i}") for i in range(3)]
+    image_map: dict[int, str] = {}  # tutti e 3 sono buchi
+
+    # Mock _make_branded_fallback per non disegnare PNG vero
+    fake_path = str(tmp_path / "branded.png")
+    Image.new("RGB", (10, 10), "white").save(fake_path, "PNG")
+
+    with patch(
+        "app.services.image_service._make_branded_fallback",
+        return_value=fake_path,
+    ) as fb, patch(
+        "app.services.image_service.httpx.AsyncClient"
+    ) as http_cls:
+        # Anche se importasse search_image, verifichiamo che NON sia mai chiamato
+        # (oltre a mock httpx per essere paranoici sul niente-network)
+        await _backfill_missing_images(slides, image_map, pool)
+
+    # Tutti i 3 buchi riempiti con branded fallback
+    assert len(image_map) == 3
+    assert all(v == fake_path for v in image_map.values())
+    # _make_branded_fallback chiamato 3 volte (uno per slide)
+    assert fb.call_count == 3
+    # Nessun httpx.AsyncClient costruito (no Stage 1 retry)
+    http_cls.assert_not_called()
+
+
+def test_backfill_constants_removed() -> None:
+    """MOSSA 1: le costanti del vecchio loop waves sono state rimosse.
+    Sostituite da DOWNLOAD_RETRY_JITTER_{MIN,MAX}."""
+    from app.services import image_service as svc_mod
+
+    assert not hasattr(svc_mod, "BACKFILL_MAX_SECONDS"), \
+        "BACKFILL_MAX_SECONDS removed in FIX #31"
+    assert not hasattr(svc_mod, "BACKFILL_WAVE_PAUSE_SECONDS"), \
+        "BACKFILL_WAVE_PAUSE_SECONDS removed in FIX #31"
+    assert hasattr(svc_mod, "DOWNLOAD_RETRY_JITTER_MIN")
+    assert hasattr(svc_mod, "DOWNLOAD_RETRY_JITTER_MAX")
+    assert svc_mod.DOWNLOAD_RETRY_JITTER_MIN < svc_mod.DOWNLOAD_RETRY_JITTER_MAX

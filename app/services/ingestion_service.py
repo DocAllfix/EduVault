@@ -522,10 +522,39 @@ _MAX_CARDINALITY_ATTEMPTS = 3       # asse cardinalità (fill-loop) — uscita g
 def _instructor_client_for(provider: str, model: str):  # type: ignore[no-untyped-def]
     """Costruisce un client instructor per il provider, in modalità TOOLS (schema imposto).
 
-    Riusa le stesse credenziali/endpoint di _call_llm_single. Ritorna (client, model_id).
+    Riusa le stesse credenziali/endpoint di _call_llm_single.
+    Ritorna ``(client, model_id, reask_counter)``.
+
+    FIX #31 MOSSA 4 (2026-05-27, analista): aggiunto counter LOCALE per
+    contare i reask interni di instructor (validation failures che
+    triggerano `max_retries`). I reask di profondità erano INVISIBILI nei
+    log finora — vedevamo solo i 8 reask diagram perché hanno
+    `diagram_filling_failed` con log dedicato, ma `bullets`/`notes`/
+    `speaker_notes_too_short` riask sparivano dentro instructor.
+
+    Il counter è un dict {"reasks": int} mutato in-place dall'hook
+    `on("completion:error")`. Closure pulita, no stato globale → test
+    facili, no interferenze cross-test. Il caller (generate_module_structured)
+    legge `counter["reasks"]` dopo ogni `client.chat.completions.create`
+    e logga `module_batch_reasks` strutturato. Aggregato per modulo dà
+    `reask_total_module` che decide H6 vs H3a nella prossima sessione
+    (analista: ">0.5/batch → conta batch-size; ~0 → solo latenza Azure").
     """
     import instructor
     from instructor import Mode
+
+    # Counter LOCALE per call. Mutato dall'hook `on("completion:error")`.
+    # Ogni chiamata a _instructor_client_for produce un counter NUOVO →
+    # zero stato globale, zero race fra test paralleli.
+    reask_counter = {"reasks": 0}
+
+    def _on_completion_error(*_args: Any, **_kw: Any) -> None:
+        """Hook instructor: chiamato ogni volta che un retry viene
+        triggerato per una validation failure. Incrementa il counter
+        locale al client. NB: l'hook può essere chiamato con argomenti
+        variabili a seconda della versione instructor — accettiamo
+        *args/**kw per robustezza."""
+        reask_counter["reasks"] += 1
 
     if provider == "deepseek":
         base = openai.AsyncOpenAI(
@@ -533,24 +562,36 @@ def _instructor_client_for(provider: str, model: str):  # type: ignore[no-untype
             base_url="https://api.deepseek.com",
             timeout=float(settings.llm_request_timeout),
         )
-        return instructor.from_openai(base, mode=Mode.TOOLS), model
-    if provider == "openai":
+        client = instructor.from_openai(base, mode=Mode.TOOLS)
+    elif provider == "openai":
         base = openai.AsyncOpenAI(
             api_key=settings.openai_api_key, timeout=float(settings.llm_request_timeout)
         )
-        return instructor.from_openai(base, mode=Mode.TOOLS), model
-    if provider == "azure_openai":
+        client = instructor.from_openai(base, mode=Mode.TOOLS)
+    elif provider == "azure_openai":
         base = openai.AsyncAzureOpenAI(
             azure_endpoint=settings.azure_openai_endpoint,
             api_key=settings.azure_openai_api_key,
             api_version=settings.azure_openai_api_version,
             timeout=float(settings.llm_request_timeout),
         )
-        return instructor.from_openai(base, mode=Mode.TOOLS), model
-    if provider == "anthropic":
-        base = anthropic.AsyncAnthropic(timeout=float(settings.llm_request_timeout))
-        return instructor.from_anthropic(base, mode=Mode.ANTHROPIC_TOOLS), model
-    raise LLMProviderError(f"unknown provider for instructor: {provider}")
+        client = instructor.from_openai(base, mode=Mode.TOOLS)
+    elif provider == "anthropic":
+        base_a = anthropic.AsyncAnthropic(timeout=float(settings.llm_request_timeout))
+        client = instructor.from_anthropic(base_a, mode=Mode.ANTHROPIC_TOOLS)
+    else:
+        raise LLMProviderError(f"unknown provider for instructor: {provider}")
+
+    # Aggancia hook reask counter (instructor supporta `.on(event, handler)`)
+    try:
+        client.on("completion:error", _on_completion_error)
+    except Exception as exc:
+        # In caso di incompatibilità con versione instructor (raro), non
+        # blocchiamo la pipeline: il counter resta a 0 (degradazione
+        # silenziosa accettabile per la sola osservabilità).
+        logger.warning("instructor_hook_install_failed", error=str(exc)[:120])
+
+    return client, model, reask_counter
 
 
 # FIX #29.1 (2026-05-26): batch size per chiamata structured. Con max_tokens=8000 e
@@ -688,7 +729,8 @@ async def generate_module_structured(
             already_types=already_types,
         )
         try:
-            client, model_id = _instructor_client_for(provider, eff_model)
+            # FIX #31 MOSSA 4: counter reask LOCALE per questo batch
+            client, model_id, reask_counter = _instructor_client_for(provider, eff_model)
             batch_module = await client.chat.completions.create(
                 model=model_id,
                 response_model=ModuleSlides,
@@ -709,11 +751,16 @@ async def generate_module_structured(
                 s.module_index = module_index
                 all_slides.append(s)
             telemetry["batches_ok"] = int(telemetry.get("batches_ok", 0)) + 1
+            # FIX #31 MOSSA 4: accumula reask per module-level stats
+            telemetry["reask_total_module"] = int(
+                telemetry.get("reask_total_module", 0)
+            ) + reask_counter["reasks"]
             logger.info(
                 "module_batch_ok",
                 module_index=module_index, batch_idx=batch_idx,
                 batch_size=batch_size, got=len(batch_module.slides),
                 accepted=min(batch_size, len(batch_module.slides)),
+                reasks=reask_counter["reasks"],  # FIX #31 MOSSA 4
             )
         except Exception as exc:
             # FIX #29.4: batch failure NON butta i precedenti. Marca degraded
@@ -752,7 +799,9 @@ async def generate_module_structured(
         need = expected_slides - start
         sub_prompt = build_subrequest(module.slides, need, start)
         try:
-            client, model_id = _instructor_client_for(provider, eff_model)
+            # FIX #31 MOSSA 4: ignoriamo reask_counter in questo dead-code path
+            # (while False), ma la firma a 3 elementi va rispettata.
+            client, model_id, _reask = _instructor_client_for(provider, eff_model)
             sub = await client.chat.completions.create(
                 model=model_id,
                 response_model=ModuleSlides,
@@ -793,6 +842,24 @@ async def generate_module_structured(
 
     telemetry["final_count"] = len(module.slides)
     logger.info("module_structured_done", **telemetry)
+
+    # FIX #31 MOSSA 4: log diagnostic dedicato per i reask instructor
+    # invisibili (analista 2026-05-27 — "ti dice se i 30-60s sono latenza
+    # Azure pura o latenza+reask-nascosti"). reask_total_module è
+    # cumulato a livello modulo da tutti i batch. La media per-batch
+    # > 0.5 → batch-size pesa, ~0 → quasi tutto latenza Azure.
+    n_batches_actual = int(telemetry.get("batches_ok", 0)) + int(
+        telemetry.get("batches_failed", 0)
+    )
+    reask_total = int(telemetry.get("reask_total_module", 0))
+    logger.info(
+        "module_reask_stats",
+        module_index=module_index,
+        n_batches=n_batches_actual,
+        reask_total_module=reask_total,
+        reask_avg_per_batch=round(reask_total / max(n_batches_actual, 1), 2),
+    )
+
     return module, telemetry
 
 
