@@ -18,12 +18,35 @@ storage/cache_images/*
 !storage/generated/.gitkeep
 !storage/cache_images/.gitkeep
 
+# === Generated output + work-in-progress binaries (never commit) ===
+output/
+extracted/
+*.bak
+*.pptx.bak*
+# Work PPTX dumped in repo root / frontend during debug (not source assets)
+/Health and Safety Workshop*.pptx
+/nexus_master_v2*.pptx
+frontend/*.pdf
+storage/pdfs/*.pdf
+
 # === Databases ===
 *.sqlite
 *.db
 
 # === Frontend ===
 node_modules/
+frontend/dist/
+frontend/build/
+frontend/.vite/
+frontend/*.pptx
+frontend/*.pdf
+
+# === Storage output (PPTX/PDF generati pipeline) ===
+storage/output/
+storage/pdfs/
+
+# === Claude Code runtime ===
+.claude/scheduled_tasks.lock
 
 # === OS / Editor ===
 .DS_Store
@@ -31,3 +54,12 @@ node_modules/
 
 # === Project-internal brainstorming material (not architecture) ===
 docs/screenshots/
+
+# === Local-only artifacts ===
+# codegraph SQLite knowledge-graph index — rebuilt locally via REI-15
+.codegraph/
+slidesgo_health_safety_original.pptx
+assets/templates/slidesgo_health_safety_original.pptx
+
+# Local debug workspace for template iteration (FIX #30.x)
+testfixtemplate/

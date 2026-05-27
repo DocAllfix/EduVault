@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+{# Jinja2 template per la dispensa PDF (BLUEPRINT §07.2 + OPT-3 v3.0).
+   Riceve: course (dict), modules (list of {index, title, slides}), palette (dict), date (str).
+   Reso da PdfBuilder, convertito in PDF da WeasyPrint. #}
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <title>{{ course.title | default('Dispensa Corso') }}</title>
+  <style>
+    @page {
+      size: A4;
+      margin: 2.5cm 2cm 2cm 2cm;
+      @top-left {
+        content: "{{ course.organization | default('') }}";
+        font-family: 'Open Sans', sans-serif;
+        font-size: 9pt;
+        color: #666;
+      }
+      @top-right {
+        content: "{{ course.title | default('') }}";
+        font-family: 'Open Sans', sans-serif;
+        font-size: 9pt;
+        color: #666;
+      }
+      @bottom-center {
+        content: counter(page);
+        font-family: 'Open Sans', sans-serif;
+        font-size: 9pt;
+        color: #666;
+      }
+    }
+    @page :first {
+      @top-left { content: ""; }
+      @top-right { content: ""; }
+    }
+    body {
+      font-family: 'Open Sans', sans-serif;
+      font-size: 11pt;
+      line-height: 1.6;
+      color: #222;
+    }
+    h1 {
+      font-family: 'Montserrat', sans-serif;
+      color: {{ palette.primary | default('#1a365d') }};
+      page-break-before: always;
+    }
+    h1:first-of-type { page-break-before: avoid; }
+    h2 {
+      font-family: 'Montserrat', sans-serif;
+      color: {{ palette.secondary | default('#2b6cb0') }};
+      border-bottom: 1px solid {{ palette.secondary | default('#2b6cb0') }};
+      margin-top: 1.5em;
+      padding-bottom: 0.2em;
+    }
+    .cover {
+      page-break-after: always;
+      text-align: center;
+      padding-top: 4cm;
+    }
+    .cover h1 {
+      page-break-before: avoid;
+      font-size: 28pt;
+      margin-bottom: 0.5em;
+    }
+    .cover .meta { font-size: 12pt; color: #555; margin-top: 1em; }
+    .cover .regs {
+      margin-top: 2em;
+      font-size: 10pt;
+      color: #666;
+      font-style: italic;
+    }
+    .toc {
+      page-break-after: always;
+    }
+    .toc h1 {
+      page-break-before: avoid;
+      color: {{ palette.primary | default('#1a365d') }};
+      margin-bottom: 1.5em;
+    }
+    .toc ol { padding-left: 1.5em; }
+    .toc li { margin: 0.4em 0; font-size: 12pt; }
+    .toc a {
+      text-decoration: none;
+      color: {{ palette.secondary | default('#2b6cb0') }};
+    }
+    .toc a::after {
+      content: leader('. ') target-counter(attr(href), page);
+      color: #666;
+      font-size: 10pt;
+    }
+    .normative-ref {
+      font-size: 9pt;
+      color: #666;
+      font-style: italic;
+      margin-top: 0.2em;
+    }
+    .quiz {
+      background: #f8f9fa;
+      padding: 1em;
+      border-radius: 4px;
+      margin: 1em 0;
+    }
+    .quiz .question { font-weight: bold; margin-bottom: 0.5em; }
+    .quiz .option { margin-left: 1em; }
+    .quiz .option.correct { font-weight: bold; color: #2f855a; }
+    .speaker-notes {
+      font-size: 10pt;
+      color: #555;
+      margin-top: 0.5em;
+      font-style: italic;
+      border-left: 3px solid #ddd;
+      padding-left: 0.6em;
+    }
+  </style>
+</head>
+<body>
+
+  {# ─────────── COPERTINA ─────────── #}
+  <section class="cover">
+    <h1>{{ course.title | default('Corso Formativo') }}</h1>
+    {% if course.organization %}
+      <p class="meta"><strong>{{ course.organization }}</strong></p>
+    {% endif %}
+    <p class="meta">
+      Durata: {{ course.duration_hours | default('-') }}h
+      &nbsp;|&nbsp; Target: {{ course.target | default('-') }}
+    </p>
+    <p class="meta">Generato il {{ date }}</p>
+    {% if course.regulations %}
+      <p class="regs">
+        Riferimenti normativi:
+        {{ course.regulations | join(', ') }}
+      </p>
+    {% endif %}
+  </section>
+
+  {# ─────────── INDICE (TOC) ─────────── #}
+  <section class="toc">
+    <h1>Indice</h1>
+    <ol>
+      {% for module in modules %}
+        <li>
+          <a href="#modulo-{{ module.index }}">
+            Modulo {{ module.index + 1 }}{% if module.title %} — {{ module.title }}{% endif %}
+          </a>
+        </li>
+      {% endfor %}
+    </ol>
+  </section>
+
+  {# ─────────── MODULI ─────────── #}
+  {% for module in modules %}
+    <h1 id="modulo-{{ module.index }}">Modulo {{ module.index + 1 }}{% if module.title %} — {{ module.title }}{% endif %}</h1>
+    {% for slide in module.slides %}
+      <h2>{{ slide.title }}</h2>
+      {% if slide.body %}
+        <p>{{ slide.body }}</p>
+      {% endif %}
+      {% if slide.normative_ref %}
+        <p class="normative-ref">Rif.: {{ slide.normative_ref }}</p>
+      {% endif %}
+      {% if slide.slide_type_value == 'QUIZ' and slide.quiz_options %}
+        <div class="quiz">
+          <p class="question">{{ slide.body }}</p>
+          {% for option in slide.quiz_options %}
+            {% set letter = 'ABCD'[loop.index0] %}
+            {% if loop.index0 == slide.quiz_correct %}
+              <p class="option correct">{{ letter }}. {{ option }} &#10003;</p>
+            {% else %}
+              <p class="option">{{ letter }}. {{ option }}</p>
+            {% endif %}
+          {% endfor %}
+        </div>
+      {% endif %}
+      {% if slide.speaker_notes %}
+        <p class="speaker-notes">{{ slide.speaker_notes }}</p>
+      {% endif %}
+    {% endfor %}
+  {% endfor %}
+
+</body>
+</html>

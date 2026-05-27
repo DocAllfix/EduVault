@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1760 800">
+  <defs>
+    <marker id="arrow_thick" markerWidth="16" markerHeight="16" refX="13" refY="8" orient="auto" markerUnits="userSpaceOnUse">
+      <path d="M0,0 L14,8 L0,16 z" fill="#C82E6E"/>
+    </marker>
+  </defs>
+  <!-- Causa -->
+  <rect x="60"   y="280" width="440" height="240" rx="20" fill="#FDE7EE" stroke="#C82E6E" stroke-width="4"/>
+  <text x="280"  y="370" font-family="Inter, Segoe UI, sans-serif" font-size="22" fill="#C82E6E" text-anchor="middle" font-weight="bold">CAUSA</text>
+  <text x="280"  y="430" font-family="Inter, Segoe UI, sans-serif" font-size="28" fill="#1F1F1F" text-anchor="middle">{{causa}}</text>
+  <line x1="510" y1="400" x2="610" y2="400" stroke="#C82E6E" stroke-width="12" marker-end="url(#arrow_thick)"/>
+  <!-- Processo -->
+  <rect x="660"  y="280" width="440" height="240" rx="20" fill="#F4F8E8" stroke="#769E2E" stroke-width="4"/>
+  <text x="880"  y="370" font-family="Inter, Segoe UI, sans-serif" font-size="22" fill="#769E2E" text-anchor="middle" font-weight="bold">EVENTO</text>
+  <text x="880"  y="430" font-family="Inter, Segoe UI, sans-serif" font-size="28" fill="#1F1F1F" text-anchor="middle">{{processo}}</text>
+  <line x1="1110" y1="400" x2="1210" y2="400" stroke="#C82E6E" stroke-width="12" marker-end="url(#arrow_thick)"/>
+  <!-- Effetto -->
+  <rect x="1260" y="280" width="440" height="240" rx="20" fill="#C82E6E"/>
+  <text x="1480" y="370" font-family="Inter, Segoe UI, sans-serif" font-size="22" fill="#FFFFFF" text-anchor="middle" font-weight="bold">EFFETTO</text>
+  <text x="1480" y="430" font-family="Inter, Segoe UI, sans-serif" font-size="28" fill="#FFFFFF" text-anchor="middle">{{effetto}}</text>
+</svg>

@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+FIX #30.9g (2026-05-27, analista): redesign della piramide.
+PRIMA: vertice a punta (triangolo acuto) + 3 fasce di altezza diversa +
+       colori invertiti (rosa-verde-rosa) che non comunicano gerarchia.
+       "Datore di lavoro" finiva in un triangolo strettissimo → sborda.
+DOPO:  piramide TRONCATA con 3 trapezi:
+       - Fasce di ALTEZZA UGUALE (220px ciascuna)
+       - Vertice TRONCO (320px wide → 17 char entrano)
+       - Centro 540px wide
+       - Base 740px wide
+       - Colori GRADUATI rosa scuro → rosa medio → verde (gerarchia visiva)
+       - Testo centrato sempre dentro al trapezio per design.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1760 800">
+  <!-- VERTICE — Trapezio 320×220px, rosa scuro CFP (#C82E6E) -->
+  <polygon points="720,80 1040,80 1100,300 660,300" fill="#C82E6E"/>
+  <text x="880" y="200" font-family="Inter, Segoe UI, sans-serif" font-size="28" fill="#FFFFFF" text-anchor="middle" font-weight="bold">{{label_1}}</text>
+
+  <!-- CENTRO — Trapezio 540×220px, rosa medio (#E04C8A) -->
+  <polygon points="660,300 1100,300 1170,520 590,520" fill="#E04C8A"/>
+  <text x="880" y="420" font-family="Inter, Segoe UI, sans-serif" font-size="28" fill="#FFFFFF" text-anchor="middle" font-weight="bold">{{label_2}}</text>
+
+  <!-- BASE — Trapezio 740×220px, verde CFP (#769E2E) -->
+  <polygon points="590,520 1170,520 1240,740 520,740" fill="#769E2E"/>
+  <text x="880" y="640" font-family="Inter, Segoe UI, sans-serif" font-size="28" fill="#FFFFFF" text-anchor="middle" font-weight="bold">{{label_3}}</text>
+</svg>

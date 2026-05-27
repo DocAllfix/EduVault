@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1760 800">
+  <!-- Left column -->
+  <rect x="80"   y="80"  width="760" height="640" rx="20" fill="#FDE7EE" stroke="#C82E6E" stroke-width="4"/>
+  <rect x="80"   y="80"  width="760" height="100" rx="20" fill="#C82E6E"/>
+  <text x="460"  y="148" font-family="Inter, Segoe UI, sans-serif" font-size="34" fill="#FFFFFF" text-anchor="middle" font-weight="bold">{{title_left}}</text>
+  <text x="460"  y="280" font-family="Inter, Segoe UI, sans-serif" font-size="26" fill="#1F1F1F" text-anchor="middle">{{item_left_1}}</text>
+  <text x="460"  y="370" font-family="Inter, Segoe UI, sans-serif" font-size="26" fill="#1F1F1F" text-anchor="middle">{{item_left_2}}</text>
+  <text x="460"  y="460" font-family="Inter, Segoe UI, sans-serif" font-size="26" fill="#1F1F1F" text-anchor="middle">{{item_left_3}}</text>
+  <!-- Right column -->
+  <rect x="920"  y="80"  width="760" height="640" rx="20" fill="#F4F8E8" stroke="#769E2E" stroke-width="4"/>
+  <rect x="920"  y="80"  width="760" height="100" rx="20" fill="#769E2E"/>
+  <text x="1300" y="148" font-family="Inter, Segoe UI, sans-serif" font-size="34" fill="#FFFFFF" text-anchor="middle" font-weight="bold">{{title_right}}</text>
+  <text x="1300" y="280" font-family="Inter, Segoe UI, sans-serif" font-size="26" fill="#1F1F1F" text-anchor="middle">{{item_right_1}}</text>
+  <text x="1300" y="370" font-family="Inter, Segoe UI, sans-serif" font-size="26" fill="#1F1F1F" text-anchor="middle">{{item_right_2}}</text>
+  <text x="1300" y="460" font-family="Inter, Segoe UI, sans-serif" font-size="26" fill="#1F1F1F" text-anchor="middle">{{item_right_3}}</text>
+</svg>

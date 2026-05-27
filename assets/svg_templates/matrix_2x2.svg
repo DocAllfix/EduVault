@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1760 800">
+  <!-- Axes labels -->
+  <text x="880" y="40" font-family="Inter, Segoe UI, sans-serif" font-size="28" fill="#1F1F1F" text-anchor="middle" font-weight="bold">{{axis_x}}</text>
+  <text x="60" y="400" font-family="Inter, Segoe UI, sans-serif" font-size="28" fill="#1F1F1F" text-anchor="middle" font-weight="bold" transform="rotate(-90 60 400)">{{axis_y}}</text>
+  <!-- Top-left -->
+  <rect x="160"  y="80"  width="700" height="320" rx="14" fill="#FDE7EE" stroke="#C82E6E" stroke-width="3"/>
+  <text x="510"  y="240" font-family="Inter, Segoe UI, sans-serif" font-size="32" fill="#1F1F1F" text-anchor="middle" font-weight="bold">{{quadrant_tl}}</text>
+  <!-- Top-right -->
+  <rect x="880"  y="80"  width="700" height="320" rx="14" fill="#C82E6E"/>
+  <text x="1230" y="240" font-family="Inter, Segoe UI, sans-serif" font-size="32" fill="#FFFFFF" text-anchor="middle" font-weight="bold">{{quadrant_tr}}</text>
+  <!-- Bottom-left -->
+  <rect x="160"  y="420" width="700" height="320" rx="14" fill="#F4F8E8" stroke="#769E2E" stroke-width="3"/>
+  <text x="510"  y="580" font-family="Inter, Segoe UI, sans-serif" font-size="32" fill="#1F1F1F" text-anchor="middle" font-weight="bold">{{quadrant_bl}}</text>
+  <!-- Bottom-right -->
+  <rect x="880"  y="420" width="700" height="320" rx="14" fill="#769E2E"/>
+  <text x="1230" y="580" font-family="Inter, Segoe UI, sans-serif" font-size="32" fill="#FFFFFF" text-anchor="middle" font-weight="bold">{{quadrant_br}}</text>
+</svg>
