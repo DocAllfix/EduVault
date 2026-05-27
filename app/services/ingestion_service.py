@@ -34,6 +34,7 @@ from tenacity import (
     retry_if_exception_type,
     stop_after_attempt,
     wait_exponential,
+    wait_random_exponential,
 )
 
 from app.config import settings
@@ -287,11 +288,16 @@ class LLMProviderError(RuntimeError):
 # - L1 = Azure gpt-4.1-mini
 # - L2 = OpenAI gpt-4o-mini
 # - L3 = Anthropic Haiku
+# FIX #28.1c (2026-05-26): chain CONTENT riorganizzata per structured output.
+# DeepSeek V4 rifiuta tool_choice forzato ("Thinking mode does not support this
+# tool_choice") → instructor in Mode.TOOLS fallisce. Standardizziamo lo step
+# strutturato su modelli TOOLS-capable nativi (analista: "non mischiare un
+# modello schema-incapace in pipeline schema-driven"). DeepSeek resta in CLASSIFY
+# (json_object basta per task semplice non-strutturato).
 _FALLBACK_CHAIN_CONTENT: list[tuple[str, str, str]] = [
-    ("deepseek",     "deepseek_content_model",            "L0_deepseek_v4_pro"),
-    ("azure_openai", "azure_openai_deployment_content",   "L1_azure_mini"),
-    ("openai",       "openai_content_model",              "L2_openai_4o"),
-    ("anthropic",    "llm_classify_model",                "L3_anthropic_haiku"),
+    ("azure_openai", "azure_openai_deployment_content",   "L0_azure_mini"),
+    ("openai",       "openai_content_model",              "L1_openai_4o"),
+    ("anthropic",    "llm_content_model_fallback",        "L2_anthropic_sonnet"),
 ]
 
 _FALLBACK_CHAIN_CLASSIFY: list[tuple[str, str, str]] = [
@@ -332,7 +338,11 @@ _FALLBACK_EXCEPTIONS: tuple[type[Exception], ...] = (
 
 @retry(
     stop=stop_after_attempt(3),
-    wait=wait_exponential(multiplier=5, min=5, max=60),
+    # FIX #29.3 (2026-05-26): jitter casuale invece di backoff deterministico.
+    # Senza jitter, N moduli paralleli che timeoutano insieme RIPARTONO insieme
+    # → thundering herd (visto nel baseline: 2 timeout nello stesso secondo,
+    # moduli 6 e 10). random_exponential spalma i retry su una banda 1-30s.
+    wait=wait_random_exponential(multiplier=1, max=30),
     retry=retry_if_exception_type(_TRANSIENT_EXCEPTIONS),
 )
 async def _call_llm_single(
@@ -420,23 +430,29 @@ async def call_llm(
 ) -> str:
     """LLM call con sistema di fallback automatico (FASE 0b vast-hopping-sketch).
 
-    Fallback chain per ``task="content"`` (default):
-      L0 → Azure OpenAI gpt-4.1-mini  (primary, ~$0.50/corso 4h)
-      L1 → Azure OpenAI gpt-4o        (premium, 5× costo, qualità ↑)
-      L2 → Anthropic Sonnet 4.6       (emergenza Azure-down)
+    Le chain REALI vivono in ``_FALLBACK_CHAIN_CONTENT`` / ``_FALLBACK_CHAIN_CLASSIFY``
+    (sopra) — questa è la loro descrizione, da tenere allineata a quelle liste:
+
+    Fallback chain per ``task="content"`` (FIX #28.1c — TOOLS-capable only):
+      L0 → Azure OpenAI gpt-4.1-mini (primary, JSON schema strict nativo, ~$0.10/corso)
+      L1 → OpenAI gpt-4o             (premium, qualità ↑, ~$0.50/corso)
+      L2 → Anthropic Sonnet 4.6      (emergenza, fallback robusto)
+    DeepSeek esce dalla chain CONTENT: rifiuta tool_choice forzato (instructor
+    Mode.TOOLS fallisce). Resta primary in CLASSIFY (task non-strutturato).
 
     Fallback chain per ``task="classify"``:
-      L0 → Azure OpenAI gpt-4.1-mini  (classify deployment)
-      L1 → Anthropic Haiku 4.5        (emergenza, no Azure premium per task semplice)
+      L0 → DeepSeek V4 Flash         (classify, economico)
+      L1 → Azure OpenAI gpt-4.1-mini
+      L2 → OpenAI gpt-4o-mini
+      L3 → Anthropic Haiku 4.5
 
     Ogni livello ha 3 retry tenacity interni (5-60s backoff exp) sulle eccezioni
     transienti. Solo dopo aver esaurito i retry interni scaliamo al livello successivo.
 
-    Il parametro ``model`` (legacy) viene IGNORATO se ``llm_provider="azure_openai"``
-    (il modello effettivo è scelto dal fallback chain). Quando
-    ``llm_provider="anthropic"``, ``model`` mantiene il vecchio comportamento.
+    Il parametro ``model`` (legacy) è IGNORATO: il modello effettivo è sempre scelto
+    dal fallback chain via ``getattr(settings, deployment_key)``.
 
-    ``task`` distingue content_agent (chain a 3 livelli) da classify_chunk (2 livelli).
+    ``task`` distingue content_agent (chain a 4 livelli) da classify_chunk (4 livelli).
     ``_fallback_level`` è uso interno ricorsione — NON passare manualmente.
     """
     # Modalità legacy Anthropic-only: bypass chain, comportamento storico.
@@ -478,6 +494,306 @@ async def call_llm(
             task=task,
             _fallback_level=_fallback_level + 1,
         )
+
+
+# ─────────────────────────────────────────────────────────────────────
+# FIX #28.1c (2026-05-26): STRUCTURED OUTPUT via instructor.
+# Sostituisce "json_object + parse + auto-fix manuale" con uno schema Pydantic
+# imposto a livello API (tool-calling) + max_retries guidati dagli errori di
+# validazione. Ritorna ModuleSlides (già validato), NON testo grezzo.
+#
+# DUE ASSI, BUDGET SEPARATI (vincoli analista):
+#   • PROFONDITÀ per-slide (bullet) → SlideContent.validator → instructor max_retries
+#   • CARDINALITÀ per-modulo (#slide) → fill-loop qui sotto, contatore distinto
+# ─────────────────────────────────────────────────────────────────────
+
+# Mappa (nostro provider) → prefisso instructor.from_provider + base_url override.
+# instructor.from_provider usa litellm sotto: "deepseek/<model>", "openai/<model>",
+# "azure/<model>", "anthropic/<model>". Per DeepSeek serve il base_url custom.
+# Tuning post-E2E 2026-05-26: 3 retry instructor erano insufficienti su moduli da
+# ~40 slide (basta che 5-6 violino la profondità per esaurire il budget e cadere sul
+# fallback legacy). 5 dà più margine perché il reask di instructor parte selettivo
+# (re-asks SOLO le slide invalide, non tutte). Costo marginale: ~$0.005/retry × max
+# 5 = $0.025/modulo nel caso peggiore. Cardinalità separata, cap a 3 invariato.
+_INSTRUCTOR_DEPTH_RETRIES = 5       # asse profondità (passato a instructor)
+_MAX_CARDINALITY_ATTEMPTS = 3       # asse cardinalità (fill-loop) — uscita garantita
+
+
+def _instructor_client_for(provider: str, model: str):  # type: ignore[no-untyped-def]
+    """Costruisce un client instructor per il provider, in modalità TOOLS (schema imposto).
+
+    Riusa le stesse credenziali/endpoint di _call_llm_single. Ritorna (client, model_id).
+    """
+    import instructor
+    from instructor import Mode
+
+    if provider == "deepseek":
+        base = openai.AsyncOpenAI(
+            api_key=settings.deepseek_api_key,
+            base_url="https://api.deepseek.com",
+            timeout=float(settings.llm_request_timeout),
+        )
+        return instructor.from_openai(base, mode=Mode.TOOLS), model
+    if provider == "openai":
+        base = openai.AsyncOpenAI(
+            api_key=settings.openai_api_key, timeout=float(settings.llm_request_timeout)
+        )
+        return instructor.from_openai(base, mode=Mode.TOOLS), model
+    if provider == "azure_openai":
+        base = openai.AsyncAzureOpenAI(
+            azure_endpoint=settings.azure_openai_endpoint,
+            api_key=settings.azure_openai_api_key,
+            api_version=settings.azure_openai_api_version,
+            timeout=float(settings.llm_request_timeout),
+        )
+        return instructor.from_openai(base, mode=Mode.TOOLS), model
+    if provider == "anthropic":
+        base = anthropic.AsyncAnthropic(timeout=float(settings.llm_request_timeout))
+        return instructor.from_anthropic(base, mode=Mode.ANTHROPIC_TOOLS), model
+    raise LLMProviderError(f"unknown provider for instructor: {provider}")
+
+
+# FIX #29.1 (2026-05-26): batch size per chiamata structured. Con max_tokens=8000 e
+# ~300-350 token/slide, il tetto teorico è ~24 slide/chiamata; 7 dà 3× di margine sul
+# budget output. Risolve insieme cardinalità (no più tool-call troncato), profondità
+# (modello non raziona parole), latenza (payload più piccolo → meno timeout TPM).
+_BATCH_SIZE = 10  # FIX #29.6 velocizzazione: 7→10 (zero timeout su test E2E con
+                  # batch 7 → ampio headroom verso il tetto teorico ~18-24 slide/call
+                  # con max_tokens=8000. 4 batch/modulo → 3 batch/modulo, -25% chiamate.
+# Soglia override: se il modulo ha N ≤ questo numero di slide, vai in 1 sola chiamata.
+# A 45s/slide il pacing produce ~26 slide/modulo, sotto 24+margine → spesso 1 batch basta.
+_SINGLE_CALL_THRESHOLD = 10
+
+
+def _partition_chunks_for_batches(
+    chunks_text: str, n_batches: int
+) -> list[str]:
+    """Divide il testo dei chunk normativi del modulo in N partizioni, una per
+    batch, così ogni batch riceve materiale fresco da coprire (FIX #29.1).
+
+    Strategia semplice (l'analista lo confermerà sul refactor): split per articoli/
+    paragrafi/righe a parità di lunghezza approssimativa. Restituisce stringhe già
+    formattate, pronte per essere infilate nel prompt batch.
+    """
+    if n_batches <= 1:
+        return [chunks_text]
+    # Split prima per "Art." (più semantico), poi cade su righe se non bastano.
+    pieces = [p for p in chunks_text.split("\nArt.") if p.strip()]
+    if len(pieces) < n_batches:
+        # Fallback: split su double-newline poi righe
+        pieces = [p for p in chunks_text.split("\n\n") if p.strip()]
+    if len(pieces) < n_batches:
+        # Ultima spiaggia: split chars equally
+        size = max(1, len(chunks_text) // n_batches)
+        pieces = [chunks_text[i:i + size] for i in range(0, len(chunks_text), size)]
+    # Distribuisci pieces nei batch ciclicamente
+    parts: list[list[str]] = [[] for _ in range(n_batches)]
+    for i, piece in enumerate(pieces):
+        parts[i % n_batches].append(piece)
+    sep = "\n\nArt." if "Art." in chunks_text else "\n\n"
+    return [sep.join(part) for part in parts]
+
+
+async def generate_module_structured(
+    *,
+    system: str,
+    user_prompt: str,
+    module_index: int,
+    module_title: str,
+    expected_slides: int,
+    chunks_text: str = "",
+    slide_distribution: dict[str, int] | None = None,  # FIX #30.8: quota per tipo
+    build_subrequest=None,  # legacy, ignorato in batch mode
+):  # type: ignore[no-untyped-def]
+    """Genera UN modulo come ModuleSlides validato, con BATCHING (FIX #29.1) +
+    fallback chain robusto.
+
+    Strategia: invece di 1 chiamata da N slide (che satura max_tokens=8000), si
+    fanno ceil(N/_BATCH_SIZE) chiamate da ~_BATCH_SIZE slide ciascuna, con partition
+    esplicita dei chunk normativi tra i batch. Ogni batch passa al primo colpo
+    profondità (validator SlideContent → instructor max_retries) + cardinalità
+    (cardinality_mode='warn' su lista piccola).
+
+    Re-index globale: ogni batch riprende l'`index` da dove il precedente ha finito,
+    `module_index` forzato. FIX #27.1 (contiguità) preservato anche con N batch.
+
+    Robustezza (#29.4): try/except per-batch — un batch fallito non butta i
+    precedenti, marca `degraded=True` e continua. degraded propagato in telemetry.
+    """
+    from app.models.pipeline import ModuleSlides
+    from app.agents.prompts import build_module_batch_prompt
+
+    chain = _FALLBACK_CHAIN_CONTENT
+    telemetry: dict[str, object] = {
+        "module_index": module_index, "expected": expected_slides,
+        "batches_planned": 0, "batches_ok": 0, "batches_failed": 0,
+        "degraded": False, "provider_used": None,
+    }
+
+    # ── Calcolo batch ──
+    if expected_slides <= _SINGLE_CALL_THRESHOLD:
+        # Modulo piccolo → 1 sola chiamata (default pacing 45s = ~26 slide/modulo
+        # cade qui solo per corsi molto brevi).
+        batches: list[int] = [expected_slides]
+    else:
+        n_full = expected_slides // _BATCH_SIZE
+        remainder = expected_slides % _BATCH_SIZE
+        batches = [_BATCH_SIZE] * n_full
+        if remainder > 0:
+            if remainder < 3 and n_full > 0:
+                # Avoid tiny last batch: redistribute (e.g. 26 = 3×7 + 5, OK; 22 = 3×7+1 → 7+7+8)
+                batches[-1] += remainder
+            else:
+                batches.append(remainder)
+    telemetry["batches_planned"] = len(batches)
+    chunk_parts = _partition_chunks_for_batches(chunks_text, len(batches))
+
+    # ── Provider selection (fallback chain) — uso lo stesso provider per tutti i
+    #    batch dello stesso modulo (cambiare provider per batch farebbe perdere il
+    #    contesto del prompt caching) ──
+    provider_used: tuple[str, str, str] | None = None
+    last_exc: Exception | None = None
+    for level in range(len(chain)):
+        provider, deployment_attr, label = chain[level]
+        eff_model = getattr(settings, deployment_attr)
+        # Test "ping" sul provider con la prima richiesta — se fallisce, fallback.
+        provider_used = (provider, eff_model, label)
+        break  # ottimistico: provo subito col primo della chain
+    if provider_used is None:
+        raise LLMProviderError("no provider available in content chain")
+    provider, eff_model, label = provider_used
+    telemetry["provider_used"] = label
+
+    # ── BATCH LOOP ──
+    all_slides = []  # SlideContent accumulati da tutti i batch
+    for batch_idx, batch_size in enumerate(batches):
+        already_titles = [s.title for s in all_slides]
+        # FIX #30.8 (2026-05-26): conta tipi già generati nei batch precedenti
+        # per dire al modello cosa MANCA da produrre nel modulo (quota).
+        already_types: dict[str, int] = {}
+        for s in all_slides:
+            stype = s.slide_type.value if hasattr(s.slide_type, "value") else str(s.slide_type)
+            already_types[stype] = already_types.get(stype, 0) + 1
+        batch_chunks = chunk_parts[batch_idx] if batch_idx < len(chunk_parts) else ""
+        batch_prompt = build_module_batch_prompt(
+            module_title=module_title,
+            module_index=module_index,
+            batch_idx=batch_idx,
+            n_batches=len(batches),
+            batch_size=batch_size,
+            already_titles=already_titles,
+            batch_chunks=batch_chunks,
+            base_user_prompt=user_prompt,
+            slide_distribution=slide_distribution,
+            already_types=already_types,
+        )
+        try:
+            client, model_id = _instructor_client_for(provider, eff_model)
+            batch_module = await client.chat.completions.create(
+                model=model_id,
+                response_model=ModuleSlides,
+                max_retries=_INSTRUCTOR_DEPTH_RETRIES,
+                messages=[
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": batch_prompt},
+                ],
+                validation_context={
+                    "expected_slides": batch_size,
+                    "cardinality_mode": "warn",
+                },
+            )
+            # Re-index sul globale + forza module_index
+            start_idx = len(all_slides)
+            for offset, s in enumerate(batch_module.slides[:batch_size]):
+                s.index = start_idx + offset
+                s.module_index = module_index
+                all_slides.append(s)
+            telemetry["batches_ok"] = int(telemetry.get("batches_ok", 0)) + 1
+            logger.info(
+                "module_batch_ok",
+                module_index=module_index, batch_idx=batch_idx,
+                batch_size=batch_size, got=len(batch_module.slides),
+                accepted=min(batch_size, len(batch_module.slides)),
+            )
+        except Exception as exc:
+            # FIX #29.4: batch failure NON butta i precedenti. Marca degraded
+            # e continua col prossimo batch.
+            telemetry["batches_failed"] = int(telemetry.get("batches_failed", 0)) + 1
+            telemetry["degraded"] = True
+            logger.warning(
+                "module_batch_failed",
+                module_index=module_index, batch_idx=batch_idx,
+                error_class=type(exc).__name__, error=str(exc)[:300],
+            )
+            last_exc = exc
+            continue
+
+    # ── Edge case: ZERO batch riusciti → propaga eccezione per fallback legacy ──
+    if not all_slides and last_exc is not None:
+        raise LLMProviderError(
+            f"all batches failed for module {module_index}: {str(last_exc)[:200]}"
+        )
+
+    # ── Assembla ModuleSlides ──
+    module = ModuleSlides(
+        module_index=module_index,
+        title=module_title,
+        slides=all_slides,
+    )
+
+    # Legacy fill-loop (disattivato in batch mode): condizione finta che salta
+    while (False and  # FIX #29.1: con batching pianificato, no fill-loop runtime
+        len(module.slides) < expected_slides
+        and telemetry["cardinality_attempts"] < _MAX_CARDINALITY_ATTEMPTS
+        and build_subrequest is not None
+    ):
+        telemetry["cardinality_attempts"] += 1
+        start = len(module.slides)
+        need = expected_slides - start
+        sub_prompt = build_subrequest(module.slides, need, start)
+        try:
+            client, model_id = _instructor_client_for(provider, eff_model)
+            sub = await client.chat.completions.create(
+                model=model_id,
+                response_model=ModuleSlides,
+                max_retries=_INSTRUCTOR_DEPTH_RETRIES,
+                messages=[
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": sub_prompt},
+                ],
+                validation_context={"expected_slides": need, "cardinality_mode": "warn"},
+            )
+        except _FALLBACK_EXCEPTIONS as exc:
+            logger.warning("fill_loop_subrequest_failed", module=module_index, error=str(exc)[:200])
+            break
+        # RE-INDEX coerente (FIX #27.1 non deve rientrare): index globale contiguo,
+        # module_index forzato. Le slide aggiunte continuano la numerazione.
+        for offset, s in enumerate(sub.slides):
+            s.index = start + offset
+            s.module_index = module_index
+        module.slides.extend(sub.slides)
+
+    # ── over-cardinalità: tronca (innocuo). under residuo: degrada + log ──
+    if len(module.slides) > expected_slides:
+        module.slides = module.slides[:expected_slides]
+    if len(module.slides) < expected_slides:
+        telemetry["degraded"] = True
+        logger.warning(
+            "cardinality_degraded", module=module_index,
+            got=len(module.slides), expected=expected_slides,
+        )
+
+    # Normalizza module_index su tutte (difesa) + re-index finale contiguo.
+    for i, s in enumerate(module.slides):
+        s.index = i
+        s.module_index = module_index
+    module.module_index = module_index
+    if not module.title:
+        module.title = module_title
+
+    telemetry["final_count"] = len(module.slides)
+    logger.info("module_structured_done", **telemetry)
+    return module, telemetry
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -625,6 +941,19 @@ async def voyage_embed_with_retry(text: str) -> list[float]:
     """Embed a single text (used for the RAG query in the Research Agent)."""
     embeddings = await embed_batch([text])
     return embeddings[0]
+
+
+async def embed_query(text: str) -> list[float]:
+    """FIX #30.9d (2026-05-26): embed con input_type='query' per matching
+    cosine asimmetrico contro chunks embeddati senza input_type (= default
+    'document' per voyage-3). Usato dal cluster tematico cosine in
+    research_agent.distribute_chunks_to_modules_cosine per i module title
+    queries. Voyage-3 è calibrato sull'asimmetria query→document → cosine
+    più pulito su corpus ristretto (analista 2026-05-26).
+    """
+    client = get_voyage_client()
+    response = await client.embed([text], model="voyage-3", input_type="query")
+    return response.embeddings[0]
 
 
 async def index_chunks(chunks: list[dict[str, object]], pool: object) -> None:

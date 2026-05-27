@@ -39,7 +39,18 @@ def _extract_style_pattern(slides: list[SlideContent]) -> StylePattern:
             preferred_image_ratio=0.0,
         )
 
-    total_words = sum(len(s.body.split()) for s in slides)
+    # FIX #28.1: body:str → bullets:list[str]/sezioni:list[str].
+    # Approx body word count from bullets/sezioni stitched, fallback 0 for
+    # placeholder-only slides (TITLE/CLOSING).
+    total_words = sum(
+        len(
+            (
+                " ".join(getattr(s, "sezioni", []) or [])
+                or " ".join(getattr(s, "bullets", []) or [])
+            ).split()
+        )
+        for s in slides
+    )
     avg_words = total_words // len(slides)
 
     type_counter = Counter(s.slide_type.value for s in slides)

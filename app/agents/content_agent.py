@@ -114,10 +114,18 @@ def _auto_complete_invalid_slide(
             fixed["speaker_notes"] = notes
             applied = True
 
-    # 7. body vuoto per TITLE/CLOSING/QUIZ deve essere "" (non None)
-    if fixed.get("slide_type") in ("TITLE", "CLOSING", "QUIZ") and fixed.get("body") is None:
-        fixed["body"] = ""
-        applied = True
+    # 7. FIX #28.1 schema bullets:list[str]: per TITLE/CLOSING/QUIZ → liste vuote.
+    # Rimuove eventuale `body` legacy che instructor non riconosce nel nuovo schema.
+    if fixed.get("slide_type") in ("TITLE", "CLOSING", "QUIZ"):
+        if "body" in fixed:
+            fixed.pop("body", None)
+            applied = True
+        if not isinstance(fixed.get("bullets"), list):
+            fixed["bullets"] = []
+            applied = True
+        if not isinstance(fixed.get("sezioni"), list):
+            fixed["sezioni"] = []
+            applied = True
 
     return fixed if applied else None
 
@@ -135,9 +143,149 @@ from app.models.pipeline import (
     SlideContent,
 )
 from app.models.requests import CourseRequest
-from app.services.ingestion_service import call_llm
+from app.services.ingestion_service import call_llm, generate_module_structured
 
 logger = structlog.get_logger()
+
+
+async def _compose_normative_refs_from_db(
+    slides: list[SlideContent], pool: object
+) -> None:
+    """FIX #30.5b (2026-05-26): ricostruisce normative_ref deterministicamente
+    dal DB usando source_chunk_ids della slide.
+
+    Analista 2026-05-26: "la fonte è un fatto del tuo DB, non un'opinione del
+    modello. La citazione è un lookup, non una generazione". Elimina le
+    allucinazioni tipo "Pag. 31-136" (schema RAG non ha page_number) e i
+    format incoerenti tipo "Allegato IV" singolo.
+
+    Per ogni slide con source_chunk_ids valorizzati, fetcha i citation_label
+    dal DB (campo denormalizzato popolato da scripts/backfill_citations.py +
+    a ingest-time per i futuri PDF). Aggrega multi-chunk: stessa regulation
+    → "art. X e art. Y"; reg diverse → ";". Se source_chunk_ids vuoto →
+    lascia normative_ref vuoto (NON inventato dall'LLM).
+    """
+    import asyncpg
+
+    if pool is None:
+        return  # smoke test mode
+
+    # Raccogli TUTTI gli ID unici per una sola query
+    all_ids: set[str] = set()
+    for s in slides:
+        if s.source_chunk_ids:
+            all_ids.update(s.source_chunk_ids)
+
+    if not all_ids:
+        # Nessuna slide ha source_chunk_ids → niente da arricchire
+        return
+
+    # Carica citation_label per ogni chunk ID (uuid)
+    try:
+        rows = await pool.fetch(
+            "SELECT id::text AS id, citation_label "
+            "FROM regulation_chunks WHERE id = ANY($1::uuid[])",
+            list(all_ids),
+        )
+    except Exception as exc:
+        logger.warning("citation_lookup_failed", error=str(exc))
+        return
+
+    id_to_label: dict[str, str] = {
+        r["id"]: r["citation_label"] for r in rows if r["citation_label"]
+    }
+
+    # Per ogni slide: ricostruisci normative_ref aggregando i citation_label
+    for s in slides:
+        if not s.source_chunk_ids:
+            continue
+        labels = [id_to_label.get(cid) for cid in s.source_chunk_ids]
+        labels = [l for l in labels if l]  # remove None / empty
+        if not labels:
+            continue
+        # Dedup mantenendo ordine
+        seen: set[str] = set()
+        unique = []
+        for l in labels:
+            if l not in seen:
+                seen.add(l)
+                unique.append(l)
+        # Aggrega: separatore "; " per ogni citazione distinta
+        # (raffinamenti multi-art same-regulation in futuro se serve)
+        new_ref = "; ".join(unique[:3])  # max 3 ref per non sovraccaricare il box
+        s.normative_ref = new_ref[:200]
+
+
+def _build_module_bookends(
+    module_index: int,
+    module_title: str,
+    content_slides: list[SlideContent],
+) -> tuple[SlideContent, SlideContent]:
+    """Genera la coppia MODULE_OPEN + MODULE_CLOSE per un modulo.
+
+    FIX #30.2 (2026-05-26): bookends programmatici (zero LLM call). MODULE_OPEN
+    è puro slot di apertura con "MODULO N" + titolo modulo. MODULE_CLOSE
+    riassume con 5 top bullet derivati dai title delle slide di contenuto
+    (i 5 titoli più "centrali", non i bridge come QUIZ/RECAP).
+
+    Note speaker brevi pre-composte per entrambi (non dipendono da LLM, audio
+    TTS pulito it-IT-DiegoNeural).
+    """
+    from app.models.core import SlideType
+
+    n_module = module_index + 1
+    # MODULE_OPEN
+    open_title = f"MODULO {n_module}"
+    # Convention: il "titolo modulo" reale lo passiamo come bullets[0] perché
+    # nx_module_title nel template legge dalla shape body (placeholder idx=1).
+    # Lo slide_builder_v2 branch MODULE_OPEN sa estrarlo da bullets[0].
+    open_slide = SlideContent(
+        index=0,
+        module_index=module_index,
+        slide_type=SlideType.MODULE_OPEN,
+        title=open_title,
+        bullets=[module_title],  # ← nx_module_title text
+        speaker_notes=(
+            f"Iniziamo il modulo {n_module}: {module_title}. In questa sezione "
+            f"approfondiremo gli aspetti normativi e pratici del tema, con esempi "
+            f"operativi e riferimenti puntuali al D.Lgs. 81/08."
+        ),
+    )
+
+    # MODULE_CLOSE — 5 bullet derivati dai title delle slide CONTENT_TEXT/IMAGE
+    eligible_titles = [
+        s.title for s in content_slides
+        if s.slide_type.value in ("CONTENT_TEXT", "CONTENT_IMAGE") and s.title
+    ]
+    # Scegli i 5 più rappresentativi (per ora: primi 5 distinti, in futuro
+    # si può raffinare con TF-IDF o re-ranking LLM)
+    seen: set[str] = set()
+    top5: list[str] = []
+    for t in eligible_titles:
+        key = t.strip().lower()[:50]
+        if key not in seen:
+            seen.add(key)
+            top5.append(t.strip())
+        if len(top5) == 5:
+            break
+    while len(top5) < 5:
+        # Padding con placeholder semantici se modulo magro
+        top5.append(f"Approfondimento {len(top5) + 1} del modulo")
+
+    close_slide = SlideContent(
+        index=len(content_slides) + 1,
+        module_index=module_index,
+        slide_type=SlideType.MODULE_CLOSE,
+        title=module_title,
+        bullets=top5,
+        speaker_notes=(
+            f"Riepilogo del modulo {n_module}. Abbiamo trattato i punti chiave "
+            f"qui sintetizzati. Nel modulo successivo continueremo il percorso "
+            f"formativo con altri temi normativi e applicazioni pratiche."
+        ),
+    )
+
+    return open_slide, close_slide
 
 
 def parse_slides_json(raw: str) -> list[dict[str, object]] | None:
@@ -214,36 +362,44 @@ async def content_agent(state: NexusPipelineState) -> dict[str, object]:
     MIN_ACCEPTABLE_SLIDES_PER_MODULE = 20
 
     async def _generate_one_module(module: object) -> dict[str, object] | None:
-        """Generate slides for one module — retry full-module if too few slides."""
-        # Tentativo 1 + retry full-module se < threshold
+        """Generate slides for one module — retry full-module if too few slides.
+
+        FIX #28.3 tuning (2026-05-26): quando instructor (path PRIMARY in
+        _generate_module_once) è attivo, il fill-loop interno gestisce GIÀ la
+        cardinalità con cap MAX_CARDINALITY_ATTEMPTS — mescolarci una rete
+        esterna `MIN_ACCEPTABLE_SLIDES_PER_MODULE` significherebbe mescolare i
+        budget (analista §4: "contatori separati"). Quindi il retry esterno è
+        attivo SOLO se instructor è caduto (path legacy attivo, result is None).
+        Un risultato con cardinalità sotto soglia ma valido viene accettato:
+        instructor ha già fatto del suo meglio col fill-loop, accumulare retry
+        esterni esplode i costi senza vantaggio.
+        """
         for attempt in range(2):
             result = await _generate_module_once(module, attempt=attempt)
             if result is None:
-                # JSON parse failed o LLM esploso → retry può aiutare
+                # PIPELINE caduta (sia instructor sia legacy esplosi): retry può aiutare.
                 if attempt == 0:
                     logger.warning(
                         "module_retry_full",
                         module_index=module.module_index,  # type: ignore[attr-defined]
-                        reason="json_failed",
+                        reason="pipeline_failed",
                     )
                     continue
                 return None
             slide_count = len(result.get("slides", []))
-            if slide_count >= MIN_ACCEPTABLE_SLIDES_PER_MODULE:
-                return result
-            # Troppo poche slide → retry full-module (LLM riprova da zero, può
-            # generare distribuzione diversa)
-            if attempt == 0:
+            # Accetta il risultato: instructor (o legacy) ha già fatto il suo
+            # massimo. Sotto-cardinalità è loggata via degraded=True dentro
+            # generate_module_structured, non rigeneriamo da zero.
+            if slide_count < MIN_ACCEPTABLE_SLIDES_PER_MODULE:
                 logger.warning(
-                    "module_retry_full",
+                    "module_below_threshold_accepted",
                     module_index=module.module_index,  # type: ignore[attr-defined]
-                    reason="too_few_slides",
                     slide_count=slide_count,
                     threshold=MIN_ACCEPTABLE_SLIDES_PER_MODULE,
                 )
-                continue
-            # Dopo retry: ritorna comunque (anche se sotto soglia) per non perdere
-            # quel contenuto. Il logger.warning sopra lo flagga per analysis.
+            return result
+            # Codice morto seguente (mai eseguito, lasciato per riferimento storico
+            # FIX #7 quando instructor non esisteva ancora):
             logger.warning(
                 "module_below_threshold_after_retry",
                 module_index=module.module_index,  # type: ignore[attr-defined]
@@ -253,7 +409,13 @@ async def content_agent(state: NexusPipelineState) -> dict[str, object]:
         return None
 
     async def _generate_module_once(module: object, attempt: int = 0) -> dict[str, object] | None:
-        """Generate slides for a single module. Returns module dict or None on failure."""
+        """Generate slides for a single module. Returns module dict or None on failure.
+
+        FIX #28.1e (2026-05-26): structured output via instructor è il path PRIMARY.
+        Garantisce profondità per-slide (max_retries) + cardinalità per-modulo (fill-loop)
+        con budget separati. Il legacy auto-fix sotto è floor di ultima istanza per
+        compatibilità (se instructor crasha o un provider è giù, ripieghiamo).
+        """
         module_chunks = context.chunks_by_module.get(module.module_index, [])  # type: ignore[attr-defined]
         user_prompt = build_module_prompt(
             module=module,
@@ -262,6 +424,72 @@ async def content_agent(state: NexusPipelineState) -> dict[str, object]:
             previous_summary=previous_summary,
             target=request.target,
         )
+        expected = int(getattr(module, "slide_count", 0) or 0)
+
+        # ── PRIMARY: instructor (structured output, schema imposto, batch) ──
+        if expected > 0:
+            # FIX #29.1: passa il testo dei chunk normativi del modulo. Il
+            # generate_module_structured li partizionerà tra i batch così ogni
+            # call ha materiale fresco e non under-generates per padding.
+            # FIX #30.7b (2026-05-26): espone chunk_id UUID intero (non
+            # regulation_id prefix come prima) così l'LLM lo copia
+            # corretto in source_chunk_ids della slide → enrich
+            # normative_ref dal DB funziona (citation_label puntuale per
+            # articolo, non solo per regulation generico).
+            chunks_text = "\n\n".join(
+                f"[ID: {c.chunk_id}] Art. {c.article or '?'}: {c.body}"
+                for c in module_chunks[:30]
+            )
+            try:
+                module_obj, telemetry = await generate_module_structured(
+                    system=system_prompt,
+                    user_prompt=user_prompt,
+                    module_index=module.module_index,  # type: ignore[attr-defined]
+                    module_title=module.title,  # type: ignore[attr-defined]
+                    expected_slides=expected,
+                    chunks_text=chunks_text,
+                    slide_distribution=module.slide_distribution,  # FIX #30.8 quota
+                )
+                logger.info(
+                    "module_instructor_ok",
+                    module_index=module.module_index,  # type: ignore[attr-defined]
+                    final=telemetry.get("final_count"),
+                    expected=telemetry.get("expected"),
+                    degraded=telemetry.get("degraded"),
+                    provider=telemetry.get("provider_used"),
+                )
+                # FIX #30.2 (2026-05-26): bookends MODULE_OPEN + MODULE_CLOSE
+                # come slot fissi (NON via LLM separato). MODULE_OPEN apre con
+                # "MODULO N" + titolo modulo; MODULE_CLOSE chiude con 5 top
+                # bullet derivati dai title delle slide di contenuto.
+                content_slides = list(module_obj.slides)
+                mod_idx = module.module_index  # type: ignore[attr-defined]
+                mod_title = module.title  # type: ignore[attr-defined]
+                bookend_slides = _build_module_bookends(
+                    module_index=mod_idx,
+                    module_title=mod_title,
+                    content_slides=content_slides,
+                )
+                # Open + content + close, indici riassegnati contigui per modulo
+                all_slides = [bookend_slides[0]] + content_slides + [bookend_slides[1]]
+                for i, s in enumerate(all_slides):
+                    s.index = i
+                    s.module_index = mod_idx
+                return ModuleContent(
+                    module_index=mod_idx,
+                    title=mod_title,
+                    slides=all_slides,
+                ).model_dump()
+            except Exception as exc:
+                logger.warning(
+                    "module_instructor_failed_fallback_legacy",
+                    module_index=module.module_index,  # type: ignore[attr-defined]
+                    error_class=type(exc).__name__,
+                    error=str(exc)[:200],
+                )
+                # Fall-through al path legacy sotto.
+
+        # ── LEGACY FLOOR: parse+auto-fix manuale (solo se instructor è giù) ──
         try:
             raw_response = await call_llm(
                 messages=[{"role": "user", "content": user_prompt}],

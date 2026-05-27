@@ -55,6 +55,21 @@ def _group_slides_by_module(slides: list[SlideContent]) -> list[dict[str, Any]]:
     return modules
 
 
+def _slide_body_text(s: SlideContent) -> str:
+    """Flatten bullets/sezioni (FIX #28.1 schema) into a printable body
+    string for the dispensa PDF template, which renders one paragraph.
+
+    Priority: ``sezioni`` (CASE_STUDY, 3 sections joined by blank line) →
+    ``bullets`` (CONTENT_TEXT/IMAGE/RECAP, joined with "• " prefix). Empty
+    when neither is populated (TITLE/CLOSING/DIAGRAM caption-only).
+    """
+    if getattr(s, "sezioni", None):
+        return "\n\n".join(s.sezioni)
+    if getattr(s, "bullets", None):
+        return "\n".join(f"• {b}" for b in s.bullets)
+    return ""
+
+
 def _slide_to_dict(s: SlideContent) -> dict[str, Any]:
     """Pydantic → plain dict shaped for the Jinja2 template.
 
@@ -67,7 +82,7 @@ def _slide_to_dict(s: SlideContent) -> dict[str, Any]:
         "module_index": s.module_index,
         "slide_type_value": s.slide_type.value,
         "title": s.title,
-        "body": s.body,
+        "body": _slide_body_text(s),
         "normative_ref": s.normative_ref,
         "speaker_notes": s.speaker_notes,
         "quiz_options": s.quiz_options,

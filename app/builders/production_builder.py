@@ -49,10 +49,14 @@ MIN_DISK_FREE_GB = 1.0
 # BP line 2277 — files older than 1 hour are tmp leftovers
 CLEANUP_AGE_SECONDS = 3600
 # BP line 2278 — patterns covered by _cleanup_tmp
+# FIX #30.0-novies (2026-05-26): rimosso "output/images/*.png" dalla blacklist.
+# Le foto Pexels sono cached via image_cache (DB local_path) e ri-referenziate
+# da rebuild successivi. Cancellarle dopo 1h faceva fallire _maybe_insert_image
+# sui file UUID-cached condivisi (16 fallback su 35 nel test). I diagrammi
+# restano nel cleanup perché generati ex-novo per ogni run (no cache).
 CLEANUP_PATTERNS = [
     "output/tmp_*",
     "output/diagrams/*.png",
-    "output/images/*.png",
 ]
 
 DEFAULT_OUTPUT_DIR = Path("output")

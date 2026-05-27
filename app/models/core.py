@@ -30,11 +30,17 @@ class SlideDensity(str, Enum):
 
 class SlideType(str, Enum):
     TITLE = "TITLE"
+    # FIX #30.2 (2026-05-26): bookends modulo dedicati. MODULE_OPEN apre
+    # ciascuno degli N moduli con "MODULO X — Titolo" grande; MODULE_CLOSE
+    # chiude con riepilogo 5 spunte ✓. Forzati come slot fissi dal pacing
+    # engine (+2 slide sopra il count contenuto, non dentro).
+    MODULE_OPEN = "MODULE_OPEN"
     CONTENT_TEXT = "CONTENT_TEXT"
     CONTENT_IMAGE = "CONTENT_IMAGE"
     DIAGRAM = "DIAGRAM"
     QUIZ = "QUIZ"
     CASE_STUDY = "CASE_STUDY"
+    MODULE_CLOSE = "MODULE_CLOSE"
     RECAP = "RECAP"
     CLOSING = "CLOSING"
 
@@ -106,14 +112,20 @@ LAYOUT_CONSTRAINTS: dict[SlideType, SlideConstraints] = {
         body_min_bullets=4,  # FIX #27.3: slide piena, mai 2-3 bullet sparsi
         body_max_bullets=6,
         bullet_max_words=12,  # best-practice 7±2 + tolleranza
-        notes_min_words=60,  # FIX #27.3: audio 25-35s (era 30 = ~10s)
+        # FIX #29.2 (2026-05-26): audio 45s/slide @ 180 wpm = ~135 parole target.
+        # Floor 90 di sicurezza (era 60 → audio 20s, sotto target). Validator
+        # downgraded a soft warning (FIX #29.2 in pipeline.py) — il gate hard è
+        # mutagen.MP3.info.length nel range 35-55s post-generazione.
+        notes_min_words=90,
+        notes_max_words=160,
     ),
     SlideType.CONTENT_IMAGE: SlideConstraints(
         title_max_chars=70,
-        body_min_bullets=3,  # FIX #27.3
+        body_min_bullets=3,
         body_max_bullets=5,  # body ridotto: 40% slide occupato da immagine
         bullet_max_words=10,
-        notes_min_words=60,  # FIX #27.3
+        notes_min_words=90,  # FIX #29.2
+        notes_max_words=160,
         requires_image=True,
     ),
     SlideType.DIAGRAM: SlideConstraints(
@@ -134,18 +146,18 @@ LAYOUT_CONSTRAINTS: dict[SlideType, SlideConstraints] = {
     SlideType.CASE_STUDY: SlideConstraints(
         title_max_chars=70,
         body_min_bullets=3,  # FIX #27.3: tutte e 3 le sezioni OBBLIGATORIE
-        body_max_bullets=3,  # 3 sezioni: Situazione | Azione | Risultato
+        body_max_bullets=3,
         bullet_max_words=50,
-        notes_min_words=60,  # FIX #27.3 (era 40)
-        notes_max_words=140,
+        notes_min_words=90,  # FIX #29.2: audio 45s
+        notes_max_words=160,
     ),
     SlideType.RECAP: SlideConstraints(
         title_max_chars=70,
-        body_min_bullets=5,  # FIX #27.3: ESATTAMENTE 5 (riempie i 5 checkmark)
+        body_min_bullets=5,
         body_max_bullets=5,
         bullet_max_words=10,
-        notes_min_words=60,  # FIX #27.3 (era 30)
-        notes_max_words=110,
+        notes_min_words=90,  # FIX #29.2
+        notes_max_words=160,
     ),
     SlideType.CLOSING: SlideConstraints(
         title_max_chars=70,
@@ -153,6 +165,25 @@ LAYOUT_CONSTRAINTS: dict[SlideType, SlideConstraints] = {
         bullet_max_words=0,
         notes_min_words=15,  # commiato breve
         notes_max_words=90,
+    ),
+    # FIX #30.2 (2026-05-26): bookends modulo. Slot fissi generati dal
+    # pacing_engine + content_agent, NON dal validator instructor per-modulo.
+    # MODULE_OPEN ha 0 bullet (solo "MODULO N" + titolo modulo);
+    # MODULE_CLOSE ha 5 ✓ (riepilogo concetti chiave modulo).
+    SlideType.MODULE_OPEN: SlideConstraints(
+        title_max_chars=80,
+        body_max_bullets=0,
+        bullet_max_words=0,
+        notes_min_words=30,
+        notes_max_words=80,  # voiceover breve "Iniziamo il modulo X..."
+    ),
+    SlideType.MODULE_CLOSE: SlideConstraints(
+        title_max_chars=80,
+        body_min_bullets=5,
+        body_max_bullets=5,  # ESATTAMENTE 5 concetti chiave
+        bullet_max_words=10,
+        notes_min_words=60,
+        notes_max_words=120,
     ),
 }
 

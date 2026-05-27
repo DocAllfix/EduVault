@@ -48,3 +48,6 @@ docs/screenshots/
 .codegraph/
 slidesgo_health_safety_original.pptx
 assets/templates/slidesgo_health_safety_original.pptx
+
+# Local debug workspace for template iteration (FIX #30.x)
+testfixtemplate/

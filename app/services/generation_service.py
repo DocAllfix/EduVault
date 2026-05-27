@@ -210,6 +210,124 @@ async def _run_pipeline_inner(job_id: str, course_id: str) -> None:
         for s in sorted(m["slides"], key=lambda sl: sl["index"])
     ]
 
+    # FIX #30.5b (2026-05-26): post-process normative_ref ricostruito dal DB
+    # tramite citation_label denormalizzato. L'LLM ha scritto un valore
+    # nel campo (vecchio prompt) ma lo sovrascriviamo deterministicamente
+    # dai source_chunk_ids → niente più allucinazioni "Pag. X-Y" né format
+    # incoerenti. Lavora su dict (all_slides è list[dict]) per evitare il
+    # round-trip Pydantic.
+    try:
+        import re as _re
+        _UUID_RE = _re.compile(
+            r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            _re.IGNORECASE,
+        )
+        # FIX #30.6 (2026-05-26): l'LLM usa source_chunk_ids in 2 modi diversi:
+        #   (a) UUID intero (corretto): "a428644f-2a0f-48c5-a5ab-45aa98f08cac"
+        #   (b) regulation_id prefisso 8 char (preso dal prompt che mostra
+        #       "Art. X (PREFISSO): body") → es. "237e0712"
+        # Strategia: accumuliamo entrambi i tipi e facciamo 2 query separate
+        # (uuid match esatto + prefix match su regulation_id). La prefix dà
+        # citation a granularità reg-only (perdiamo art. specifico) ma è meglio
+        # di niente. Il prompt-fix vero (chiedere chunk_id intero) va in #30.7.
+        all_uuid_ids: set[str] = set()
+        all_prefix_ids: set[str] = set()
+        for s in all_slides:
+            ids = s.get("source_chunk_ids") or []
+            for cid in ids:
+                sc = str(cid)
+                if _UUID_RE.match(sc):
+                    all_uuid_ids.add(sc)
+                elif len(sc) == 8 and all(c in "0123456789abcdef" for c in sc.lower()):
+                    all_prefix_ids.add(sc.lower())
+
+        id_to_label: dict[str, str] = {}
+        if all_uuid_ids:
+            rows = await db.fetch(
+                "SELECT id::text AS id, citation_label "
+                "FROM regulation_chunks WHERE id = ANY($1::uuid[])",
+                list(all_uuid_ids),
+            )
+            for r in rows:
+                if r["citation_label"]:
+                    id_to_label[r["id"]] = r["citation_label"]
+        if all_prefix_ids:
+            # Lookup via regulation_id prefix: prendiamo 1 chunk per reg come
+            # rappresentativo (la citation viene dal regulation, non dall'art.)
+            rows = await db.fetch(
+                "SELECT DISTINCT ON (regulation_id) regulation_id::text AS rid, "
+                "citation_label FROM regulation_chunks "
+                "WHERE SUBSTRING(regulation_id::text, 1, 8) = ANY($1::text[])",
+                list(all_prefix_ids),
+            )
+            for r in rows:
+                if r["citation_label"]:
+                    # Mappiamo la prefix al label (e anche l'uppercase variant)
+                    short = r["rid"][:8]
+                    # estrai solo "D.Lgs. 81/08" senza "art. X" parte
+                    base = r["citation_label"].split(",")[0]
+                    id_to_label[short] = base
+                    id_to_label[short.upper()] = base
+
+        if not id_to_label:
+            return  # niente da enrichire
+
+        n_enriched = 0
+        for s in all_slides:
+            ids = s.get("source_chunk_ids") or []
+            if not ids:
+                continue
+            labels = []
+            for cid in ids:
+                sc = str(cid)
+                lbl = id_to_label.get(sc) or id_to_label.get(sc.lower())
+                if lbl:
+                    labels.append(lbl)
+            if not labels:
+                continue
+            seen: set[str] = set()
+            unique = []
+            for l in labels:
+                if l not in seen:
+                    seen.add(l)
+                    unique.append(l)
+            new_ref = "; ".join(unique[:3])[:200]
+            s["normative_ref"] = new_ref
+            n_enriched += 1
+        logger.info(
+            "normative_refs_enriched",
+            enriched=n_enriched,
+            total=len(all_slides),
+            unique_uuid_lookup=len(all_uuid_ids),
+            unique_prefix_lookup=len(all_prefix_ids),
+        )
+    except Exception as exc:
+        logger.warning("normative_ref_enrich_failed", error=str(exc))
+
+    # FIX #29.4 (2026-05-26): gate "partial" per corsi con troppi moduli degradati.
+    # Un modulo è degradato quando ha meno slide del previsto (batch falliti o
+    # under-cardinalità). Se > 30% dei moduli è degradato il corso NON è
+    # `completed` ma `partial` — l'RSPP deve sapere che va revisionato a fondo.
+    total_modules = len(modules_sorted)
+    degraded_modules = 0
+    for m in modules_sorted:
+        # Stima: un modulo è degradato se ha < 80% delle slide attese (~21/27 a 45s).
+        # Soglia conservativa — meglio un partial in più che un completed mascherato.
+        n_slides = len(m.get("slides", []))
+        expected = m.get("expected_slides") or 27
+        if n_slides < int(expected * 0.8):
+            degraded_modules += 1
+    degraded_ratio = degraded_modules / max(total_modules, 1)
+    course_final_status = "partial" if degraded_ratio > 0.30 else "completed"
+    logger.info(
+        "course_quality_gate",
+        course_id=str(course_id),
+        total_modules=total_modules,
+        degraded_modules=degraded_modules,
+        degraded_ratio=round(degraded_ratio, 2),
+        final_status=course_final_status,
+    )
+
     # ═══ CRASH-SAFE SAVE (slides JSON + fingerprint BEFORE the build) ═══
     await db.execute(
         "UPDATE courses SET slide_contents_json = $1 WHERE id = $2",
@@ -254,12 +372,13 @@ async def _run_pipeline_inner(job_id: str, course_id: str) -> None:
 
     elapsed = time.time() - start_time
 
-    # ═══ FINAL DB STATE ═══
+    # ═══ FINAL DB STATE (FIX #29.4: status può essere 'completed' o 'partial') ═══
     await db.execute(
-        "UPDATE courses SET pptx_path=$1, pdf_path=$2, status='completed' WHERE id=$3",
+        "UPDATE courses SET pptx_path=$1, pdf_path=$2, status=$4 WHERE id=$3",
         str(pptx_path),
         str(pdf_path),
         course_id,
+        course_final_status,
     )
     await db.execute(
         "UPDATE generation_jobs SET status='completed', completed_at=NOW(), "

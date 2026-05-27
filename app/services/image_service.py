@@ -244,13 +244,35 @@ def _render_diagram_sync(pos: int, slide: SlideContent) -> tuple[int, str | None
 
     ``pos`` is the global image_map key (FIX #26 — see _download_one_image).
 
-    The Content Agent (FASE 3.4) emits SVG directly (NOT Mermaid). The SVG is
-    sanitized + auto-fixed before reaching cairosvg.
+    FIX #30.4 (2026-05-26): se slide.image.diagram_filling è valorizzato,
+    usa il catalogo SVG (diagram_service.render_diagram_to_svg) — path
+    PREFERRED, vincoli max_chars già applicati a monte. Altrimenti ricade
+    sul legacy diagram_code (free-form, deprecated).
     """
-    if not slide.image.diagram_code:
+    raw_svg: str | None = None
+    # PATH 1 (preferito FIX #30.4): catalogo SVG
+    if slide.image.diagram_filling:
+        try:
+            from app.services.diagram_service import (
+                DiagramFilling,
+                render_diagram_to_svg,
+            )
+            filling = DiagramFilling(**slide.image.diagram_filling)
+            raw_svg = render_diagram_to_svg(filling)
+        except Exception as exc:
+            logger.warning(
+                "diagram_filling_failed",
+                slide=slide.index,
+                error=str(exc),
+                fallback="legacy_diagram_code",
+            )
+    # PATH 2 (legacy): diagram_code free-form
+    if raw_svg is None and slide.image.diagram_code:
+        raw_svg = slide.image.diagram_code
+    if raw_svg is None:
         return (pos, None)
     try:
-        safe_svg = sanitize_svg(slide.image.diagram_code)
+        safe_svg = sanitize_svg(raw_svg)
         # FIX #23: auto-fix SVG malformati (entità HTML, xmlns mancante, ecc.)
         safe_svg = _autofix_svg(safe_svg)
         # FIX #16 (2026-05-25): forza background bianco se l'SVG non ne ha uno.
@@ -302,13 +324,26 @@ async def _resolve_query_urls(slides: list[SlideContent]) -> None:
         "web_search", "pexels", "search", "generate", "with_query", "auto",
         "image", "photo", "stock",
     }
+    from app.models.core import SlideType
+    _SLIDE_TYPES_NEED_IMAGE = {SlideType.CONTENT_IMAGE}
 
+    # FIX #30.0-octies (2026-05-26, anticipato da #30.3 — analista richiesta
+    # esplicita: "una feature immagini che rende il 17% di quello che dovrebbe
+    # non è 'a tendere', è non-funzionante"). Recovery: se slide è CONTENT_IMAGE
+    # E ha query valorizzata, scarica SEMPRE l'immagine — anche se l'LLM ha
+    # scritto strategy="none" / "content_image" / qualsiasi altro valore non
+    # canonico. Il layout CONTENT_IMAGE ha sempre un PICTURE placeholder che
+    # senza foto resta vuoto, quindi l'intent è inequivocabile: vuole foto.
     to_resolve = [
         s
         for s in slides
         if s.image.query
         and not s.image.query_url
-        and (s.image.strategy in _IMAGE_SEARCH_STRATEGIES or s.image.strategy not in (None, "", "none", "diagram", "inline_svg"))
+        and (
+            s.image.strategy in _IMAGE_SEARCH_STRATEGIES
+            or s.image.strategy not in (None, "", "none", "diagram", "inline_svg")
+            or s.slide_type in _SLIDE_TYPES_NEED_IMAGE  # ← RECOVERY
+        )
     ]
     if not to_resolve:
         return
@@ -462,14 +497,26 @@ def _visual_holes(
     stays empty = template placeholder text shows. Same criterion as the
     verify script's detector.
     """
+    from app.models.core import SlideType
+
     holes: list[tuple[int, SlideContent]] = []
     for pos, s in enumerate(slides):
         strat = s.image.strategy
         # FIX #27.6: un diagram = ha diagram_code (qualunque strategy). Una web
         # image = ha query e NON è un diagram.
-        is_diagram = bool(s.image.diagram_code)
-        needs_visual = is_diagram or bool(
-            s.image.query and strat not in (None, "", "none", "inline_svg")
+        # FIX #30.3 (2026-05-26): aggiunta condizione slide_type=CONTENT_IMAGE.
+        # Layout CONTENT_IMAGE ha PICTURE placeholder SEMPRE — se la slide è
+        # CONTENT_IMAGE e non c'è path in image_map, è un buco che va riempito
+        # SEMPRE (o con query Pexels, o con fallback brandizzato), MAI lasciare
+        # il placeholder template visibile.
+        # FIX #30.9f (2026-05-27): un diagram = ha diagram_code (legacy)
+        # OPPURE diagram_filling (catalogo SVG, FIX #30.4).
+        is_diagram = bool(s.image.diagram_code or s.image.diagram_filling)
+        is_content_image = s.slide_type == SlideType.CONTENT_IMAGE
+        needs_visual = (
+            is_diagram
+            or is_content_image  # ← NEW: layout esige immagine sempre
+            or bool(s.image.query and strat not in (None, "", "none", "inline_svg"))
         )
         if needs_visual and pos not in image_map:
             holes.append((pos, s))
@@ -540,7 +587,8 @@ async def _backfill_missing_images(
     still_missing = _visual_holes(slides, image_map)
     fallback_count = 0
     for pos, s in still_missing:
-        is_diagram = bool(s.image.diagram_code)  # FIX #27.6
+        # FIX #30.9f (2026-05-27): include diagram_filling.
+        is_diagram = bool(s.image.diagram_code or s.image.diagram_filling)
         fb = await asyncio.to_thread(
             _make_branded_fallback, s.image.query or s.title or "", is_diagram=is_diagram
         )
@@ -586,8 +634,15 @@ async def prefetch_images(
     # slide DIAGRAM con strategy="code" che NON venivano renderizzate → box
     # vuoto. Un diagram = ha diagram_code. Una web image = ha query/query_url
     # e NON ha diagram_code.
+    # FIX #30.9f (2026-05-27, analista): includere anche `diagram_filling`
+    # (catalogo SVG FIX #30.4) nel filter, oltre al legacy `diagram_code`.
+    # Pre-fix: i 16 DIAGRAM dell'E2E #14 4h avevano diagram_filling valorizzato
+    # ma diagram_code=None → esclusi dal prefetch diagram → mai renderizzati
+    # → box nx_diagram_box vuoto nel PPTX (16 slide rotte, "diagram_box vuoto"
+    # come quello fix immagini di 2 iterazioni fa).
     diagram_slides = [
-        (pos, s) for pos, s in enumerate(slides) if s.image.diagram_code
+        (pos, s) for pos, s in enumerate(slides)
+        if s.image.diagram_code or s.image.diagram_filling
     ]
     diagram_positions = {pos for pos, _ in diagram_slides}
 

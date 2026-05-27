@@ -29,11 +29,15 @@ def _make_valid_content_text(**overrides: object) -> dict[str, object]:
         "module_index": 0,
         "slide_type": SlideType.CONTENT_TEXT,
         "title": "Titolo breve valido",
-        # FIX #27.3: CONTENT_TEXT richiede min 4 bullet (slide piena).
-        "body": (
-            "Primo bullet breve\nSecondo bullet breve\n"
-            "Terzo bullet breve\nQuarto bullet breve"
-        ),
+        # FIX #28.1 (2026-05-26): schema bullets:list[str] (era body:str).
+        # CONTENT_TEXT richiede min 4 bullet (slide piena).
+        "bullets": [
+            "Primo bullet breve",
+            "Secondo bullet breve",
+            "Terzo bullet breve",
+            "Quarto bullet breve",
+        ],
+        "sezioni": [],
         "speaker_notes": _valid_notes(80),
         "normative_ref": "Art. 1, D.Lgs 81/08",
         "source_chunk_ids": ["chunk-1"],
@@ -81,20 +85,20 @@ def test_title_too_long_rejected() -> None:
 
 
 def test_too_many_bullets_rejected() -> None:
-    """CONTENT_TEXT body > 6 bullets → ValueError che richiede SPLIT."""
-    seven_bullets = "\n".join(f"bullet {i}" for i in range(7))
+    """CONTENT_TEXT bullets > 6 → ValueError che richiede SPLIT."""
+    seven_bullets = [f"bullet {i}" for i in range(7)]
     with pytest.raises(ValueError, match="7 bullets > 6"):
-        SlideContent(**_make_valid_content_text(body=seven_bullets))
+        SlideContent(**_make_valid_content_text(bullets=seven_bullets))
 
 
 def test_bullet_too_many_words_rejected() -> None:
     """1 bullet > 12 parole (CONTENT_TEXT) → ValueError per riscrittura/split.
-    Best-practice 7±2 + tolleranza. FIX #27.3: servono >= 4 bullet (minimo) di
-    cui uno con 13 parole, sennò scatterebbe prima il check "< 4 min"."""
+    Best-practice 7±2 + tolleranza. Servono >= 4 bullet (minimo) di cui uno con
+    13 parole, sennò scatterebbe prima il check "< 4 min"."""
     long_bullet = " ".join(["parola"] * 13)
-    body = f"{long_bullet}\nbullet due\nbullet tre\nbullet quattro"
+    bullets = [long_bullet, "bullet due", "bullet tre", "bullet quattro"]
     with pytest.raises(ValueError, match=r"bullets\[0\].*13 parole > 12"):
-        SlideContent(**_make_valid_content_text(body=body))
+        SlideContent(**_make_valid_content_text(bullets=bullets))
 
 
 def test_notes_too_few_words_rejected() -> None:
@@ -127,7 +131,7 @@ def test_content_image_without_query_rejected() -> None:
     """CONTENT_IMAGE deve avere image.query non vuoto (FASE 4 prerequisito)."""
     data = _make_valid_content_text(
         slide_type=SlideType.CONTENT_IMAGE,
-        body="bullet uno\nbullet due\nbullet tre",  # min 3 per CONTENT_IMAGE
+        bullets=["bullet uno", "bullet due", "bullet tre"],  # min 3 per CONTENT_IMAGE
         image=ImageStrategy(strategy="web_search"),  # niente query
     )
     with pytest.raises(ValueError, match="CONTENT_IMAGE richiede image.query"):
@@ -139,7 +143,7 @@ def test_content_image_aspect_hint_optional_defaults_landscape() -> None:
     query ma senza aspect_hint → valido (non più rigettato)."""
     data = _make_valid_content_text(
         slide_type=SlideType.CONTENT_IMAGE,
-        body="bullet uno\nbullet due\nbullet tre",  # min 3 per CONTENT_IMAGE
+        bullets=["bullet uno", "bullet due", "bullet tre"],
         image=ImageStrategy(strategy="web_search", query="casco cantiere"),
     )
     slide = SlideContent(**data)
@@ -148,11 +152,11 @@ def test_content_image_aspect_hint_optional_defaults_landscape() -> None:
 
 def test_diagram_without_viewbox_rejected() -> None:
     """FIX #11: DIAGRAM con SVG SENZA viewBox → rigettato (qualunque viewBox OK,
-    ma deve esserci)."""
+    ma deve esserci). FIX #28.1: bullets list (DIAGRAM didascalia 1-2 elementi)."""
     bad_svg = '<svg width="500" height="300"><rect/></svg>'
     data = _make_valid_content_text(
         slide_type=SlideType.DIAGRAM,
-        body="didascalia breve",
+        bullets=["didascalia breve"],
         image=ImageStrategy(strategy="diagram", diagram_code=bad_svg),
     )
     with pytest.raises(ValueError, match="viewBox SVG"):
@@ -163,38 +167,38 @@ def test_diagram_without_viewbox_rejected() -> None:
 
 
 def test_content_text_too_few_bullets_rejected() -> None:
-    """FIX #27.3: CONTENT_TEXT con < 4 bullet → rigettato (slide vuota)."""
-    three_bullets = "uno\ndue\ntre"
+    """FIX #28.1: CONTENT_TEXT con < 4 bullet → rigettato (slide vuota)."""
+    three_bullets = ["uno", "due", "tre"]
     with pytest.raises(ValueError, match="3 bullets < 4 min"):
-        SlideContent(**_make_valid_content_text(body=three_bullets))
+        SlideContent(**_make_valid_content_text(bullets=three_bullets))
 
 
 def test_recap_not_exactly_five_bullets_rejected() -> None:
-    """FIX #27.3: RECAP con < 5 bullet → rigettato (5 checkmark da riempire)."""
-    four = "uno\ndue\ntre\nquattro"
+    """FIX #28.1: RECAP con < 5 bullet → rigettato (5 checkmark da riempire)."""
+    four = ["uno", "due", "tre", "quattro"]
     data = _make_valid_content_text(
-        slide_type=SlideType.RECAP, body=four, speaker_notes=_valid_notes(70)
+        slide_type=SlideType.RECAP, bullets=four, speaker_notes=_valid_notes(70)
     )
     with pytest.raises(ValueError, match="4 bullets < 5 min"):
         SlideContent(**data)
 
 
 def test_recap_exactly_five_bullets_passes() -> None:
-    """FIX #27.3: RECAP con esattamente 5 bullet → valido."""
-    five = "uno\ndue\ntre\nquattro\ncinque"
+    """FIX #28.1: RECAP con esattamente 5 bullet → valido."""
+    five = ["uno", "due", "tre", "quattro", "cinque"]
     data = _make_valid_content_text(
-        slide_type=SlideType.RECAP, body=five, speaker_notes=_valid_notes(70)
+        slide_type=SlideType.RECAP, bullets=five, speaker_notes=_valid_notes(70)
     )
     slide = SlideContent(**data)
     assert slide.slide_type == SlideType.RECAP
 
 
 def test_case_study_too_few_sections_rejected() -> None:
-    """FIX #27.3: CASE_STUDY con < 3 sezioni (split '---') → rigettato."""
-    one_section = "Situazione: operaio senza casco in cantiere edile"
+    """FIX #28.1: CASE_STUDY con < 3 sezioni (lista) → rigettato."""
     data = _make_valid_content_text(
         slide_type=SlideType.CASE_STUDY,
-        body=one_section,
+        bullets=[],
+        sezioni=["Situazione: operaio senza casco in cantiere edile"],
         speaker_notes=_valid_notes(70),
     )
     with pytest.raises(ValueError, match="1 sezioni < 3 min"):
@@ -202,15 +206,15 @@ def test_case_study_too_few_sections_rejected() -> None:
 
 
 def test_case_study_three_sections_passes() -> None:
-    """FIX #27.3: CASE_STUDY con 3 sezioni separate da '---' → valido."""
-    three = (
-        "Operaio salda vicino a gas senza verifica ATEX --- "
-        "Preposto ferma il lavoro e fa classificare la zona --- "
-        "Esplosione evitata, procedura aggiornata in azienda"
-    )
+    """FIX #28.1: CASE_STUDY con 3 sezioni (lista) → valido."""
     data = _make_valid_content_text(
         slide_type=SlideType.CASE_STUDY,
-        body=three,
+        bullets=[],
+        sezioni=[
+            "Operaio salda vicino a gas senza verifica ATEX",
+            "Preposto ferma il lavoro e fa classificare la zona",
+            "Esplosione evitata, procedura aggiornata in azienda",
+        ],
         speaker_notes=_valid_notes(70),
     )
     slide = SlideContent(**data)

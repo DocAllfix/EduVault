@@ -45,6 +45,10 @@ dependencies = [
     "anthropic",                   # Claude Sonnet 4 SDK (L2 fallback emergenza)
     "voyageai",                    # Voyage AI SDK (voyage-3, 1024 dim)
     "openai>=1.50",                # Azure OpenAI SDK (gpt-4.1-mini primary, FASE 0b)
+    # FIX #28 (2026-05-26): structured output — schema imposto via tool/json_schema
+    # su tutti i provider (sostituisce response_format=json_object + auto-fix manuale).
+    "instructor>=1.5",             # Pydantic-validated LLM output + max_retries
+    "litellm>=1.40",               # uniform provider routing under instructor.from_provider
 
     # === v3.0 Optimizations (CLAUDE.md OPT-1 / OPT-2 / OPT-3 / OPT-4) ===
     "edge-tts>=6.1",               # OPT-1: free TTS (replaces openai), it-IT-DiegoNeural

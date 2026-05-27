@@ -93,10 +93,13 @@ class Settings(BaseSettings):
     llm_content_model: str = "claude-sonnet-4-6"
     llm_content_model_fallback: str = "claude-sonnet-4-6"   # L2 emergenza content_agent
 
-    # === Parallelizzazione moduli (R6 mitigation, FASE 0b) ===
-    # DeepSeek V4 Flash ha 2500 concurrency, V4 Pro 500. Settiamo 100 paralleli:
-    # ben oltre 24 moduli del corso 8h (1 wave), margine 4× per SPLIT retry.
-    content_agent_concurrency: int = 100
+    # === Parallelizzazione moduli ===
+    # FIX #29.3 (2026-05-26): 100→10. Con TOOLS mode + Azure mini (200K TPM standard),
+    # 100 moduli paralleli saturavano il TPM e producevano timeout HTTP senza 429
+    # espliciti (Azure mette in coda invece di rifiutare). 10 lascia ~6 chiamate
+    # parallele effettive in volo con margine ai retry instructor — dimensionato sui
+    # token, non sui moduli (ogni batch da 7 slide ~8K token, vedi FIX #29.1).
+    content_agent_concurrency: int = 20  # FIX #29.6 velocizzazione (era 10): test E2E ha mostrato zero saturazione TPM con 10 moduli paralleli, alziamo per -30% tempo totale.
 
     # === TTS — OPT-1: edge-tts, no API key required ===
     tts_voice: str = "it-IT-DiegoNeural"

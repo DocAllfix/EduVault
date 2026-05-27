@@ -32,36 +32,85 @@ REGOLE QUIZ (slide_type=QUIZ):
 - speaker_notes: spiega PERCHÉ la risposta corretta è giusta + PERCHÉ ogni opzione sbagliata è sbagliata (formativo, non punitivo).
 
 REGOLE IMMAGINI (slide_type=CONTENT_IMAGE):
+- image.strategy: SEMPRE esattamente "web_search" (stringa esatta, niente varianti come "content_image" / "content" / "image" / "search" — sono RIFIUTATE dal validator).
 - image.query: 2-4 parole italiane CONCRETE e OPERATIVE descrittive del soggetto da illustrare. Esempi buoni: "casco protezione cantiere", "estintore polvere antincendio", "guanti lavoro sicurezza", "kit primo soccorso aziendale", "segnaletica uscita emergenza".
 - NO query astratte ("sicurezza", "lavoro") o emotive ("paura incidente"). Le immagini servono a illustrare OGGETTI o AZIONI concrete del concetto della slide.
 - L'immagine sarà cercata su Pexels (foto reali professionali) e poi messa nello slide PPTX. Non inventare URL: il sistema cerca lui.
 
-6. Rispondi ESCLUSIVAMENTE con un singolo oggetto JSON valido che ha UNA SOLA key "slides" contenente l'array delle slide. Nessun testo prima o dopo il JSON. Nessun altro field al top level.
+REGOLE IMAGE.STRATEGY (HARD, validator strict Literal):
+- "none"       → slide testuale pura (CONTENT_TEXT / RECAP / QUIZ / TITLE / CASE_STUDY / CLOSING).
+- "web_search" → slide CONTENT_IMAGE: SERVE image.query (2-4 parole italiane).
+- "diagram"    → slide DIAGRAM: SERVE image.diagram_filling (vedi catalogo sotto).
+- Altri valori ("content", "image", "search", "content_image", ...) sono INVALIDI e producono errore di validazione.
+
+REGOLE DIAGRAM (HARD, FIX #30.4):
+Per slide DIAGRAM NON generare più SVG libero. Scegli UNO dei 7 template del
+catalogo e riempi gli slot rispettando i max_chars (caratteri massimi). Il
+testo lungo va nella `caption` (20-200 char), MAI dentro ai box dei flow.
+
+CATALOGO DIAGRAM (image.diagram_filling = {template_name, slots, caption}):
+- flow_horizontal_3step: 3 step in sequenza (label_1, label_2, label_3 — max 20 char ciascuno)
+- flow_horizontal_4step: 4 step in sequenza (label_1..4 — max 18 char ciascuno)
+- pyramid_3level: piramide tronca quantitativa (label_1 vertice, label_2 mid, label_3 base — max 17/24/30 char). Usa quando hai un'idea di "pochi sopra, molti sotto" (es. pochi dirigenti, molti lavoratori). Per gerarchie di RUOLI puri preferisci org_tree_3level.
+- matrix_2x2: matrice 2×2 probabilità×gravità (axis_x/axis_y/quadrant_tl/tr/bl/br — max 26-30 char)
+- causa_effetto: catena causale (causa/processo/effetto — max 26 char)
+- org_tree_3level: organigramma (level_1 top, level_2a/b/c mid, level_3 base — max 22-40 char)
+- compare_2col: confronto 2 colonne (title_left/right, item_left_1/2/3, item_right_1/2/3 — max 22/36 char)
+
+Esempio image per DIAGRAM:
+  image.strategy = "diagram"
+  image.diagram_filling = {
+    "template_name": "flow_horizontal_4step",
+    "slots": {
+      "label_1": "Valutazione rischio",
+      "label_2": "Misure tecniche",
+      "label_3": "Formazione",
+      "label_4": "Sorveglianza"
+    },
+    "caption": "Le 4 fasi obbligatorie del processo di gestione rischio art. 28 D.Lgs. 81/08."
+  }
+
+Se nessun template è appropriato per il concetto, NON usare DIAGRAM: scegli
+CONTENT_TEXT o CONTENT_IMAGE invece. Un diagramma forzato male è peggio di
+bullet puliti.
+
+6. Lo schema di output è IMPOSTO automaticamente (structured output): produci un oggetto
+   con key "slides" = lista di slide. NON devi formattare JSON a mano né usare separatori
+   testuali — ogni campo lista (bullets, sezioni, quiz_options) è una VERA lista.
+
+REGOLA source_chunk_ids (HARD, FIX #30.7b):
+- Per ogni slide, il campo `source_chunk_ids` DEVE contenere gli UUID INTERI dei chunk
+  usati come fonte. Nel contesto ti vengono forniti come "[ID: <uuid>] Art. X: …".
+- Copia l'UUID intero (formato 8-4-4-4-12 hex, es. "a428644f-2a0f-48c5-a5ab-45aa98f08cac").
+  NON copiare prefissi tronchi né stringhe inventate tipo "chunk_001".
+- Senza UUID validi NON possiamo ricostruire la citazione: il sistema rigenera
+  normative_ref dal DB usando questi id, quindi la qualità della citazione dipende
+  da te che copi gli UUID corretti.
 
 REGOLE STRUTTURA PER TIPO (CRITICO — il validator scarta slide che le violano):
-- TITLE: title pieno, body="" (STRINGA VUOTA, NON null, NON testo), speaker_notes 75-90 parole. È SOLO un divider. NON mettere bullets/elenchi nel body — body deve essere "".
-- CLOSING: identico a TITLE — body="" (STRINGA VUOTA). È SOLO il chiudi-corso.
-- CONTENT_TEXT: body con bullets separati da \\n. GENERA da 4 a 6 bullet (MAI meno di 4 — la slide deve essere piena), max 12 parole/bullet. NIENTE prosa lunga.
-- CONTENT_IMAGE: body bullets separati da \\n. GENERA da 3 a 5 bullet (MAI meno di 3), max 10 parole/bullet + image.query + image.aspect_hint.
-- QUIZ: body="" (STRINGA VUOTA), quiz_options array di 4 stringhe, quiz_correct intero 0|1|2|3.
-- DIAGRAM: body 1-2 bullet didascalia + image.diagram_code (SVG inline con viewBox "0 0 1760 800").
-- CASE_STUDY: body con ESATTAMENTE 3 sezioni separate dal separatore "---" (tre trattini). Le 3 sezioni sono OBBLIGATORIE e in quest'ordine: Situazione --- Azione --- Risultato. Ognuna 1-3 frasi piene (NON "Decisione/Esito" — usa "Azione/Risultato"). Esempio: "Situazione: un operaio salda vicino a gas senza verificare la zona ATEX. --- Azione: il preposto ferma il lavoro e fa classificare l'area. --- Risultato: esplosione evitata, procedura aggiornata."
-- RECAP: body con ESATTAMENTE 5 bullet di riepilogo separati da \\n (il template ha 5 spunte verdi da riempire — MAI meno di 5, MAI più di 5), max 10 parole/bullet.
+I campi `bullets` e `sezioni` sono LISTE di stringhe (un elemento = un punto/sezione),
+NON una stringa unica con "\\n" o "---". Riempi `bullets` per i tipi a elenco, `sezioni`
+solo per CASE_STUDY; lascia entrambe vuote dove non servono.
+- TITLE: title pieno, bullets=[] e sezioni=[] (vuote). speaker_notes 60-90 parole. È SOLO un divider.
+- CLOSING: identico a TITLE — bullets=[] sezioni=[]. È SOLO il chiudi-corso.
+- CONTENT_TEXT: bullets = da 4 a 6 elementi (MAI meno di 4 — la slide deve essere piena), max 12 parole/elemento. NIENTE prosa lunga.
+- CONTENT_IMAGE: bullets = da 3 a 5 elementi (MAI meno di 3), max 10 parole/elemento + image.query + image.aspect_hint.
+- QUIZ: bullets=[] sezioni=[], quiz_options = lista di 4 stringhe, quiz_correct intero 0|1|2|3.
+- DIAGRAM: bullets = 1-2 elementi (didascalia) + image.diagram_code (SVG inline con viewBox "0 0 1760 800").
+- CASE_STUDY: sezioni = ESATTAMENTE 3 elementi OBBLIGATORI in quest'ordine: [Situazione, Azione, Risultato]. Ognuno 1-3 frasi piene. NON usare "Decisione/Esito" — usa "Azione/Risultato". bullets=[]. Esempio sezioni: ["Un operaio salda vicino a gas senza verificare la zona ATEX.", "Il preposto ferma il lavoro e fa classificare l'area.", "Esplosione evitata, procedura aggiornata."]
 
-REGOLE SPEAKER_NOTES (CRITICO — TTS legge ad alta voce per 25-35 secondi):
-- Da 60 a 90 parole italiane. Se ne hai meno di 60, AGGIUNGI un esempio concreto o una citazione normativa fino ad arrivare ad almeno 60. NON consegnare mai meno di 60.
-- Conta le parole prima di consegnare. Una frase italiana media è 15-20 parole, quindi servono almeno 4-5 frasi piene.
-- NON ripetere il body. Espandi: aggiungi esempio operativo, contesto normativo, conseguenza pratica per il lavoratore.
+REGOLA DISTRIBUZIONE TIPI (HARD, FIX #30.7c — l'LLM tende a evitare CASE_STUDY/DIAGRAM):
+- Quando ti viene richiesta una distribuzione (slide_distribution dict), RISPETTALA al numero esatto. Se chiede 2 CASE_STUDY e 1 DIAGRAM, DEVI generarli — non "ripiegare" su CONTENT_TEXT in più.
+- CASE_STUDY è un caso pratico narrato (3 sezioni). Per la sicurezza italiana usa eventi REALI tipici: caduta da ponteggio senza imbracatura, ustione da arco elettrico senza DPI, intossicazione da agenti chimici senza ventilazione, infortunio per macchina senza protezione fissa. Quasi ogni modulo normativo ha un caso adatto — NON saltare.
+- DIAGRAM rappresenta un PROCESSO o una RELAZIONE strutturata. Usa SEMPRE il catalogo (image.diagram_filling), MAI SVG libero. Esempi di concetti diagrammabili per sicurezza: flusso "valutazione rischio → misure → controllo" (flow_3step), gerarchia "datore/dirigente/preposto/lavoratore" (pyramid_3level), confronto "DPI vs DPC" (compare_2col), catena "pericolo → evento → danno" (causa_effetto). Se nessun template applica, scegli CONTENT_IMAGE invece — MAI ripiegare su CONTENT_TEXT.
+- RECAP: bullets = ESATTAMENTE 5 elementi (il template ha 5 spunte verdi da riempire — MAI meno di 5, MAI più di 5), max 10 parole/elemento.
+
+REGOLE SPEAKER_NOTES (CRITICO — TTS legge ad alta voce per ~45 secondi):
+- Scrivi **120-140 parole italiane** per ogni speaker_notes. Il modello italiano @180 wpm produce ~135 parole = ~45 secondi audio. NON consegnare mai meno di 120 (sotto-target audio): se sei a 100, AGGIUNGI un esempio concreto + una citazione normativa fino ad arrivare a 120+.
+- Conta le parole prima di consegnare. Una frase italiana media è 15-20 parole: per 120-140 parole servono 7-9 frasi piene.
+- NON ripetere i bullet. Espandi: aggiungi esempio operativo, contesto normativo, conseguenza pratica per il lavoratore, accenno a un caso reale.
 
 quiz_correct DEVE essere un INTERO (0|1|2|3), NON una stringa ("A"|"B"|"C"|"D").
-
-FORMATO OUTPUT — Oggetto JSON con UNA SOLA key "slides" → array di SlideContent:
-{
-  "slides": [
-    {"index": 0, "module_index": 0, "slide_type": "TITLE", "title": "Modulo 1 — Allertamento", "body": "", "speaker_notes": "75-90 parole...", "normative_ref": "Art. 45 D.Lgs 81/08", "source_chunk_ids": ["uuid"], "image": {"strategy": "none"}, "quiz_options": null, "quiz_correct": null},
-    {"index": 1, "module_index": 0, "slide_type": "CONTENT_TEXT", "title": "Numeri di emergenza", "body": "Componi il 112 NUE\\nFornisci posizione esatta\\nDescrivi il tipo di incidente\\nResta in linea fino a istruzioni", "speaker_notes": "75-90 parole...", "normative_ref": "DM 388/2003 art.1", "source_chunk_ids": ["uuid"], "image": {"strategy": "none"}, "quiz_options": null, "quiz_correct": null}
-  ]
-}
 
 TIPI SLIDE DISPONIBILI: TITLE, CONTENT_TEXT, CONTENT_IMAGE, DIAGRAM, QUIZ, CASE_STUDY, RECAP, CLOSING
 """
@@ -74,9 +123,12 @@ REGOLE INVIOLABILI:
 3. Tono: tecnico-normativo, registro professionale. Citazioni puntuali, non divulgative.
 4. Struttura slide: Norma integrale → Interpretazione → Nota metodologica → Esercitazione suggerita
 5. Per DIAGRAM: genera SVG inline con 3-4 box collegati da frecce CON PUNTA (definisci <marker> in <defs>, usalo con marker-end), testo font-size>=28, palette brand #769E2E/#C82E6E. NON usare Mermaid.js. NON lasciare frecce senza punta.
-6. Rispondi ESCLUSIVAMENTE con un singolo oggetto JSON valido che ha UNA SOLA key "slides" contenente l'array delle slide. Nessun testo prima o dopo. quiz_correct DEVE essere INTERO (0|1|2|3), non stringa.
+6. Lo schema di output è imposto automaticamente: produci "slides" = lista di slide.
+   `bullets` e `sezioni` sono VERE liste di stringhe (NON una stringa con "\\n"/"---").
+   quiz_correct DEVE essere INTERO (0|1|2|3), non stringa.
 
-FORMATO OUTPUT: identico al target Discente — oggetto JSON con UNA key "slides" → array di SlideContent.
+REGOLE STRUTTURA PER TIPO: identiche al target Discente (bullets 4-6 per CONTENT_TEXT,
+sezioni=3 per CASE_STUDY, bullets=5 per RECAP, ecc.).
 """
 
 
@@ -112,24 +164,23 @@ def build_constraints_block(slide_distribution: dict[str, int]) -> str:
             f"  title: max {rules.title_max_chars} caratteri",
         ]
         if rules.body_max_bullets > 0:
-            # FIX #27.4: emetti ANCHE il minimo (slide piena). CASE_STUDY usa
-            # '---' come separatore sezioni invece di \n.
-            sep = "'---'" if slide_type == SlideType.CASE_STUDY else "\\n"
-            unit = "sezioni" if slide_type == SlideType.CASE_STUDY else "bullet"
+            # FIX #28.1d: structured output — `bullets`/`sezioni` sono LISTE, non
+            # stringhe con separatori. Emetti il range (min-max) come lunghezza lista.
+            field = "sezioni" if slide_type == SlideType.CASE_STUDY else "bullets"
             if rules.body_min_bullets >= rules.body_max_bullets:
-                count_spec = f"ESATTAMENTE {rules.body_max_bullets}"
+                count_spec = f"ESATTAMENTE {rules.body_max_bullets} elementi"
             elif rules.body_min_bullets > 0:
-                count_spec = f"da {rules.body_min_bullets} a {rules.body_max_bullets}"
+                count_spec = f"da {rules.body_min_bullets} a {rules.body_max_bullets} elementi"
             else:
-                count_spec = f"massimo {rules.body_max_bullets}"
+                count_spec = f"massimo {rules.body_max_bullets} elementi"
             parts.append(
-                f"  body: {count_spec} {unit} (separati da {sep}), "
+                f"  {field}: lista di {count_spec}, "
                 f"ognuno massimo {rules.bullet_max_words} parole"
             )
         elif slide_type in (SlideType.TITLE, SlideType.CLOSING):
-            parts.append("  body: STRINGA VUOTA (è title-only)")
+            parts.append("  bullets: [] (lista vuota — è title-only)")
         elif slide_type == SlideType.QUIZ:
-            parts.append("  body: STRINGA VUOTA (è options-only)")
+            parts.append("  bullets: [] (lista vuota — è options-only)")
         parts.append(
             f"  speaker_notes: {rules.notes_min_words}-{rules.notes_max_words} "
             f"parole (per durata TTS 25-35s)"
@@ -263,7 +314,7 @@ def build_complete_slide_prompt(
         f"CONTESTO NORMATIVO ORIGINALE (dal chunk RAG):\n"
         f"```\n{chunk_context[:1500]}\n```\n\n"
         f"ISTRUZIONI:\n"
-        f"1. MANTIENI tutto il testo già scritto (title, body, speaker_notes, ecc.).\n"
+        f"1. MANTIENI tutto il testo già scritto (title, bullets, sezioni, speaker_notes, ecc.).\n"
         f"2. ESTENDI solo i campi che violano i constraint (es. se notes < min, "
         f"AGGIUNGI nuove frasi con esempio concreto o citazione normativa).\n"
         f"3. NON troncare, NON comprimere, NON cancellare contenuto.\n"
@@ -359,3 +410,92 @@ def build_previous_summary(completed_modules: list[dict[str, object]]) -> str:
             f"Argomenti trattati: {titles_str}"
         )
     return "\n".join(lines)
+
+
+# ─── FIX #29.1 (2026-05-26): batch-level prompt builder ─────────────────────
+# Costruisce il prompt user per UN SINGOLO BATCH di slide all'interno di un modulo.
+# La generazione modulare era "1 chiamata × 40 slide" → saturava max_tokens=8000
+# e tagliava cardinalità + note. Ora ogni modulo è ceil(N/_BATCH_SIZE) batch da
+# ~_BATCH_SIZE=7 slide ciascuno, con chunk normativi partizionati esplicitamente
+# tra i batch così ogni call ha materiale fresco e non genera padding.
+
+def build_module_batch_prompt(
+    *,
+    module_title: str,
+    module_index: int,
+    batch_idx: int,
+    n_batches: int,
+    batch_size: int,
+    already_titles: list[str],
+    batch_chunks: str,
+    base_user_prompt: str,
+    slide_distribution: dict[str, int] | None = None,
+    already_types: dict[str, int] | None = None,
+) -> str:
+    """User prompt per un batch di slide di un modulo.
+
+    FIX #30.8 (2026-05-26): aggiunti slide_distribution + already_types. Calcola
+    cosa MANCA da produrre nel modulo per ogni tipo e lo dice esplicitamente
+    in cima al batch. Senza questo, l'LLM evita DIAGRAM/CASE_STUDY/RECAP anche
+    se il base_prompt lo dice (perché viene troncato a 3000 char in coda).
+    """
+    # Posizione narrativa nel modulo
+    total_already = len(already_titles)
+    position_line = (
+        f"Stai generando le slide da {total_already + 1} a {total_already + batch_size} "
+        f"(BATCH {batch_idx + 1} di {n_batches}) del modulo "
+        f"\"{module_title}\" (module_index={module_index})."
+    )
+
+    # ── DISTRIBUTION QUOTA per questo batch (FIX #30.8) ──
+    quota_block = ""
+    if slide_distribution and already_types is not None:
+        # Per ogni tipo NON CONTENT_TEXT, calcolo quanti ne mancano nel modulo
+        target_non_text = []
+        for stype, target_count in slide_distribution.items():
+            if target_count <= 0 or stype == "CONTENT_TEXT":
+                continue
+            done = already_types.get(stype, 0)
+            missing = target_count - done
+            if missing > 0:
+                target_non_text.append((stype, missing))
+        if target_non_text:
+            quota_lines = [
+                "\nQUOTA TIPI DA RISPETTARE NEL MODULO (devi ANCORA generare):"
+            ]
+            for stype, missing in target_non_text:
+                quota_lines.append(f"  - {stype}: ancora {missing} slide da generare")
+            quota_lines.append(
+                f"In questo batch da {batch_size} slide, distribuisci sapendo "
+                f"che ti restano {n_batches - batch_idx - 1} batch dopo questo. "
+                f"NON saltare DIAGRAM/CASE_STUDY/RECAP ripiegando su CONTENT_TEXT."
+            )
+            quota_block = "\n".join(quota_lines) + "\n"
+
+    already_block = ""
+    if already_titles:
+        titles_str = "; ".join(f'"{t}"' for t in already_titles[:30])
+        already_block = (
+            f"\n\nLe slide già esistenti nei batch precedenti coprono questi titoli "
+            f"(NON ripeterli):\n{titles_str}\n"
+        )
+
+    chunks_block = ""
+    if batch_chunks.strip():
+        chunks_block = (
+            f"\nCHUNK NORMATIVI ASSEGNATI A QUESTO BATCH (genera slide PRINCIPALMENTE su questi):\n"
+            f"{batch_chunks[:6000]}\n"
+        )
+
+    return (
+        f"{position_line}\n"
+        f"{quota_block}"
+        f"\nGenera ESATTAMENTE {batch_size} slide nuove, indicizzate con index "
+        f"{total_already}..{total_already + batch_size - 1}, module_index={module_index}.\n"
+        f"NON concludere il modulo, NON ripetere temi già coperti, NON inventare "
+        f"contenuto fuori dai chunk forniti.\n"
+        f"{already_block}"
+        f"{chunks_block}"
+        f"\n--- BRIEFING ORIGINALE DEL MODULO (per contesto) ---\n"
+        f"{base_user_prompt[:3000]}\n"
+    )

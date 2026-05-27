@@ -48,6 +48,20 @@ from app.models.pipeline import SlideContent
 
 logger = structlog.get_logger()
 
+
+def _slide_fallback_text(s: SlideContent) -> str:
+    """Flatten bullets/sezioni (FIX #28.1 schema) when speaker_notes is empty.
+
+    Used by the narration fallback chain: ``speaker_notes`` first (preferred,
+    discorsive prose), else bullets/sezioni stitched into a paragraph so the
+    TTS still has something to read.
+    """
+    if getattr(s, "sezioni", None):
+        return ". ".join(s.sezioni)
+    if getattr(s, "bullets", None):
+        return ". ".join(s.bullets)
+    return ""
+
 _AUDIO_ROOT = Path("output/audio")
 _TTS_TIMEOUT_SECONDS = 30.0
 # Boost 2026-05-25: edge-tts (Microsoft free) regge bene 16 concurrent senza
@@ -81,9 +95,10 @@ class AudioService:
     ) -> dict[str, Any]:
         """Generate one MP3 per narratable slide + sync manifest.
 
-        ``narration_text`` falls back to ``slide.body`` when ``speaker_notes``
-        is empty. The "discorsivo rephrase" mentioned in the prompt is NOT
-        implemented in v1.0 — see REI-16 discrepancy D40.
+        ``narration_text`` falls back to flattened bullets/sezioni
+        (FIX #28.1 schema) when ``speaker_notes`` is empty. The "discorsivo
+        rephrase" mentioned in the prompt is NOT implemented in v1.0 — see
+        REI-16 discrepancy D40.
 
         Returns: ``{"tracks_generated": int, "tracks_skipped": int,
         "manifest_path": str | None, "course_id": str}``.
@@ -95,7 +110,7 @@ class AudioService:
         skipped = 0
 
         narratable = [
-            s for s in slides if (s.speaker_notes or s.body or "").strip()
+            s for s in slides if (s.speaker_notes or _slide_fallback_text(s)).strip()
         ]
         results = await asyncio.gather(
             *(self._generate_one(s, course_audio_dir) for s in narratable),
@@ -186,7 +201,7 @@ class AudioService:
         FASE 6: ``off_target`` è True se la durata è fuori 25-35s (la slide
         narra troppo veloce/lento rispetto alla regola 30s/slide).
         """
-        narration = (slide.speaker_notes or slide.body or "").strip()
+        narration = (slide.speaker_notes or _slide_fallback_text(slide)).strip()
         audio_path = course_audio_dir / f"slide_{slide.index:04d}.mp3"
 
         try:
