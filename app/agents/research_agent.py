@@ -408,9 +408,43 @@ MODULE_QUERY_EXPANSIONS: dict[str, str] = {
         "lavoratori, sopralluoghi periodici."
     ),
     "Incidenti e infortuni mancati": (
-        "Near miss, incidenti senza danno, infortuni mancati, registro "
-        "infortuni, analisi cause, azioni correttive. Differenza tra "
-        "incidente e infortunio."
+        # FIX #32 LEVA 1 (analista review 14): query con anchor specifici
+        # degli articoli D.Lgs 81/08 in italiano normativo verbatim
+        # (NON gergo moderno tipo "near miss"/"PDCA"/"indicatori predittivi"
+        # che voyage-3 matcha male sul corpus italiano puro). Anchor da
+        # art. 18 c.1 lett. r, art. 19 c.1, art. 29 c.3, art. 35, art. 53.
+        # Effetto atteso: cosine spinge su chunk legati a monitoraggio +
+        # preposto-vigilanza + segnalazione anomalie invece che su
+        # sanzioni/cancerogeni/ATEX/attrezzature singole.
+        "Ruolo del preposto nell'incident management: "
+        # Art. 19 c.1 verbatim — segnalazione tempestiva preposto
+        "obblighi del preposto segnalare tempestivamente al datore di "
+        "lavoro o al dirigente le deficienze dei mezzi e delle "
+        "attrezzature di lavoro e dei dispositivi di protezione, le "
+        "condizioni di pericolo durante il lavoro. "
+        # Art. 19 c.1 lett. a — vigilanza preposto
+        "Vigilanza osservanza degli obblighi dei lavoratori, "
+        "uso dei dispositivi di protezione collettivi e individuali. "
+        # Art. 35 — riunione periodica andamento infortunistico
+        "Riunione periodica di prevenzione e protezione dai rischi: "
+        "andamento degli infortuni e delle malattie professionali, "
+        "andamento della sorveglianza sanitaria, criteri di scelta "
+        "delle misure preventive. "
+        # Art. 53 — registro infortuni + denuncia INAIL
+        "Registro infortuni aziendale: tenuta e aggiornamento "
+        "obbligatorio. Denuncia INAIL degli infortuni sul lavoro "
+        "che comportano astensione dal lavoro superiore a tre giorni. "
+        # Art. 18 c.1 lett. r — comunicazione infortunio > 1 giorno
+        "Comunicazione obbligatoria infortunio sul lavoro che comporti "
+        "assenza dal lavoro di almeno un giorno escluso quello dell'evento. "
+        # Art. 29 c.3 — aggiornamento DVR a seguito infortuni
+        "Rielaborazione e aggiornamento del documento di valutazione "
+        "dei rischi a seguito di infortuni significativi, modifiche "
+        "del processo produttivo, evoluzione tecnica. "
+        # Misure correttive (generico ma corpus-presente)
+        "Misure correttive e azioni di prevenzione a seguito di "
+        "infortunio o incidente significativo. Analisi delle cause "
+        "e dinamica dell'evento."
     ),
     "Tecniche di comunicazione e sensibilizzazione": (
         "Comunicazione efficace del preposto verso lavoratori: linguaggio "
@@ -870,6 +904,66 @@ async def retrieve_chunks_per_module(
             "m1_prevenzione_drop_list_applied",
             chunks_dropped=drop_counts_m1,
             reason="medico_biologico_corpus_blur",
+        )
+
+    # FIX #32 LEVA 2 (analista review 14): drop-list M3 "Incidenti e
+    # infortuni mancati" del corso PREPOSTI 8h. Stesso pattern Segnaletica/
+    # M1 Generale: corpus 81/08 ha cosine alto fra "infortuni" e cluster
+    # adiacenti SPARSI (ATEX, cancerogeni, attrezzature singole, sostanze
+    # chimiche, sorveglianza, istituzioni). La query refinement #32 Leva 1
+    # spinge cosine su anchor art. 18/19/29/35/53, ma il residuo di
+    # contaminanti specifici resta — drop-list mira i 6 cluster identificati
+    # da analisi titoli M3 v2 (38 slide off-topic del 47%).
+    # Applicato SOLO al modulo "Incidenti e infortuni mancati" (M3 di
+    # Preposti 8h), NON globalmente (ATEX/cancerogeni sono legittimi in
+    # altri corsi). NB analista review 14: aggiunti anche "medico\s+
+    # competente|cartella\s+sanitaria|allegato\s+XLI" + "porte\s+meccanic"
+    # come copertura extra per pattern emersi nel post-fix.
+    _DROP_PATTERN_M3_INCIDENTI_PREPOSTI = re.compile(
+        r"\b("
+        # ATEX / atmosfere esplosive (4 slide in v2)
+        r"atmosfer[ae]\s+esplosiv\w*"
+        r"|zon[ae]?\s+ATEX"
+        r"|rischi[oe]\s+(?:di\s+)?esplosion\w*"
+        # Registri tumori / cancerogeni (7 slide in v2)
+        r"|registro\s+(?:tumori|esposizione)"
+        r"|agent[ei]\s+cancerogen\w*"
+        r"|cancerogen\w*\s+e\s+mutagen\w*"
+        r"|allegato\s+(?:XLII|XLIII|XLI)\b"
+        # Sostanze cancerogene + allegati (5 slide in v2)
+        r"|sostanz[ae]\s+(?:cancerogen|tossic|pericolos)\w*"
+        # Medico/sorveglianza (review 14 aggiunta)
+        r"|medico\s+competent\w*"
+        r"|cartella\s+sanitaria"
+        r"|sorveglianza\s+sanitaria"
+        # Porte meccaniche (review 14 aggiunta — fuori posto)
+        r"|porte\s+meccanic\w*"
+        # Istituzioni vigilanza generiche (2 slide in v2)
+        r"|ispettorato\s+nazional\w*\s+del\s+lavoro\s+funzion\w*"
+        r")\b",
+        re.IGNORECASE,
+    )
+    m3_incidenti_modules = [
+        m for m in pacing_plan.modules
+        if m.title == "Incidenti e infortuni mancati"
+    ]
+    drop_counts_m3: dict[int, int] = {}
+    for m3 in m3_incidenti_modules:
+        kept_chunks = []
+        dropped = 0
+        for c in result[m3.module_index]:
+            if _DROP_PATTERN_M3_INCIDENTI_PREPOSTI.search(c.body or ""):
+                dropped += 1
+                continue
+            kept_chunks.append(c)
+        if dropped > 0:
+            drop_counts_m3[m3.module_index] = dropped
+            result[m3.module_index] = kept_chunks
+    if drop_counts_m3:
+        logger.info(
+            "m3_incidenti_drop_list_applied",
+            chunks_dropped=drop_counts_m3,
+            reason="atex_cancerogeni_attrezzature_corpus_blur",
         )
 
     # 3. Log finale — cautela #1 analista review 2:
