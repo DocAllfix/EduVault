@@ -35,6 +35,18 @@ storage/pdfs/*.pdf
 
 # === Frontend ===
 node_modules/
+frontend/dist/
+frontend/build/
+frontend/.vite/
+frontend/*.pptx
+frontend/*.pdf
+
+# === Storage output (PPTX/PDF generati pipeline) ===
+storage/output/
+storage/pdfs/
+
+# === Claude Code runtime ===
+.claude/scheduled_tasks.lock
 
 # === OS / Editor ===
 .DS_Store
