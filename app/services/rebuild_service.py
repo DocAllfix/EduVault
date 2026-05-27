@@ -15,7 +15,6 @@ dalla prima generazione — vedi generation_service line 187).
 
 from __future__ import annotations
 
-import json
 import time
 import uuid as uuid_mod
 from typing import Any

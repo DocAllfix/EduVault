@@ -582,6 +582,15 @@ async def _backfill_missing_images(
     logger.info("backfill_started", holes=len(holes), stage="branded_only")
 
     fallback_count = 0
+    # FIX #31.5A (2026-05-27, analista review 6): disaggregare counter
+    # per tipo. Prima loggavamo solo branded_fallbacks=N totale, ma
+    # l'analista ha scoperto che la metrica "23/23 DIAGRAM catalog"
+    # era falsa perché contava `image.diagram_filling` valorizzato nel
+    # DB (sempre vero, l'LLM lo emette) ma NON contava se il render
+    # cairosvg avesse effettivamente prodotto PNG: i fallback DIAGRAM
+    # finivano nel branded ma erano invisibili al log generico.
+    diagram_fallback_count = 0
+    content_image_fallback_count = 0
     for pos, s in holes:
         # FIX #30.9f (2026-05-27): include diagram_filling.
         is_diagram = bool(s.image.diagram_code or s.image.diagram_filling)
@@ -593,11 +602,17 @@ async def _backfill_missing_images(
         if fb:
             image_map[pos] = fb
             fallback_count += 1
+            if is_diagram:
+                diagram_fallback_count += 1
+            else:
+                content_image_fallback_count += 1
 
     logger.info(
         "backfill_done",
         holes_initial=len(holes),
         branded_fallbacks=fallback_count,
+        diagram_fallbacks=diagram_fallback_count,  # FIX #31.5A
+        content_image_fallbacks=content_image_fallback_count,  # FIX #31.5A
         unresolved=len(_visual_holes(slides, image_map)),
     )
 

@@ -216,6 +216,23 @@ async def _compose_normative_refs_from_db(
         s.normative_ref = new_ref[:200]
 
 
+def _smart_truncate_to_words(text: str, max_words: int) -> str:
+    """FIX #31.4 (2026-05-27, analista review 5): truncate intelligente
+    a max_words preservando senso. Usato nei bookends MODULE_CLOSE per
+    evitare che un titolo content lungo (es. 13 parole) violi
+    bullet_max_words=12 e triggeri il fallback distruttivo che ha
+    eliminato 77 slide di M2 in E2E #22.
+
+    Strategia: split su parole, tieni le prime max_words, aggiungi
+    "…" come marker visibile di troncamento. Preserva il senso
+    iniziale del bullet (le parole più informative sono in testa).
+    """
+    words = text.split()
+    if len(words) <= max_words:
+        return text
+    return " ".join(words[:max_words]) + "…"
+
+
 def _build_module_bookends(
     module_index: int,
     module_title: str,
@@ -228,10 +245,15 @@ def _build_module_bookends(
     riassume con 5 top bullet derivati dai title delle slide di contenuto
     (i 5 titoli più "centrali", non i bridge come QUIZ/RECAP).
 
+    FIX #31.4 (2026-05-27, analista review 5): auto-truncate bullet
+    MODULE_CLOSE a bullet_max_words=12. Era la causa del bug E2E #22:
+    titolo content da 13 parole → bullet MODULE_CLOSE da 13 parole →
+    ValidationError → fallback_legacy → 77 slide M2 buttate via.
+
     Note speaker brevi pre-composte per entrambi (non dipendono da LLM, audio
     TTS pulito it-IT-DiegoNeural).
     """
-    from app.models.core import SlideType
+    from app.models.core import LAYOUT_CONSTRAINTS, SlideType
 
     n_module = module_index + 1
     # MODULE_OPEN
@@ -272,12 +294,19 @@ def _build_module_bookends(
         # Padding con placeholder semantici se modulo magro
         top5.append(f"Approfondimento {len(top5) + 1} del modulo")
 
+    # FIX #31.4 (analista review 5): auto-truncate bullet ai max_words
+    # del tipo MODULE_CLOSE prima di passare al validator Pydantic.
+    # Previene il fallback distruttivo se un titolo content è leggermente
+    # lungo (es. 13 parole su limite 12).
+    mc_max_words = LAYOUT_CONSTRAINTS[SlideType.MODULE_CLOSE].bullet_max_words
+    top5_safe = [_smart_truncate_to_words(t, mc_max_words) for t in top5]
+
     close_slide = SlideContent(
         index=len(content_slides) + 1,
         module_index=module_index,
         slide_type=SlideType.MODULE_CLOSE,
         title=module_title,
-        bullets=top5,
+        bullets=top5_safe,
         speaker_notes=(
             f"Riepilogo del modulo {n_module}. Abbiamo trattato i punti chiave "
             f"qui sintetizzati. Nel modulo successivo continueremo il percorso "
@@ -387,15 +416,26 @@ async def content_agent(state: NexusPipelineState) -> dict[str, object]:
                     continue
                 return None
             slide_count = len(result.get("slides", []))
-            # Accetta il risultato: instructor (o legacy) ha già fatto il suo
-            # massimo. Sotto-cardinalità è loggata via degraded=True dentro
-            # generate_module_structured, non rigeneriamo da zero.
+            # FIX #31.4 (2026-05-27, analista review 5): gate fail-fast,
+            # NON accept. Prima loggava warning e ritornava il modulo
+            # disastrato che il builder portava a un PPTX consegnabile
+            # con modulo mancante + numerazione rotta (E2E #22: M2 = 2
+            # slide su 82 attese, modulo 3 sparito, numerazione 1-2-4).
+            # Per una demo self-serve è inaccettabile: un cliente che
+            # genera un corso deve vedere un crash esplicito, NON un
+            # output silenziosamente rotto.
             if slide_count < MIN_ACCEPTABLE_SLIDES_PER_MODULE:
-                logger.warning(
-                    "module_below_threshold_accepted",
+                logger.error(
+                    "module_below_threshold_fatal",
                     module_index=module.module_index,  # type: ignore[attr-defined]
                     slide_count=slide_count,
                     threshold=MIN_ACCEPTABLE_SLIDES_PER_MODULE,
+                )
+                raise RuntimeError(
+                    f"Modulo {module.module_index} ha solo {slide_count} "  # type: ignore[attr-defined]
+                    f"slide su soglia minima {MIN_ACCEPTABLE_SLIDES_PER_MODULE}. "
+                    f"Pipeline interrotta per non consegnare corso con modulo "
+                    f"mancante (FIX #31.4 gate fatal — analista review 5)."
                 )
             return result
             # Codice morto seguente (mai eseguito, lasciato per riferimento storico
@@ -440,6 +480,14 @@ async def content_agent(state: NexusPipelineState) -> dict[str, object]:
                 f"[ID: {c.chunk_id}] Art. {c.article or '?'}: {c.body}"
                 for c in module_chunks[:30]
             )
+            # FIX #31.4 (analista review 5): SEPARO il try/except in 2 step.
+            # STEP 1: generate_module_structured (può fallire per LLM/quota/
+            # validation → legittimo fallback legacy).
+            # STEP 2: bookends (NON deve attivare fallback se fallisce: 77
+            # slide buone non si buttano via per un bullet di 13 parole nel
+            # MODULE_CLOSE — è quello che ha eliminato M2 in E2E #22).
+            module_obj = None
+            telemetry: dict[str, object] = {}
             try:
                 module_obj, telemetry = await generate_module_structured(
                     system=system_prompt,
@@ -458,20 +506,46 @@ async def content_agent(state: NexusPipelineState) -> dict[str, object]:
                     degraded=telemetry.get("degraded"),
                     provider=telemetry.get("provider_used"),
                 )
-                # FIX #30.2 (2026-05-26): bookends MODULE_OPEN + MODULE_CLOSE
-                # come slot fissi (NON via LLM separato). MODULE_OPEN apre con
-                # "MODULO N" + titolo modulo; MODULE_CLOSE chiude con 5 top
-                # bullet derivati dai title delle slide di contenuto.
+            except Exception as exc:
+                logger.warning(
+                    "module_instructor_failed_fallback_legacy",
+                    module_index=module.module_index,  # type: ignore[attr-defined]
+                    error_class=type(exc).__name__,
+                    error=str(exc)[:200],
+                )
+                # Fall-through al path legacy sotto (instructor fallito veramente).
+                module_obj = None
+
+            # STEP 2: se STEP 1 è andato a buon fine, applico bookends.
+            # NON dentro try/except che fa fallback (analista review 5):
+            # se bookends fallisce, è bug nostro e va aggiustato con
+            # truncate/drop, non dropping 77 slide buone.
+            if module_obj is not None:
                 content_slides = list(module_obj.slides)
                 mod_idx = module.module_index  # type: ignore[attr-defined]
                 mod_title = module.title  # type: ignore[attr-defined]
-                bookend_slides = _build_module_bookends(
-                    module_index=mod_idx,
-                    module_title=mod_title,
-                    content_slides=content_slides,
-                )
-                # Open + content + close, indici riassegnati contigui per modulo
-                all_slides = [bookend_slides[0]] + content_slides + [bookend_slides[1]]
+                try:
+                    bookend_slides = _build_module_bookends(
+                        module_index=mod_idx,
+                        module_title=mod_title,
+                        content_slides=content_slides,
+                    )
+                    all_slides = (
+                        [bookend_slides[0]] + content_slides + [bookend_slides[1]]
+                    )
+                except Exception as exc:
+                    # FIX #31.4 (analista review 5): bookends fallito MA
+                    # tengo le content_slides buone. Solo logging + skip
+                    # bookends, NO fallback distruttivo. Il modulo perde
+                    # MODULE_OPEN/CLOSE ma resta integro nei contenuti.
+                    logger.error(
+                        "bookends_construction_failed_kept_content",
+                        module_index=mod_idx,
+                        content_slides=len(content_slides),
+                        error_class=type(exc).__name__,
+                        error=str(exc)[:200],
+                    )
+                    all_slides = list(content_slides)
                 for i, s in enumerate(all_slides):
                     s.index = i
                     s.module_index = mod_idx
@@ -480,14 +554,6 @@ async def content_agent(state: NexusPipelineState) -> dict[str, object]:
                     title=mod_title,
                     slides=all_slides,
                 ).model_dump()
-            except Exception as exc:
-                logger.warning(
-                    "module_instructor_failed_fallback_legacy",
-                    module_index=module.module_index,  # type: ignore[attr-defined]
-                    error_class=type(exc).__name__,
-                    error=str(exc)[:200],
-                )
-                # Fall-through al path legacy sotto.
 
         # ── LEGACY FLOOR: parse+auto-fix manuale (solo se instructor è giù) ──
         try:

@@ -23,6 +23,7 @@ import json
 import os
 import re
 from pathlib import Path
+from typing import Any
 
 import anthropic
 import openai
@@ -515,7 +516,16 @@ async def call_llm(
 # fallback legacy). 5 dà più margine perché il reask di instructor parte selettivo
 # (re-asks SOLO le slide invalide, non tutte). Costo marginale: ~$0.005/retry × max
 # 5 = $0.025/modulo nel caso peggiore. Cardinalità separata, cap a 3 invariato.
-_INSTRUCTOR_DEPTH_RETRIES = 5       # asse profondità (passato a instructor)
+# FIX #32 velocità (analista review 12 + utente "demo < metà tempo"):
+# 5→2 reask LLM per batch. Riduce del 60% la coda di reask per batch
+# falliti. Demo #3 v2 ha bruciato ~4 min su UN batch fallito (5 reask
+# × ~30s/reask). Con 2 il tempo cap per batch fallito scende a ~1.5
+# min, dopo cui scatta _try_sub_batch_recovery (max_retries=2 hardcoded
+# interno, OK) che salva le slide via 2 sub-batch da half-size.
+# Trade-off: edge case validation borderline non più rescued al 3-4-5
+# tentativo. Sub-batch recovery copre il caso → atteso zero perdita
+# slide finale. Validato su Demo #3 v2 sub_batch_ok M2 batch 3.
+_INSTRUCTOR_DEPTH_RETRIES = 2       # asse profondità (passato a instructor)
 _MAX_CARDINALITY_ATTEMPTS = 3       # asse cardinalità (fill-loop) — uscita garantita
 
 
@@ -633,6 +643,111 @@ def _partition_chunks_for_batches(
         parts[i % n_batches].append(piece)
     sep = "\n\nArt." if "Art." in chunks_text else "\n\n"
     return [sep.join(part) for part in parts]
+
+
+async def _try_sub_batch_recovery(
+    *,
+    original_batch_size: int,
+    batch_chunks: str,
+    system: str,
+    provider: str,
+    eff_model: str,
+    already_count_in_module: int,
+    module_index: int,
+    batch_idx: int,
+) -> list | None:
+    """FIX #31.5B (2026-05-27, analista review 6): recovery quando un
+    batch fallisce dopo `_INSTRUCTOR_DEPTH_RETRIES=5` reask.
+
+    In E2E #23, M1 ha perso 27 slide (2 batch falliti × ~13 slide cad)
+    perché instructor max_retries si esauriva e il batch veniva
+    droppato (linea 765-776 dell'except). Analista: "Il batch fallito
+    NON va droppato, va recuperato con un retry (prompt semplificato
+    o sub-batch più piccolo) invece di perdere 10-13 slide."
+
+    Strategia:
+      1. Dimezza batch_size (es. 10 → 2 sub-batch da 5)
+      2. Per ogni sub-batch: prompt SEMPLIFICATO (no SPREAD overhead,
+         no quota_block, no already_titles → riduce token e variance)
+      3. instructor.max_retries=2 (vs 5 main) — 60% più veloce sul
+         caso peggiore. Il sub-batch è più semplice del main, ha più
+         probabilità di chiudere al primo tentativo.
+
+    Ritorna lista slide recuperate (può essere parziale se solo 1 sub
+    su 2 chiude), oppure None se TUTTI i sub-batch falliscono.
+
+    Edge case: se original_batch_size < 4 skip recovery (troppo
+    piccolo per dividere, non vale il costo).
+    """
+    # ModuleSlides import locale (stesso pattern di generate_module_structured)
+    from app.models.pipeline import ModuleSlides
+
+    if original_batch_size < 4:
+        logger.info(
+            "sub_batch_skipped_too_small",
+            module_index=module_index, batch_idx=batch_idx,
+            original_batch_size=original_batch_size,
+        )
+        return None
+
+    half = original_batch_size // 2
+    sub_sizes = [half, original_batch_size - half]  # es. 10→[5,5], 7→[3,4]
+
+    recovered_slides: list = []
+    for sub_idx, sub_size in enumerate(sub_sizes):
+        # Prompt SEMPLIFICATO: niente SPREAD, niente quota, niente
+        # already_titles — il sub-batch è "best effort emergency"
+        # che recupera le slide perse, non ottimizza la coerenza
+        # tematica fine.
+        sub_prompt = (
+            f"Genera ESATTAMENTE {sub_size} slide a tema, brevi e mirate, "
+            f"a partire dai chunk normativi assegnati qui sotto.\n\n"
+            f"CHUNK NORMATIVI ASSEGNATI:\n"
+            f"{batch_chunks[:3000]}\n\n"
+            f"Vincoli: rispetta gli schemi pydantic (titoli ≤70 char, "
+            f"bullets entro i max per tipo, source_chunk_ids come LISTA "
+            f"di stringhe non come stringa). NON inventare contenuto "
+            f"fuori dai chunk forniti."
+        )
+        try:
+            client, model_id, _ = _instructor_client_for(provider, eff_model)
+            sub_module = await client.chat.completions.create(
+                model=model_id,
+                response_model=ModuleSlides,
+                max_retries=2,  # ridotto da _INSTRUCTOR_DEPTH_RETRIES=5
+                messages=[
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": sub_prompt},
+                ],
+                validation_context={
+                    "expected_slides": sub_size,
+                    "cardinality_mode": "warn",
+                },
+            )
+            sub_slides = sub_module.slides[:sub_size]
+            recovered_slides.extend(sub_slides)
+            logger.info(
+                "sub_batch_ok",
+                module_index=module_index,
+                batch_idx=batch_idx,
+                sub_idx=sub_idx,
+                sub_size=sub_size,
+                got=len(sub_slides),
+            )
+        except Exception as sub_exc:
+            logger.warning(
+                "sub_batch_failed",
+                module_index=module_index,
+                batch_idx=batch_idx,
+                sub_idx=sub_idx,
+                sub_size=sub_size,
+                error_class=type(sub_exc).__name__,
+                error=str(sub_exc)[:200],
+            )
+            # Skip questo sub-batch, prova il prossimo
+            continue
+
+    return recovered_slides if recovered_slides else None
 
 
 async def generate_module_structured(
@@ -763,15 +878,70 @@ async def generate_module_structured(
                 reasks=reask_counter["reasks"],  # FIX #31 MOSSA 4
             )
         except Exception as exc:
-            # FIX #29.4: batch failure NON butta i precedenti. Marca degraded
-            # e continua col prossimo batch.
-            telemetry["batches_failed"] = int(telemetry.get("batches_failed", 0)) + 1
-            telemetry["degraded"] = True
+            # FIX #29.4: batch failure NON butta i precedenti (i 7 batch OK
+            # restano in all_slides). FIX #31.5B (analista review 6): prima
+            # di marcare il batch come failed, tenta sub-batch recovery —
+            # spezza il batch da N in 2 sub-batch da N//2 e tenta con prompt
+            # semplificato + max_retries=2. Recupera tipicamente 5-10 slide
+            # per batch fallito che prima erano semplicemente perse.
             logger.warning(
-                "module_batch_failed",
+                "module_batch_failed_attempting_split",
                 module_index=module_index, batch_idx=batch_idx,
+                batch_size=batch_size,
                 error_class=type(exc).__name__, error=str(exc)[:300],
             )
+            try:
+                recovered = await _try_sub_batch_recovery(
+                    original_batch_size=batch_size,
+                    batch_chunks=batch_chunks,
+                    system=system,
+                    provider=provider,
+                    eff_model=eff_model,
+                    already_count_in_module=len(all_slides),
+                    module_index=module_index,
+                    batch_idx=batch_idx,
+                )
+            except Exception as sub_exc:
+                # Funzione recovery a sua volta crashata (non dovrebbe)
+                logger.error(
+                    "sub_batch_recovery_crashed",
+                    module_index=module_index, batch_idx=batch_idx,
+                    error_class=type(sub_exc).__name__,
+                )
+                recovered = None
+
+            if recovered:
+                # Recovery RIUSCITA (parziale o totale): aggiungi le slide
+                # recuperate, conta batch come "recovered" non "failed".
+                start_idx = len(all_slides)
+                for offset, s in enumerate(recovered[:batch_size]):
+                    s.index = start_idx + offset
+                    s.module_index = module_index
+                    all_slides.append(s)
+                telemetry["batches_recovered"] = int(
+                    telemetry.get("batches_recovered", 0)
+                ) + 1
+                # Se il recovery ha dato < batch_size slide, marca degraded
+                if len(recovered) < batch_size:
+                    telemetry["degraded"] = True
+                logger.info(
+                    "module_batch_recovered_via_split",
+                    module_index=module_index, batch_idx=batch_idx,
+                    sub_slides_recovered=len(recovered),
+                    sub_slides_expected=batch_size,
+                )
+            else:
+                # Recovery FALLITA o skippata (batch_size < 4): marca
+                # degraded e continua come prima del fix.
+                telemetry["batches_failed"] = int(
+                    telemetry.get("batches_failed", 0)
+                ) + 1
+                telemetry["degraded"] = True
+                logger.warning(
+                    "module_batch_failed_final",
+                    module_index=module_index, batch_idx=batch_idx,
+                    error_class=type(exc).__name__,
+                )
             last_exc = exc
             continue
 

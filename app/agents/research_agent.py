@@ -23,6 +23,8 @@ Architectural notes:
 
 from __future__ import annotations
 
+import re
+
 import structlog
 
 from app.agents.pipeline import NexusPipelineState
@@ -308,10 +310,35 @@ MODULE_QUERY_EXPANSIONS: dict[str, str] = {
         "lotta antincendio, esercitazioni periodiche."
     ),
     "Segnaletica": (
-        "Cartelli e segnali di sicurezza sul lavoro: divieto, avvertimento, "
-        "prescrizione, salvataggio. Forme geometriche, colori, pittogrammi "
-        "ISO. Segnali acustici e luminosi. Posizionamento, visibilità, "
-        "manutenzione cartellonistica."
+        # FIX #31.6C (2026-05-27, analista review 7): query ricalibrata
+        # DENTRO il tema segnaletica. In #31.5 avevamo aggiunto
+        # "formazione" e "obblighi del datore" → self-own: 13 slide M3
+        # diventarono formazione/sanzioni. Rimossi entrambi. Allarghiamo
+        # ai sotto-tipi LEGITTIMI di segnaletica (cartelli, colori,
+        # pittogrammi, luminosi, acustici, gestuali, esodo, antincendio,
+        # cantiere) — segnaletica a tutto tondo, non solo cartelli.
+        # Aspettativa onesta: corpus 81/08 ha ~60 chunk di vera
+        # segnaletica, M3 potrà reggere ~60 slide oneste; le 20 extra
+        # saranno ripetizione on-topic (accettabile) invece di sanzioni
+        # (inaccettabile). Trade giusto. Il drop-list post-retrieval
+        # (#31.6D) elimina il residuo da adiacenza-corpus
+        # (sanzioni/medico/inidoneità/RSPP).
+        "Segnaletica di salute e sicurezza sul lavoro: "
+        # Cartelli (core)
+        "cartelli di divieto, avvertimento, prescrizione, salvataggio, "
+        "antincendio. "
+        # Caratteristiche cartelli
+        "Forme geometriche, colori di sicurezza (rosso, giallo, verde, blu), "
+        "pittogrammi ISO 7010, dimensioni, materiali resistenti, "
+        "posizionamento ottimale, visibilità, manutenzione. "
+        # Segnali alternativi (sotto-tipi Titolo V)
+        "Segnali luminosi, segnali acustici, comunicazioni verbali, "
+        "segnali gestuali per movimentazione manuale e mezzi di sollevamento. "
+        # Segnaletica per contesti specifici (allargamento DENTRO tema)
+        "Segnaletica delle vie di esodo, segnaletica antincendio, "
+        "segnaletica di emergenza, segnaletica di cantiere temporaneo "
+        "e mobile, segnaletica per lavori stradali, segnaletica per "
+        "sostanze pericolose e marchio CE."
     ),
 
     # === sicurezza_lavoratori_generale (4 moduli) ===
@@ -321,9 +348,37 @@ MODULE_QUERY_EXPANSIONS: dict[str, str] = {
         "rischio residuo, livelli di rischio basso medio alto."
     ),
     "Prevenzione e protezione": (
-        "Misure di prevenzione e protezione: gerarchia dei controlli, "
-        "eliminazione del rischio, sostituzione, controlli tecnici, "
-        "controlli amministrativi. Sorveglianza sanitaria."
+        # FIX #32 (analista review 12): query ampliata mirata a
+        # misure tecniche/organizzative/procedurali per ESCLUDERE
+        # cosine match con "sorveglianza sanitaria" / "medico
+        # competente" / "agenti biologici" / "cartella sanitaria"
+        # che erano 39 chunk = 46% off-topic in Demo #2 v2 M1.
+        # NB: la query NON menziona "medico", "sorveglianza",
+        # "biologico", "cancerogeno", "sanitaria" intenzionalmente.
+        # Questi temi appartengono a moduli diversi del corso
+        # (Diritti e doveri, Concetti di rischio).
+        "Misure di prevenzione e protezione tecniche e organizzative: "
+        # Gerarchia dei controlli (esteso)
+        "gerarchia dei controlli ISO/EN, eliminazione del rischio alla "
+        "fonte, sostituzione con alternative meno pericolose, controlli "
+        "ingegneristici (separazione spaziale, ventilazione, schermature, "
+        "interlock di sicurezza), controlli amministrativi (procedure "
+        "operative, permessi di lavoro, turni di lavoro). "
+        # DPI collettivi e individuali (core)
+        "Dispositivi di protezione collettiva (DPC) prima dei DPI: "
+        "parapetti, schermi, aspirazione localizzata, isolamento "
+        "acustico. Dispositivi di protezione individuale (DPI) come "
+        "ultima barriera. "
+        # Misure procedurali e organizzative
+        "Procedure di sicurezza, istruzioni operative, formazione "
+        "specifica preventiva, addestramento all'uso DPI, manutenzione "
+        "preventiva delle attrezzature, ispezioni periodiche, "
+        "registrazione anomalie. "
+        # Esempi pratici (anti-blur)
+        "Misure tecniche per cadute dall'alto (parapetti, reti, "
+        "imbracature), per rischio elettrico (interruttori magnetotermici, "
+        "messa a terra), per rumore (cabine acustiche, cuffie), per "
+        "macchine (ripari, dispositivi di consenso)."
     ),
     "Organizzazione della prevenzione": (
         "Servizio prevenzione e protezione aziendale SPP, RSPP, ASPP, "
@@ -511,13 +566,389 @@ def _cosine(a: list[float], b: list[float]) -> float:
     return dot / (na * nb)
 
 
+# ═══════════════════════════════════════════════════════════════════════
+# FIX #31.1 (2026-05-27): RETRIEVAL PER-MODULO (precondizione demo CFP).
+#
+# Sostituisce "1 retrieval globale + cluster + rebalance" con
+# N retrieval indipendenti uno per modulo. Risolve il grab-bag M3/M4
+# rilevato in E2E #19 (M3 "Procedure emergenza" = 20 vere emergenze
+# + 54 RLS/sanzioni/fondi; M4 "Segnaletica" = 22 segnaletica vera +
+# 60 formazione/RSPP/agenti). Vedi piano vast-hopping-sketch.md.
+#
+# Approvato analista 2026-05-27 (review 1 e 2) con 6 cautele integrate:
+#   1. lost_to_other_module per modulo (diagnostico: corpus povero vs
+#      dedup aggressiva)
+#   2. guard module_titles None → flusso legacy (corsi sperimentali)
+#   3. test_dedup_does_not_starve_weak_module
+#   4. filtro relevance dentro funzione PRIMA dedup (chunks_by_module
+#      e chunks_flatten devono vedere stesso insieme)
+#   5. log relevance_filter_dropped per modulo
+#   6. assert module_index contiguo + allineato con pacing
+# ═══════════════════════════════════════════════════════════════════════
+
+
+async def retrieve_chunks_per_module(
+    pacing_plan: PacingPlan,
+    regulation_ids: list[str],
+    region: str,
+    knowledge_repo: KnowledgeRepository,
+    top_k_per_module: int = 70,
+    min_relevance: float = 0.0,
+) -> dict[int, list[NormativeChunk]]:
+    """#31.1 — N retrieval indipendenti, uno per modulo + dedup cosine.
+
+    Per ogni modulo del pacing_plan:
+      1. Embed query: ``MODULE_QUERY_EXPANSIONS[title]`` OR title nudo.
+      2. ``knowledge_repo.search_chunks(top_k=top_k_per_module)``.
+      3. Filtro relevance > min_relevance (cautela #4 analista).
+
+    Dedup cross-modulo: un chunk vince in UN SOLO modulo (quello con
+    il cosine score più alto vs il suo embed query). Necessario perché
+    un chunk può essere rilevante per più temi (es. "DPI" vs "Rischi
+    specifici" sui DPI elettrici).
+
+    Ritorna ``dict[module_index, list[NormativeChunk]]`` dove ogni
+    chunk appare in al più un modulo.
+    """
+    from app.services.ingestion_service import embed_query as _embed_query
+
+    # 1. Per ogni modulo: embed query + search_chunks + filtro relevance
+    raw_per_module: dict[int, list[NormativeChunk]] = {}
+    for m in pacing_plan.modules:
+        query_text = MODULE_QUERY_EXPANSIONS.get(m.title, m.title)
+        try:
+            module_q_embed = await _embed_query(query_text)
+        except Exception as exc:
+            logger.warning(
+                "module_query_embed_failed",
+                module_index=m.module_index, title=m.title, error=str(exc),
+            )
+            raw_per_module[m.module_index] = []
+            continue
+
+        module_chunks_raw = await knowledge_repo.search_chunks(
+            query_embedding=module_q_embed,
+            regulation_ids=regulation_ids,
+            region=region,
+            top_k=top_k_per_module,
+        )
+        # Cautela #4 analista review 2: filtro relevance PRIMA della
+        # dedup. chunks_by_module (al content_agent) e _flatten_unique
+        # (a CourseContext.chunks per audit) devono vedere lo stesso
+        # insieme — altrimenti chunk sotto-soglia finiscono in slide
+        # mentre l'audit dice scartati = disallineamento silenzioso.
+        module_chunks = [
+            c for c in module_chunks_raw
+            if c.relevance_score and c.relevance_score > min_relevance
+        ]
+        # FIX #31.8 LEVA B (2026-05-27, analista review 11): MIN_RELEVANCE
+        # adattivo per modulo. Se il filtro statico svuota un modulo sotto
+        # la soglia gate (30 chunk), ricalcola MIN come P25 dei chunk raw
+        # e ri-applica. Salva i moduli con tema stretto / corpus debole
+        # (Patologia 1 di Preposti 8h: M3 "Incidenti mancati" → 70 chunk
+        # con score [0.21..0.29] → filtro statico 0.3 droppa 60/70 → 5
+        # chunk per 108 slide attese. Post-B: P25 ≈ 0.22, ~50 rescued).
+        GATE_MIN_CHUNKS = 30
+        adaptive_applied = False
+        if len(module_chunks) < GATE_MIN_CHUNKS and module_chunks_raw:
+            scores_sorted = sorted(
+                (c.relevance_score or 0.0) for c in module_chunks_raw
+            )
+            p25_idx = max(0, len(scores_sorted) // 4)
+            adaptive_min = scores_sorted[p25_idx]
+            rescued = [
+                c for c in module_chunks_raw
+                if c.relevance_score and c.relevance_score > adaptive_min
+            ]
+            if len(rescued) > len(module_chunks):
+                logger.info(
+                    "min_relevance_adaptive_applied",
+                    module_index=m.module_index, title=m.title,
+                    static_min=min_relevance,
+                    adaptive_min=round(adaptive_min, 4),
+                    before=len(module_chunks),
+                    after=len(rescued),
+                )
+                module_chunks = rescued
+                adaptive_applied = True
+        relevance_dropped = len(module_chunks_raw) - len(module_chunks)
+        raw_per_module[m.module_index] = module_chunks
+        logger.info(
+            "module_retrieval_done",
+            module_index=m.module_index, title=m.title,
+            count_raw=len(module_chunks_raw),
+            count_after_relevance=len(module_chunks),
+            relevance_filter_dropped=relevance_dropped,  # cautela #5
+            adaptive_min_applied=adaptive_applied,  # FIX #31.8 B
+            top_score=max((c.relevance_score or 0) for c in module_chunks)
+                if module_chunks else 0,
+        )
+
+    # 2. Dedup cross-modulo QUOTA-AWARE (FIX #31.8 LEVA C, analista
+    # review 11): garantisci QUOTA_MIN chunk per modulo PRIMA di
+    # trasferire eccedenti via cosine winner. Risolve Patologia 2
+    # dedup-zero-sum su moduli adiacenti (Preposti M1/M4/M5 perdono
+    # 40-47 chunk ciascuno verso moduli "campione" cosine come M0;
+    # Generale Demo #2 M3 "Diritti e doveri" perde 4 slot Segnaletica
+    # verso M2 "Segnaletica" stesso corso).
+    #
+    # Algoritmo:
+    #   Step 1: ordina chunk per modulo decrescente per score.
+    #   Step 2: ogni modulo pin i suoi top QUOTA_MIN chunk (a meno che
+    #           non siano già pinned altrove — first-come).
+    #   Step 3: chunk NON pinned → dedup cosine winner come prima
+    #           (preserva semantica originale per gli eccedenti).
+    #   Step 4: costruisci result combinando pinned + cosine-winners.
+    #
+    # Su corsi 4h × 4 moduli ben distinti (E25) la quota 30 è
+    # ampiamente coperta da tutti i moduli → effetto zero su
+    # retrocompat. Attiva solo dove dedup-starvation morde.
+    QUOTA_MIN = 30  # analista review 11 verbatim
+
+    # Step 1: sort per modulo decrescente per score
+    sorted_per_module: dict[int, list[NormativeChunk]] = {
+        m_idx: sorted(
+            chunks_list,
+            key=lambda c: c.relevance_score or 0.0,
+            reverse=True,
+        )
+        for m_idx, chunks_list in raw_per_module.items()
+    }
+
+    # Step 2: pin i primi QUOTA_MIN chunk di ogni modulo (first-come,
+    # ordine di iterazione = ordine module_index)
+    pinned: dict[str, int] = {}  # chunk_id → module_index pinned
+    for m_idx, chunks_list in sorted_per_module.items():
+        quota_taken = 0
+        for c in chunks_list:
+            if quota_taken >= QUOTA_MIN:
+                break
+            if c.chunk_id not in pinned:
+                pinned[c.chunk_id] = m_idx
+                quota_taken += 1
+
+    # Step 3: dedup cosine winner sui NON pinned (eccedenti)
+    chunk_best_module: dict[str, tuple[int, float]] = {}
+    for m_idx, chunks_list in raw_per_module.items():
+        for c in chunks_list:
+            if c.chunk_id in pinned:
+                continue  # già pinned, skip dedup
+            cid = c.chunk_id
+            score = c.relevance_score or 0.0
+            current = chunk_best_module.get(cid)
+            if current is None or score > current[1]:
+                chunk_best_module[cid] = (m_idx, score)
+
+    # Step 4: costruisci result combinando pinned + cosine-winners
+    result: dict[int, list[NormativeChunk]] = {
+        m.module_index: [] for m in pacing_plan.modules
+    }
+    for m_idx, chunks_list in raw_per_module.items():
+        for c in chunks_list:
+            if c.chunk_id in pinned:
+                if pinned[c.chunk_id] == m_idx:
+                    result[m_idx].append(c)
+            else:
+                if chunk_best_module.get(c.chunk_id, (None, 0))[0] == m_idx:
+                    result[m_idx].append(c)
+
+    # Diagnostico FIX #31.8 C: quanti chunk pinned per modulo + flag
+    # per_module_quota_pin_active (= modulo che ha "saturato" la quota
+    # — segnale che la rete C è stata utile).
+    per_module_pinned: dict[int, int] = {
+        m_idx: sum(
+            1 for c in chunks_list
+            if c.chunk_id in pinned and pinned[c.chunk_id] == m_idx
+        )
+        for m_idx, chunks_list in raw_per_module.items()
+    }
+    logger.info(
+        "dedup_quota_aware_applied",
+        quota_min=QUOTA_MIN,
+        pinned_count=len(pinned),
+        per_module_pinned=per_module_pinned,
+    )
+
+    # FIX #31.6D (2026-05-27, analista review 7): drop-list per Segnaletica.
+    # In E2E #24 il modulo M3 "Segnaletica" aveva 13 slide off-topic su
+    # sanzioni/medico/inidoneità/RSPP (=15%). Causa: il corpus 81/08 ha
+    # cosine alto fra "segnaletica" e questi temi trasversali. Il drop-list
+    # rimuove i chunk il cui body matcha pattern non-segnaletica DOPO la
+    # dedup (chirurgico, applicato SOLO al modulo "Segnaletica" perché
+    # "RSPP" potrebbe essere legittimo in M0 Rischi specifici, "medico"
+    # in altri moduli ecc.). Pattern derivati da analisi titoli M3 #24:
+    # sanzioni, medico competente, inidoneità, RSPP/SPP, formazione generica
+    # (la query ampliata #31.6C ha già tolto "formazione specifica
+    # sulla segnaletica" ma il drop-list assicura zero residuo).
+    _DROP_PATTERN_SEGNALETICA = re.compile(
+        r"\b("
+        r"sanzion[ei]"
+        r"|inidone(?:o|ita|ità)"
+        r"|medico\s+competent\w*"  # competente, competenti
+        r"|giudizio\s+(?:medico|di\s+idonei)\w*"
+        r"|sorveglianza\s+sanitaria"
+        r"|RSPP|ASPP"
+        r"|SPP\s+(?:aziendal|servizio)\w*"
+        r"|delega\s+di\s+funzion\w*"
+        r"|responsabilit[àa]\s+penal\w*"
+        r")\b",
+        re.IGNORECASE,
+    )
+    segnaletica_modules = [
+        m for m in pacing_plan.modules if m.title == "Segnaletica"
+    ]
+    drop_counts: dict[int, int] = {}
+    for sm in segnaletica_modules:
+        kept_chunks = []
+        dropped = 0
+        for c in result[sm.module_index]:
+            if _DROP_PATTERN_SEGNALETICA.search(c.body or ""):
+                dropped += 1
+                continue
+            kept_chunks.append(c)
+        if dropped > 0:
+            drop_counts[sm.module_index] = dropped
+            result[sm.module_index] = kept_chunks
+    if drop_counts:
+        logger.info(
+            "segnaletica_drop_list_applied",
+            chunks_dropped=drop_counts,
+            reason="off_topic_corpus_adjacency",
+        )
+
+    # FIX #32 (2026-05-27, analista review 12): drop-list M1
+    # "Prevenzione e protezione" del corso GENERALE 4h. Stesso
+    # pattern di Segnaletica drop-list: corpus 81/08 ha cosine
+    # alto fra "Prevenzione" e "Sorveglianza sanitaria / medico
+    # competente / agenti biologici", e la dedup zero-sum (#31.8 C)
+    # ha bilanciato i numeri ma il contenuto recuperato per M1 di
+    # Demo #2 v2 era 46% medico/biologico off-topic.
+    # Pattern derivato da analisi titoli M1 Demo #2 v2 (analista
+    # classificazione: 39/63 medico/sorveglianza/agenti biologici).
+    # Applicato SOLO al modulo "Prevenzione e protezione" (M1 di
+    # Generale 4h), NON a "Prevenzione e protezione" di altri
+    # cataloghi se esistesse (qui è specifico a corsi lavoratori
+    # generale per disambiguazione semantica).
+    _DROP_PATTERN_M1_PREVENZIONE_GENERALE = re.compile(
+        r"\b("
+        # Medico competente / sorveglianza sanitaria (core off-topic)
+        r"medico\s+competent\w*"
+        r"|sorveglianza\s+sanitaria"
+        r"|giudizio\s+(?:medico|di\s+idonei)\w*"
+        r"|cartella\s+sanitaria"
+        r"|visita\s+medic\w*"
+        r"|inidone(?:o|ita|ità)"
+        # Agenti biologici (registri, vaccinazioni — sono temi di
+        # Diritti e doveri come parte formazione obbligatoria specifica)
+        r"|agent[ei]\s+biologic\w*"
+        r"|vaccinazion\w*"
+        r"|registro\s+(?:esposizione|biologic\w*)"
+        r"|cancerogen\w*\s+e\s+mutagen\w*"
+        # Sanzioni penali (sono M3 Diritti come "conseguenza dovere")
+        r"|sanzion[ei]\s+penal\w*"
+        r")\b",
+        re.IGNORECASE,
+    )
+    m1_modules = [
+        m for m in pacing_plan.modules
+        if m.title == "Prevenzione e protezione"
+    ]
+    drop_counts_m1: dict[int, int] = {}
+    for m1 in m1_modules:
+        kept_chunks = []
+        dropped = 0
+        for c in result[m1.module_index]:
+            if _DROP_PATTERN_M1_PREVENZIONE_GENERALE.search(c.body or ""):
+                dropped += 1
+                continue
+            kept_chunks.append(c)
+        if dropped > 0:
+            drop_counts_m1[m1.module_index] = dropped
+            result[m1.module_index] = kept_chunks
+    if drop_counts_m1:
+        logger.info(
+            "m1_prevenzione_drop_list_applied",
+            chunks_dropped=drop_counts_m1,
+            reason="medico_biologico_corpus_blur",
+        )
+
+    # 3. Log finale — cautela #1 analista review 2:
+    # `lost_to_other_module` per modulo è il numero DIAGNOSTICO che
+    # distingue "corpus povero" (mitigation: allarga query) da "dedup
+    # aggressiva che migra generici verso moduli forti" (mitigation
+    # opposta: dedup quota-aware). Senza, vedi M3=15 e non sai quale
+    # fix applicare. Sono due fix opposti.
+    total_raw = sum(len(v) for v in raw_per_module.values())
+    total_dedup = sum(len(v) for v in result.values())
+    per_module_kept: dict[int, int] = {
+        m_idx: len(v) for m_idx, v in result.items()
+    }
+    per_module_lost: dict[int, int] = {
+        m_idx: len(raw_per_module.get(m_idx, [])) - per_module_kept[m_idx]
+        for m_idx in per_module_kept
+    }
+    logger.info(
+        "per_module_retrieval_summary",
+        total_raw=total_raw,
+        total_after_dedup=total_dedup,
+        duplicates_removed=total_raw - total_dedup,
+        per_module_kept=per_module_kept,
+        lost_to_other_module=per_module_lost,
+    )
+
+    # Cautela #6 analista review 2: assert module_index contiguo +
+    # allineato con pacing_plan. Blinda contro disallineamento
+    # numerazione moduli (vecchio FIX #27.1 sotto altra forma: se gli
+    # indici del retrieval divergono da quelli del content_agent /
+    # builder, i chunk finiscono nel modulo sbagliato a valle senza
+    # errore visibile).
+    expected_keys = {m.module_index for m in pacing_plan.modules}
+    actual_keys = set(result.keys())
+    assert actual_keys == expected_keys, (
+        f"module_index mismatch: pacing={sorted(expected_keys)}, "
+        f"retrieval={sorted(actual_keys)}"
+    )
+
+    return result
+
+
+def _flatten_unique(
+    chunks_by_module: dict[int, list[NormativeChunk]],
+) -> list[NormativeChunk]:
+    """Helper #31.1: unione chunk preservando ordine per backward-compat
+    con ``chunks`` in CourseContext (usato per audit/fingerprint).
+
+    Itera per ``module_index`` ascendente, scarta duplicati. Necessario
+    perché ``CourseContext.chunks`` è ``list[NormativeChunk]`` flat e
+    il chunk_id deve essere unico per fingerprint coerente.
+    """
+    seen: set[str] = set()
+    out: list[NormativeChunk] = []
+    for m_idx in sorted(chunks_by_module.keys()):
+        for c in chunks_by_module[m_idx]:
+            if c.chunk_id not in seen:
+                seen.add(c.chunk_id)
+                out.append(c)
+    return out
+
+
 async def distribute_chunks_to_modules_cosine(
     chunks: list[NormativeChunk],
     pacing_plan: PacingPlan,
     course_id: str = "",
     pool: object | None = None,
 ) -> tuple[dict[int, list[NormativeChunk]], list[dict[str, object]]]:
-    """FIX #30.9d (2026-05-26): cluster cosine embedding voyage-3.
+    """[DEPRECATED #31.1 — 2026-05-27]: sostituita da
+    ``retrieve_chunks_per_module()``. Mantenuta nel file per rollback
+    rapido se #31.1 introduce regressioni che la verifica E2E non
+    intercetta. Sarà rimossa post-OK analista sui 4 moduli.
+
+    Usata SOLO ora dal flusso legacy quando ``module_titles is None``
+    (corsi sperimentali senza catalogo — vedi guard in research_agent).
+
+    --- DOCSTRING ORIGINALE ---
+
+    FIX #30.9d (2026-05-26): cluster cosine embedding voyage-3.
 
     Step:
       1. Round-robin fallback se chunks < 3 × moduli (invariato).
@@ -691,7 +1122,14 @@ def distribute_chunks_to_modules(
     chunks: list[NormativeChunk],
     pacing_plan: PacingPlan,
 ) -> dict[int, list[NormativeChunk]]:
-    """Distribute chunks to modules by thematic similarity (FIX #30.9c).
+    """[DEPRECATED #31.1 — 2026-05-27]: sostituita da
+    ``retrieve_chunks_per_module()``. Mantenuta come fallback storico
+    pre-cosine (#30.9c thematic-only). Non più chiamata dal
+    research_agent moderno.
+
+    --- DOCSTRING ORIGINALE ---
+
+    Distribute chunks to modules by thematic similarity (FIX #30.9c).
 
     Algoritmo (3 livelli):
     1. Round-robin fallback se chunks < 3*moduli (poche fonti, evita
@@ -823,48 +1261,90 @@ async def research_agent(state: NexusPipelineState) -> dict[str, object]:
     title_str = str(catalog_entry["title"])
     query_parts = [title_str] + default_modules
     query = " ".join(query_parts)
-    query_embedding = await voyage_embed_with_retry(query)
-
-    # 3. Vector search with DYNAMIC top_k scaled by course duration.
-    top_k = max(30, int(request.duration_hours * 10))  # 30 for 1h, 80 for 8h
-    chunks = await knowledge_repo.search_chunks(
-        query_embedding=query_embedding,
-        regulation_ids=regulation_ids,
-        region=request.region,
-        top_k=top_k,
-    )
-
-    # ═══ RAG GATE: too few chunks → pipeline aborts ═══
-    if len(chunks) < 5:
-        raise ValueError(
-            f"RAG insufficiente: solo {len(chunks)} chunk trovati per "
-            f"{regulation_slugs}. Verificare che l'ingestion sia stata "
-            f"completata correttamente per queste normative."
-        )
-
-    # ═══ RELEVANCE FILTER ═══
-    chunks = [c for c in chunks if c.relevance_score and c.relevance_score > MIN_RELEVANCE]
-
-    if len(chunks) < 5:
-        raise ValueError(
-            f"RAG post-filtro insufficiente: solo {len(chunks)} chunk con "
-            f"rilevanza > {MIN_RELEVANCE}. Verificare la qualità degli embedding."
-        )
-
-    # 4. Pre-group chunks per module — semantic titles from COURSE_CATALOG
+    # FIX #31.1 (2026-05-27): pacing PRIMA del retrieval — serve
+    # module_titles per i N retrieval indipendenti.
     module_titles = default_modules if default_modules else None
     pacing_plan = PacingEngine().calculate(
         request.duration_hours, request.slide_density, module_titles=module_titles
     )
-    # FIX #30.9d (2026-05-26): nuovo cluster cosine embedding voyage-3.
-    # Mantiene rebalance_min/max e round-robin fallback identici. Dumpa CSV
-    # in output/cluster_logs/cluster_scores_{course_id}.csv per gap analysis
-    # con analista (top-3 scores, margin, body_len, thematic_winner come
-    # guardia parallela).
     _course_id_for_log = str(state.get("course_request", {}).get("id", "noid"))
-    chunks_by_module, _cluster_scores = await distribute_chunks_to_modules_cosine(
-        chunks, pacing_plan, course_id=_course_id_for_log, pool=pool,
-    )
+
+    # FIX #31.1 GUARD (analista review rischio #3): se module_titles is None
+    # (corso "sperimentale" senza catalogo), gli N retrieval embedderebbero
+    # "Modulo 1..N" senza significato semantico → collasso 0×N visto su
+    # 12-moduli (#30.9e). Per quei casi resta il flusso legacy global +
+    # cluster cosine + rebalance.
+    if module_titles is None:
+        logger.info(
+            "research_legacy_fallback",
+            reason="no_catalog_module_titles",
+            course_type=request.course_type,
+        )
+        query_embedding = await voyage_embed_with_retry(query)
+        top_k = max(30, int(request.duration_hours * 10))
+        chunks = await knowledge_repo.search_chunks(
+            query_embedding=query_embedding,
+            regulation_ids=regulation_ids,
+            region=request.region,
+            top_k=top_k,
+        )
+        if len(chunks) < 5:
+            raise ValueError(
+                f"RAG insufficiente (legacy path): solo {len(chunks)} chunk "
+                f"trovati per {regulation_slugs}."
+            )
+        chunks = [
+            c for c in chunks
+            if c.relevance_score and c.relevance_score > MIN_RELEVANCE
+        ]
+        if len(chunks) < 5:
+            raise ValueError(
+                f"RAG post-filtro insufficiente (legacy): {len(chunks)} chunk "
+                f"con rilevanza > {MIN_RELEVANCE}."
+            )
+        chunks_by_module, _cluster_scores = await distribute_chunks_to_modules_cosine(
+            chunks, pacing_plan, course_id=_course_id_for_log, pool=pool,
+        )
+    else:
+        # FIX #31.1 PATH: N retrieval indipendenti, uno per modulo.
+        # Il filtro MIN_RELEVANCE è applicato DENTRO la funzione PRIMA
+        # della dedup (cautela #4 analista review 2: chunks_by_module
+        # e chunks (post _flatten_unique) devono vedere lo stesso
+        # insieme — disallineamento silenzioso altrimenti).
+        chunks_by_module = await retrieve_chunks_per_module(
+            pacing_plan=pacing_plan,
+            regulation_ids=regulation_ids,
+            region=request.region,
+            knowledge_repo=knowledge_repo,
+            # FIX #31.8 LEVA A (2026-05-27, analista review 11): top_k
+            # scalabile con duration_hours per coprire scaling fino a
+            # 32h del catalogo cliente. Storia:
+            # - #31.2 fissò top_k=70 calibrato su 4h × 4 moduli (E25,
+            #   Generale 4h: ognuno ~50 chunk post-dedup).
+            # - Demo #3 Preposti 8h × 6 moduli ha rivelato top_k=70
+            #   sotto-dimensionato: M3 "Incidenti mancati" 5 chunk.
+            # - Formula: top_k = min(150, int(35 + 8 * duration_hours))
+            #   4h → 67 (≈ vecchio 70, retrocompat)
+            #   8h → 99 (+41% vs vecchio, copre 6 moduli stretti)
+            #   16h → 163 → cap 150
+            #   32h → 291 → cap 150 (mitigato da B+C)
+            # search_chunks è O(log N) su HNSW pgvector → costo
+            # trascurabile (~+30s atteso su 8h, irrilevante su 15 min).
+            top_k_per_module=min(150, int(35 + 8 * request.duration_hours)),
+            min_relevance=MIN_RELEVANCE,
+        )
+
+        # Ricostruisco `chunks` come unione deduplicata per
+        # CourseContext.chunks (audit + fingerprint). Il filtro relevance
+        # è già stato applicato dentro retrieve_chunks_per_module → qui
+        # solo gate "abbastanza chunk totali post filter+dedup".
+        chunks = _flatten_unique(chunks_by_module)
+        if len(chunks) < 5:
+            raise ValueError(
+                f"RAG insufficiente post per-module retrieval (#31.1): solo "
+                f"{len(chunks)} chunk con rilevanza > {MIN_RELEVANCE}. "
+                f"Allargare MODULE_QUERY_EXPANSIONS o verificare corpus."
+            )
 
     # 5. Retrieve stylistic patterns from Level 2
     style_patterns = await knowledge_repo.get_style_patterns(
@@ -882,12 +1362,19 @@ async def research_agent(state: NexusPipelineState) -> dict[str, object]:
         regulation_slugs=regulation_slugs,
     )
 
+    # FIX #31.1: top_k esiste solo nel ramo legacy (module_titles is None).
+    # Nel ramo per-modulo, ogni modulo ha il suo top_k_per_module
+    # (70 dopo FIX #31.2, era 45 in #31.1).
+    # Riporto entrambi nel log per coerenza.
     logger.info(
         "research_completed",
         chunks=len(chunks),
-        top_k=top_k,
+        chunks_by_module_sizes={
+            k: len(v) for k, v in chunks_by_module.items()
+        },
         modules=len(pacing_plan.modules),
         style_patterns=len(style_patterns),
+        retrieval_mode="per_module" if module_titles else "legacy_global",
     )
 
     return {

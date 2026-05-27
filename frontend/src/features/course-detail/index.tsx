@@ -98,13 +98,17 @@ const DOWNLOADS: { format: DownloadFormat; label: string; icon: React.ComponentT
 // FIX #31 MOSSA 3 (2026-05-27): audio TTS spostato in background dopo
 // pipeline. Il corso può essere `status=completed` con `audio_manifest_path`
 // ancora NULL (audio in elaborazione bg, 2-3 min). Il polling qui sotto
-// rileva quando arriva. Timeout duro 5 min: oltre, l'utente vede "audio
+// rileva quando arriva. Timeout duro 12 min: oltre, l'utente vede "audio
 // non disponibile" invece di uno spinner infinito (caso fallimento bg
 // silenzioso — non distinguibile da "in corso" senza migration apposita).
-// NB: 5 min copre il caso 4h. Per corsi 8h alzare a 8-10 min — vedi
-// #R-audio-fe-timeout-4h-only in docs/VERIFICATION_DEBT.md.
+// FIX #32 (analista review 12 + #R-audio-fe-timeout-4h-only chiuso):
+// 5→12 min copre corsi 8h (Preposti ~644 slide × 1.5s / sem=6 ≈ 167s
+// audio bg + overhead = ~4-5 min totali, ma su Railway con concorrenza
+// può salire fino a 8-10 min). 12 min dà margine sicuro senza spinner
+// fastidiosi a 4h tipici (che completano in 3 min). Cost: 0 — il polling
+// si arresta appena audio_manifest_path appare.
 const AUDIO_POLL_INTERVAL_MS = 5_000  // 5s tra un check e il successivo
-const AUDIO_POLL_TIMEOUT_MS = 5 * 60_000  // 5 min totali di attesa
+const AUDIO_POLL_TIMEOUT_MS = 12 * 60_000  // 12 min totali di attesa (copre 8h)
 
 export function CourseDetail() {
   const { id } = useParams({ from: '/_authenticated/courses/$id' })

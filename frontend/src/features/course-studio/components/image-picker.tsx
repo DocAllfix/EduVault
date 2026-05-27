@@ -93,7 +93,7 @@ export function ImagePicker({
         </div>
 
         {/* Griglia candidati */}
-        {candidates.length > 0 && (
+        {candidates.length > 0 ? (
           <div className="grid grid-cols-3 gap-2">
             {candidates.map((url) => (
               <button
@@ -107,6 +107,17 @@ export function ImagePicker({
               </button>
             ))}
           </div>
+        ) : (
+          // FIX #32 (polish): empty state esplicito per guidare cliente.
+          !searchMut.isPending && (
+            <div className="border-border bg-muted/30 rounded-md border border-dashed p-6 text-center">
+              <ImageIcon className="text-muted-foreground mx-auto mb-2 h-8 w-8" />
+              <p className="text-muted-foreground text-xs">
+                Scrivi una parola chiave (es. "casco protezione cantiere") e clicca cerca,
+                oppure incolla un URL immagine nel campo sotto.
+              </p>
+            </div>
+          )
         )}
 
         {/* URL manuale */}

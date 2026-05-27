@@ -11,7 +11,7 @@ from __future__ import annotations
 from typing import Literal, Self
 
 import structlog
-from pydantic import BaseModel, Field, ValidationInfo, model_validator
+from pydantic import BaseModel, Field, ValidationInfo, field_validator, model_validator
 
 from app.models.core import (
     DIAGRAM_VIEWBOX_LITERAL,
@@ -90,10 +90,51 @@ class SlideContent(BaseModel):
         "esempio operativo, contesto normativo, conseguenza pratica."
     ))
     normative_ref: str = ""
-    source_chunk_ids: list[str] = []
+    source_chunk_ids: list[str] = Field(default_factory=list)
     image: ImageStrategy = Field(default_factory=lambda: ImageStrategy(strategy="none"))
     quiz_options: list[str] | None = None
     quiz_correct: int | None = None
+
+    @field_validator("source_chunk_ids", mode="before")
+    @classmethod
+    def _coerce_source_chunk_ids(cls, v: object) -> list[str]:
+        """FIX #31.5B (2026-05-27, analista review 6): coercion idempotente
+        per chunk_ids emessi malformati dall'LLM.
+
+        In E2E #23 batch 2 di M1 era fallito perché Azure-mini ha emesso
+        `source_chunk_ids='source_chunk_ids([id1,id2]'` come stringa
+        invece che lista. Instructor ha re-asked 5 volte ma l'LLM ha
+        continuato a sbagliare lo schema → batch perso (10 slide).
+
+        Accetta:
+          - None / "" → []
+          - list[str|Any] → [str(x) per x in list, x non vuoto]
+          - str JSON-array '["a", "b"]' → list
+          - str con wrapper 'source_chunk_ids([a, b])' → strip e parse
+          - str comma-separated 'a,b,c' (fallback) → split
+        """
+        if v is None or v == "":
+            return []
+        if isinstance(v, list):
+            return [str(x).strip() for x in v if x is not None and str(x).strip()]
+        if isinstance(v, str):
+            import json
+            s = v.strip()
+            # Strip wrapper 'source_chunk_ids(...)' se presente
+            if s.startswith("source_chunk_ids("):
+                s = s[len("source_chunk_ids("):].rstrip(")")
+            # Prova JSON parse
+            try:
+                parsed = json.loads(s)
+                if isinstance(parsed, list):
+                    return [str(x).strip() for x in parsed if x is not None and str(x).strip()]
+                return [str(parsed)] if parsed else []
+            except json.JSONDecodeError:
+                # Fallback: split comma-separated, strip brackets/quotes
+                cleaned = s.strip("[](){}").replace('"', "").replace("'", "")
+                return [x.strip() for x in cleaned.split(",") if x.strip()]
+        # Tipo non gestito (int, float, ecc.) — fallback safe
+        return []
 
     @model_validator(mode="after")
     def enforce_layout_constraints(self) -> Self:

@@ -43,10 +43,30 @@ REGOLE IMAGE.STRATEGY (HARD, validator strict Literal):
 - "diagram"    → slide DIAGRAM: SERVE image.diagram_filling (vedi catalogo sotto).
 - Altri valori ("content", "image", "search", "content_image", ...) sono INVALIDI e producono errore di validazione.
 
-REGOLE DIAGRAM (HARD, FIX #30.4):
+REGOLE DIAGRAM (HARD, FIX #30.4 + #31.6 prompt-ruolo):
 Per slide DIAGRAM NON generare più SVG libero. Scegli UNO dei 7 template del
-catalogo e riempi gli slot rispettando i max_chars (caratteri massimi). Il
-testo lungo va nella `caption` (20-200 char), MAI dentro ai box dei flow.
+catalogo e riempi gli slot rispettando i max_chars (caratteri massimi).
+
+RUOLO DEI CAMPI (FIX #31.6 — analista review 7, definizione positiva):
+- `slots.label_*` = ETICHETTA di un BOX PICCOLO nel diagramma. È un CONCETTO
+  CONDENSATO in 2-3 PAROLE (es. "Valutazione rischio", "DPI", "Formazione").
+  NON è una frase. NON contiene riferimenti normativi. NON contiene verbi
+  ausiliari ("secondo la normativa", "secondo D.Lgs. 81/08", "ai sensi di",
+  "in base a") — questi gonfiano il label oltre i max_chars e fanno cadere
+  il render in fallback brandizzato.
+- `caption` = SOTTOTITOLO del diagramma sotto i box (20-200 char). È QUI che
+  vanno i riferimenti normativi, gli articoli, gli allegati, le motivazioni.
+  Esempio buono: caption="Le 4 fasi obbligatorie del processo di gestione
+  rischio ex art. 28 D.Lgs. 81/08."
+
+ESEMPI CONCRETI di trasformazione:
+- ❌ label: "Valutazione DPI secondo D.Lgs. 81/08 Art. 225" (45 char, sfora)
+  ✓ label: "Valutazione DPI" (15 char) + caption che cita art. 225
+- ❌ label: "Implementare formazione secondo la normativa" (44 char, sfora)
+  ✓ label: "Formazione" (10 char) + caption che spiega la norma di
+    riferimento
+- ❌ label: "Uso DPI secondo l'art. 76" (24 char, sfora)
+  ✓ label: "Uso DPI" (7 char) + caption che richiama art. 76
 
 CATALOGO DIAGRAM (image.diagram_filling = {template_name, slots, caption}):
 - flow_horizontal_3step: 3 step in sequenza (label_1, label_2, label_3 — max 20 char ciascuno)
@@ -475,9 +495,30 @@ def build_module_batch_prompt(
     already_block = ""
     if already_titles:
         titles_str = "; ".join(f'"{t}"' for t in already_titles[:30])
+        # FIX #31.3 (2026-05-27, analista review 4): SPREAD TEMATICO
+        # intra-modulo. La regola "non ripetere titoli" non basta — il
+        # content_agent variava già i corpi ma riformulava lo STESSO
+        # sotto-tema con parole leggermente diverse (M2 #21: "vie sgombre"
+        # ×7 con angolazioni diverse ma stessa zona tematica). La regola
+        # qui spinge a MUOVERSI fra sotto-temi del modulo prima di tornare
+        # su uno già coperto, e a dichiarare l'angolo nel titolo per
+        # leggibilità (es. "Cosa fare per tenere libere le vie" non
+        # "Vie sgombre e sicure" terzo doppione).
         already_block = (
             f"\n\nLe slide già esistenti nei batch precedenti coprono questi titoli "
             f"(NON ripeterli):\n{titles_str}\n"
+            f"\nREGOLA SPREAD TEMATICO (intra-modulo):\n"
+            f"Identifica quali SOTTO-TEMI del modulo \"{module_title}\" sono già "
+            f"stati coperti dai titoli sopra (es. per 'Procedure di emergenza' i "
+            f"sotto-temi possibili sono: vie/uscite di fuga, illuminazione, porte, "
+            f"segnaletica emergenza, organizzazione/ruoli, antincendio, evacuazione, "
+            f"primo soccorso). PRIMA di tornare su un sotto-tema già coperto, "
+            f"copri quelli ancora vuoti. Se devi tornare su un sotto-tema già "
+            f"coperto perché i chunk del batch lo richiedono, IL TITOLO della "
+            f"nuova slide deve DICHIARARE ESPLICITAMENTE l'angolo NUOVO (es. "
+            f"'Checklist operativa per vie libere' invece di un terzo 'Vie "
+            f"sgombre e sicure'). Vale per CONTENT_TEXT, CONTENT_IMAGE e "
+            f"CASE_STUDY consecutivi sullo stesso sotto-tema.\n"
         )
 
     chunks_block = ""

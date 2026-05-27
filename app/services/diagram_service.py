@@ -26,11 +26,12 @@ strict via instructor.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Literal
 
 import structlog
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 logger = structlog.get_logger()
 
@@ -163,6 +164,69 @@ DiagramTemplateName = Literal[
 ]
 
 
+# FIX #31.6B (2026-05-27, analista review 7): coercion regex deterministica
+# che strippa i suffissi normativi dai label DIAGRAM PRIMA che il validator
+# tolerance veda i valori troppo lunghi. In E2E #24 abbiamo 14/19 (74%)
+# DIAGRAM in branded fallback perché l'LLM ostinatamente aggiungeva suffissi
+# tipo "secondo la normativa", "secondo D.Lgs. 81/08 Art. X", "secondo
+# Allegato VIII". Analista: "rendi deterministico ciò che possiedi — il
+# fallback dev'essere riservato a 'struttura non mappabile', non a 'label
+# troppo lungo'".
+#
+# Strategia: regex case-insensitive che rimuove pattern noti di filler
+# normativo dalla coda del label. Se dopo lo strip il testo è ancora oltre
+# max_chars, il check_slots (con tolerance 20%) si occupa del residuo
+# (truncate gentile). Se è ancora oltre tolerance, allora è vero errore
+# semantico → ValueError → fallback brandizzato giustificato.
+_LABEL_NORMATIVE_SUFFIX_RE = re.compile(
+    r"\s*[,;:.]*\s*("
+    # "secondo (la|il|gli|le|i)? <qualunque cosa fino a fine>" — greedy fino
+    # alla fine. Cattura "secondo D.Lgs. 81/08 Art. 225", "secondo la legge",
+    # "secondo l'art. 76", ecc. in un colpo solo. La `.*$` greedy è OK qui
+    # perché applichiamo solo a fine stringa (\s*$ in coda).
+    r"secondo\s+.*"
+    # "ai sensi (del|della|di)? <qualunque cosa fino a fine>"
+    r"|ai\s+sensi\s+.*"
+    # "in base (al|alla|a)? <qualunque cosa fino a fine>"
+    r"|in\s+base\s+.*"
+    # "ex art. N" / "ex D.Lgs. X" come suffisso preposizionato
+    r"|ex\s+(?:art|d\.?\s*lgs|d\.?\s*m|allegato).*"
+    # "D.Lgs. X/YY" puro a fine label (senza "secondo")
+    r"|d\.?\s*lgs\.?\s*[\d/°.\s,-]+"
+    r"|d\.?\s*m\.?\s*[\d/°.\s,-]+"
+    # "art. N" o "art. N comma M" come suffisso puro
+    r"|art(?:icolo|\.)\s*\d+[\s,a-z.°]*(?:comma\s*\d+)?"
+    # "allegato N" / "Allegato VIII" puro
+    r"|allegato\s+[ivxlcdm\d]+[\s,a-z.°]*"
+    # "normativa vigente" generico
+    r"|normativa(?:\s+vigente)?"
+    r")\s*$",
+    re.IGNORECASE,
+)
+
+
+def _strip_normative_suffix(text: str) -> str:
+    """Rimuove ricorsivamente suffissi normativi tipici da un label DIAGRAM.
+
+    Esempi:
+      "valutaz. periodica DPI secondo la normativa" → "valutaz. periodica DPI"
+      "obblighi DPI secondo D.Lgs. 81/08 Art. 225"  → "obblighi DPI"
+      "uso DPI secondo l'art. 76"                    → "uso DPI"
+      "implementare DPI secondo la legge"            → "implementare DPI"
+      "Formazione"                                    → "Formazione"  (nop)
+    """
+    prev = text
+    # Applica fino a fix-point (alcuni label hanno doppio suffisso)
+    for _ in range(3):
+        stripped = _LABEL_NORMATIVE_SUFFIX_RE.sub("", prev).rstrip(" ,.;:-")
+        if stripped == prev or not stripped:
+            break
+        prev = stripped
+    # Edge case: se la regex ha mangiato tutto, ritorna il testo originale
+    # ripulito solo dai trailing punctuation (sicurezza > zelo)
+    return prev if prev else text.rstrip(" ,.;:-")
+
+
 class DiagramFilling(BaseModel):
     """Schema strict per il riempimento di un template diagramma.
 
@@ -184,18 +248,46 @@ class DiagramFilling(BaseModel):
         ),
     )
 
+    @field_validator("slots", mode="before")
+    @classmethod
+    def _coerce_strip_normative_suffix(cls, v: object) -> object:
+        """FIX #31.6B (2026-05-27, analista review 7): strip deterministico
+        suffissi normativi dai label PRIMA del check tolerance.
+
+        In E2E #24: 14/19 DIAGRAM finivano in branded fallback per pattern
+        ostinato LLM "label + secondo normativa/D.Lgs./art./Allegato". Lo
+        strip a monte fa entrare il label nel max_chars senza dipendere
+        dalla tolerance del check_slots."""
+        if not isinstance(v, dict):
+            return v
+        return {
+            slot_name: (_strip_normative_suffix(slot_text)
+                        if isinstance(slot_text, str)
+                        else slot_text)
+            for slot_name, slot_text in v.items()
+        }
+
     @model_validator(mode="after")
     def check_slots(self) -> "DiagramFilling":
-        """FIX #30.9f (2026-05-27, post-analista): auto-truncate gentile.
+        """FIX #31.7A (2026-05-27, post-analista review 8+9):
+        validazione strutturale soltanto, ZERO mutazione dei valori.
 
-        Pre-fix: l'LLM produceva "Valutazione rischio" (19 char) per slot a
-        max_chars=18 → validator raise → fallback legacy SVG → diagram_code
-        None → branded_fallback. Risultato: 16/16 DIAGRAM del 4h v2 erano
-        placeholder generici, non i template SVG.
+        Storia:
+        - #30.9f: introdusse raise sopra-tolerance 20% (poi smentito dai dati)
+        - #31.7A (v1): rimuove raise + truncate gentile sotto tolerance
+        - #31.7A (v2 — review 9): RIMUOVE anche il truncate gentile. L'analista
+          ha verificato visivamente che il truncate gentile lasciava il "…" su
+          slot SHORTER mentre lo shrink lasciava INTERI slot più lunghi nello
+          stesso diagramma — incoerenza visiva ("Valutazione risch…" accanto
+          a "Formazione e addestramento" intera, font 19pt). Cause: il truncate
+          gentile mutava i valori PRIMA che _compute_uniform_font_size li
+          leggesse → shrink calcolato sul valore lungo, "…" sopravvissuto sul
+          valore corto.
 
-        Post-fix: se uno slot eccede max_chars di POCO (<=50% in più),
-        tronca a max_chars-1 + "…". Se eccede MOLTO (>50%), raise come
-        prima (è un errore semantico vero, non un off-by-1 LLM).
+        Regola di coordinamento (#31.7A v2): se servirà shrink, NON troncare.
+        Il truncate scatta SOLO se anche al floor 16pt qualche slot eccede
+        capacity reale (rarissimo) → fatto dentro _compute_uniform_font_size.
+        Qui: zero mutazioni, solo gate strutturali.
         """
         tpl = DIAGRAM_CATALOG.get(self.template_name)
         if tpl is None:
@@ -207,45 +299,123 @@ class DiagramFilling(BaseModel):
                 f"DiagramFilling template={self.template_name}: "
                 f"slot mancanti {sorted(missing)}"
             )
-        # Auto-truncate come RETE DI SICUREZZA per ±1-2 char (analista
-        # 2026-05-27): tolerance ridotta da 50% a 20%. Lo strumento
-        # primario per evitare overflow è max_chars per-slot accurato
-        # (vedi DIAGRAM_CATALOG geometrie aggiornate). Se l'LLM sfora di
-        # più del 20% è errore semantico vero: il chunk non si sintetizza
-        # in N char, va re-prompted.
-        # Taglio in CODA (primi N chars + "…"), MAI in testa: il PNG 27
-        # mostrava "atore di lavor…" ma in realtà era cairosvg che
-        # clippava simmetrico per text-anchor=middle in triangolo
-        # geometricamente più stretto del testo. Il fix vero è max_chars
-        # per-slot misurato sulla geometria reale.
-        for s in tpl.slots:
-            v = self.slots.get(s.name, "")
-            if len(v) > s.max_chars:
-                tolerance = int(s.max_chars * 1.2)
-                if len(v) > tolerance:
-                    raise ValueError(
-                        f"slot {s.name!r} sfora max_chars={s.max_chars} di "
-                        f"più del 20%: {len(v)} caratteri (max tollerato "
-                        f"{tolerance}). Riformula più sintetico."
-                    )
-                # Truncate in coda + ellissi finale (mai in testa)
-                truncated = v[: s.max_chars - 1].rstrip() + "…"
-                self.slots[s.name] = truncated
+        # FIX #31.7A v2: zero mutazioni. Tutti i valori passano intatti al
+        # renderer che applica font-shrink uniforme. Il truncate (ultima
+        # rete a 16pt) sta in _compute_uniform_font_size, NON qui — così
+        # i due meccanismi sono coordinati e mai sovrapposti.
         return self
 
 
-def render_diagram_to_svg(filling: DiagramFilling) -> str:
-    """Sostituisce gli {{slot}} nel template SVG con i valori validati.
+# FIX #31.7A constants
+_MIN_FONT_PT = 16          # Sotto questa soglia il testo è troppo piccolo
+_LAST_RESORT_SUFFIX = "…"  # Ellissi per truncate ultima rete a 16pt
 
-    Ritorna stringa SVG pronta per cairosvg → PNG. NON fa auto-shrink:
-    grazie ai max_chars vincolati a monte, il testo entra sempre con il
-    font_size_default. Se in futuro vedremo casi limite, aggiungeremo
-    auto-shrink qui (Pillow misura → ricalcola sz attribute).
+
+def _compute_uniform_font_size(filling: "DiagramFilling") -> tuple[int, dict[str, str]]:
+    """FIX #31.7A v2 (2026-05-27, analista review 9): font-shrink uniforme
+    + truncate riservato ESCLUSIVAMENTE al floor 16pt.
+
+    Principio di coordinamento (analista review 9 verbatim):
+    > "quando un diagramma usa font ridotto, i label NON si troncano —
+    > tutto il senso dello shrink è far entrare il testo intero. Il truncate
+    > deve restare solo come ultima rete *al floor di 16pt*".
+
+    Algoritmo:
+    1. Per ogni slot oltre max_chars: calcola font_target = font_default *
+       max_chars / actual_len che farebbe entrare il valore intero.
+    2. uniform_font = max(_MIN_FONT_PT, min(font_target_min, font_default_max))
+       cioè il font più piccolo che fa entrare TUTTO, clippato al floor.
+    3. Truncate ultima rete: scatta SOLO se uniform_font == _MIN_FONT_PT
+       (siamo al floor) E un valore sfora la capacity reale a quel font.
+       Sopra il floor, mai truncate. Coordina con check_slots che NON tocca
+       più i valori (#31.7A v2).
+
+    Esempio della patologia review 9 (M1/idx15, flow_horizontal_4step):
+       slots = ["Valutazione rischio" 19c, "Scelta DPI adeguati" 19c,
+                "Formazione e addestramento" 26c, "Controllo e sorveglianza" 24c]
+       max_chars = 18 per ogni slot, font_default = 28.
+       font_target peggior slot (26c): 28*18/26 = 19pt.
+       uniform_font = max(16, min(19, 28)) = 19pt.
+       19pt > floor 16pt → NESSUN truncate.
+       capacity a 19pt = int(18 * 28/19) = 26 char per slot.
+       Tutti 4 slot ≤ 26 char → tutti interi. ✅
+
+    Pre-fix patologia: check_slots truncava "Valutazione rischio" 19c → 17c
+    perché sopra max_chars=18 sotto tolerance 21, e quel "…" sopravviveva
+    nel render anche a 19pt dove sarebbe entrato intero.
+    """
+    tpl = DIAGRAM_CATALOG[filling.template_name]
+    default_font_max = max((s.font_size_default for s in tpl.slots), default=28)
+
+    # Step 1+2: font_target = font che fa entrare il peggior slot intero
+    font_target_min = default_font_max
+    for s in tpl.slots:
+        v = filling.slots.get(s.name, "")
+        if len(v) <= s.max_chars:
+            continue  # questo slot non spinge il min
+        # Approssimazione lineare: width box ≈ max_chars * font_default
+        # → font_target = font_default * max_chars / actual_len
+        font_target = int(s.font_size_default * s.max_chars / len(v))
+        if font_target < font_target_min:
+            font_target_min = font_target
+
+    uniform_font = max(_MIN_FONT_PT, min(font_target_min, default_font_max))
+
+    # Step 3: truncate ultima rete — SOLO al floor (coordinamento review 9).
+    # Sopra il floor: capacity sufficiente per tutti i valori → mai truncate.
+    final_slots: dict[str, str] = {}
+    at_floor = uniform_font == _MIN_FONT_PT
+    for s in tpl.slots:
+        v = filling.slots.get(s.name, "")
+        if at_floor:
+            # Solo qui può scattare il truncate (rarissimo per testi reali)
+            capacity = int(s.max_chars * s.font_size_default / uniform_font)
+            if len(v) > capacity:
+                v = v[: max(1, capacity - 1)].rstrip() + _LAST_RESORT_SUFFIX
+        # Sopra il floor: valore INTATTO, lo shrink garantisce che entri
+        final_slots[s.name] = v
+
+    return uniform_font, final_slots
+
+
+def render_diagram_to_svg(filling: DiagramFilling) -> str:
+    """Sostituisce gli {{slot}} nel template SVG con i valori validati,
+    applicando auto-shrink font uniforme per il diagramma (FIX #31.7A).
+
+    Strategia (analista review 8):
+    1. Calcola font_size uniforme per TUTTI gli slot del diagramma in
+       modo che lo slot peggiore (più lungo vs max_chars) entri nel box.
+    2. Sostituisce i `font-size="N"` letterali dei tag `<text>` del
+       template col font uniforme calcolato (raw_svg replace).
+    3. Sostituisce i placeholder `{{slot}}` coi valori finali (escapati,
+       eventualmente troncati come ultima rete a 16pt).
+
+    Il fallback brandizzato viene ora riservato esclusivamente a
+    template_name invalido o template mancante su filesystem — mai più
+    a label "troppo lungo".
     """
     tpl = DIAGRAM_CATALOG[filling.template_name]
     svg = tpl.template_path.read_text(encoding="utf-8")
+
+    # FIX #31.7A: calcola font uniforme + valori finali (possibili truncate
+    # ultima rete) per il diagramma
+    uniform_font, final_slots = _compute_uniform_font_size(filling)
+
+    # Sostituisci font-size="N" letterale per ogni slot del template.
+    # I template hanno tutti font-size="<N>" con N uguale al
+    # font_size_default dello slot (per costruzione del catalogo).
+    # Replace mirato per default → uniform.
+    distinct_default_fonts = {s.font_size_default for s in tpl.slots}
+    for default_font in distinct_default_fonts:
+        if default_font != uniform_font:
+            svg = svg.replace(
+                f'font-size="{default_font}"',
+                f'font-size="{uniform_font}"',
+            )
+
+    # Sostituisci i placeholder {{slot}} coi valori finali escapati
     for s in tpl.slots:
-        value = filling.slots.get(s.name, "")
+        value = final_slots.get(s.name, "")
         # Escape XML basic
         value = (
             value.replace("&", "&amp;")
@@ -254,6 +424,18 @@ def render_diagram_to_svg(filling: DiagramFilling) -> str:
                  .replace('"', "&quot;")
         )
         svg = svg.replace(f"{{{{{s.name}}}}}", value)
+
+    logger.debug(
+        "diagram_rendered",
+        template=filling.template_name,
+        uniform_font=uniform_font,
+        default_font_max=max(
+            (s.font_size_default for s in tpl.slots), default=28
+        ),
+        shrunk=uniform_font < max(
+            (s.font_size_default for s in tpl.slots), default=28
+        ),
+    )
     return svg
 
 
@@ -274,5 +456,6 @@ __all__ = [
     "DiagramTemplateName",
     "DiagramFilling",
     "render_diagram_to_svg",
+    "_compute_uniform_font_size",  # exported for #31.7A unit tests
     "get_catalog_prompt_description",
 ]

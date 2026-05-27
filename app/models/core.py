@@ -131,7 +131,13 @@ LAYOUT_CONSTRAINTS: dict[SlideType, SlideConstraints] = {
     SlideType.DIAGRAM: SlideConstraints(
         title_max_chars=70,
         body_min_bullets=1,  # FIX #27.3: almeno una riga di didascalia
-        body_max_bullets=2,  # didascalia 2 righe sotto il diagramma
+        # FIX #31.5A (2026-05-27, analista review 6): 2→3. In E2E #23 batch 0
+        # di M1 era fallito perché LLM generava ostinatamente 3 bullet ed
+        # esauriva 5 reask, perdendo 10 slide. Layout PPTX regge 3 righe
+        # sotto SVG, template SVG (flow/pyramid/org_tree) non vincolano
+        # il numero di bullet didascalia (gestiscono caption unica + slot
+        # label interni separati). Quindi 3 è feasibile.
+        body_max_bullets=3,
         bullet_max_words=20,
         requires_image=True,  # diagram_code SVG obbligatorio
     ),
@@ -181,7 +187,12 @@ LAYOUT_CONSTRAINTS: dict[SlideType, SlideConstraints] = {
         title_max_chars=80,
         body_min_bullets=5,
         body_max_bullets=5,  # ESATTAMENTE 5 concetti chiave
-        bullet_max_words=10,
+        # FIX #31.4 (2026-05-27, analista review 5): 10→12. Era incoerente
+        # con CONTENT_TEXT (12). Una violazione MODULE_CLOSE bullet 11>10
+        # in E2E #22 ha triggerato fallback distruttivo che ha eliminato
+        # 77 slide M2. Allineato a CONTENT_TEXT, MODULE_CLOSE è un
+        # riepilogo modulo non più stringente di una slide normale.
+        bullet_max_words=12,
         notes_min_words=60,
         notes_max_words=120,
     ),
