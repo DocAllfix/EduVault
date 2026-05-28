@@ -417,6 +417,26 @@ async function getChunks(
   )
 }
 
+/** Forma di un link normativa->corso esposto dal backend (v2 F1.D).
+ *  Coincide con LinkedCourseSummary del Pydantic model. */
+export interface LinkedCourse {
+  course_type_slug: string
+  title: string
+  hours: number
+  target: string
+  link_source: 'scrape' | 'remap' | 'manual' | 'imported_v1'
+  link_notes?: string | null
+  course_approved: boolean
+}
+
+/** Lista dei corsi del catalogo che dichiarano la normativa come riferimento.
+ *  Accetta sia lo slug (preferito) sia l'UUID della normativa. */
+async function getLinkedCourses(slugOrId: string): Promise<LinkedCourse[]> {
+  return request<LinkedCourse[]>(
+    `/api/regulations/${encodeURIComponent(slugOrId)}/linked-courses`,
+  )
+}
+
 async function deleteRegulation(
   regulationId: string,
 ): Promise<{ status: string; regulation_id: string }> {
@@ -640,6 +660,7 @@ export const api = {
   uploadRegulation,
   getRegulations,
   getChunks,
+  getLinkedCourses,
   deleteRegulation,
   // Admin
   getMetrics,

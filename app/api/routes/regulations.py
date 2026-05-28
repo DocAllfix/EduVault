@@ -53,6 +53,24 @@ class ChunkSummary(BaseModel):
     tags: list[str] = []
 
 
+class LinkedCourseSummary(BaseModel):
+    """Un corso del catalogo che dichiara questa normativa come riferimento.
+
+    Esposto dall'endpoint /regulations/{slug_or_id}/linked-courses così la UI
+    può rendere "Questa normativa è usata da N corsi" sulla pagina normativa.
+    Il flag `link_source` traccia la provenienza VAA del link (scrape automatico
+    vs remap con conferma vs manuale admin vs ereditato v1).
+    """
+
+    course_type_slug: str
+    title: str
+    hours: float
+    target: str
+    link_source: str  # 'scrape' | 'remap' | 'manual' | 'imported_v1'
+    link_notes: str | None = None
+    course_approved: bool
+
+
 @router.post("/upload", response_model=UploadResponse)
 @limiter.limit("3/minute")  # BP §08.5 — prevent repeated uploads
 async def upload_regulation(
