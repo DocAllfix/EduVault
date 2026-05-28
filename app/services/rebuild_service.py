@@ -22,7 +22,9 @@ from typing import Any
 import structlog
 
 from app.builders.production_builder import ProductionBuilder
+from app.config import settings
 from app.models.pipeline import SlideContent
+from app.services.audio_service import AudioService
 from app.services.generation_service import _job_semaphore
 from app.services.image_service import prefetch_images
 from app.services.studio_service import get_slides
@@ -87,6 +89,34 @@ async def rebuild_course(course_id: str, user_id: str, pool: Any) -> None:
                 image_map=image_map,
                 db=pool,
             )
+
+            # Re-genera la narrazione audio dal slide_contents_json corrente.
+            # ProductionBuilder costruisce solo PPTX/PDF; l'audio è un passo
+            # separato (come in generation_service). Senza questo, un rebuild
+            # post-edit lascerebbe audio_manifest_path stale o NULL.
+            # generate_narrations fa solo INSERT in audio_tracks → DELETE prima
+            # per idempotenza (rebuild ripetuti non duplicano le tracce).
+            # L'audio è secondario: se fallisce, PPTX/PDF restano validi.
+            try:
+                await pool.execute(
+                    "DELETE FROM audio_tracks WHERE course_id=$1", cid
+                )
+                audio_service = AudioService(voice=settings.tts_voice)
+                audio_result = await audio_service.generate_narrations(
+                    slide_models, course_id, pool
+                )
+                logger.info(
+                    "rebuild_audio_generated",
+                    course_id=course_id,
+                    tracks=audio_result.get("tracks_generated"),
+                    voice=settings.tts_voice,
+                )
+            except Exception as audio_exc:
+                logger.error(
+                    "rebuild_audio_failed",
+                    course_id=course_id,
+                    error=str(audio_exc),
+                )
 
             # Stato finale: completed + dirty=false + snapshot
             await pool.execute(
