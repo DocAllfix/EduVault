@@ -547,6 +547,96 @@ async def regenerate_slide(
     return updated
 
 
+# ── Slide management (FASE 6 — add / move / delete / duplicate) ──────────
+
+
+class AddSlideBody(BaseModel):
+    after_idx: int
+    slide_type: str
+
+
+class MoveSlideBody(BaseModel):
+    direction: str  # "up" | "down"
+
+
+@router.post("/{course_id}/slides")
+async def add_course_slide(
+    course_id: str,
+    body: AddSlideBody,
+    user: dict[str, Any] = Depends(require_role("admin", "reviewer")),
+) -> list[dict[str, Any]]:
+    """Inserisce una nuova slide vuota del tipo scelto dopo ``after_idx``.
+
+    Ritorna l'array slide aggiornato. Marca dirty=true (RebuildBanner).
+    """
+    pool = get_pool()
+    course = await _load_course_or_404(course_id, pool)
+    _enforce_ownership(course, user)
+    try:
+        return await studio_service.add_slide(
+            course_id, body.after_idx, body.slide_type, pool
+        )
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(422, f"Impossibile aggiungere slide: {exc}") from exc
+
+
+@router.post("/{course_id}/slides/{idx}/move")
+async def move_course_slide(
+    course_id: str,
+    idx: int,
+    body: MoveSlideBody,
+    user: dict[str, Any] = Depends(require_role("admin", "reviewer")),
+) -> list[dict[str, Any]]:
+    """Sposta la slide su/giù (solo nello stesso modulo)."""
+    pool = get_pool()
+    course = await _load_course_or_404(course_id, pool)
+    _enforce_ownership(course, user)
+    try:
+        return await studio_service.move_slide(course_id, idx, body.direction, pool)
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(422, f"Impossibile spostare slide: {exc}") from exc
+
+
+@router.post("/{course_id}/slides/{idx}/duplicate")
+async def duplicate_course_slide(
+    course_id: str,
+    idx: int,
+    user: dict[str, Any] = Depends(require_role("admin", "reviewer")),
+) -> list[dict[str, Any]]:
+    """Duplica la slide (copia inserita subito dopo)."""
+    pool = get_pool()
+    course = await _load_course_or_404(course_id, pool)
+    _enforce_ownership(course, user)
+    try:
+        return await studio_service.duplicate_slide(course_id, idx, pool)
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(422, f"Impossibile duplicare slide: {exc}") from exc
+
+
+@router.delete("/{course_id}/slides/{idx}")
+async def delete_course_slide(
+    course_id: str,
+    idx: int,
+    user: dict[str, Any] = Depends(require_role("admin", "reviewer")),
+) -> list[dict[str, Any]]:
+    """Elimina la slide (vietato sui bookend di modulo)."""
+    pool = get_pool()
+    course = await _load_course_or_404(course_id, pool)
+    _enforce_ownership(course, user)
+    try:
+        return await studio_service.delete_slide(course_id, idx, pool)
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(422, f"Impossibile eliminare slide: {exc}") from exc
+
+
 @router.post("/{course_id}/rebuild")
 async def rebuild_course(
     course_id: str,

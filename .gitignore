@@ -44,6 +44,19 @@ frontend/*.pdf
 # === Storage output (PPTX/PDF generati pipeline) ===
 storage/output/
 storage/pdfs/
+# Local-only DB dumps + rephrase/audit reports (may contain course content)
+storage/dumps/
+
+# === Local-only operational scripts (CONTAIN DB PASSWORD / PROXY URL — never commit) ===
+scripts/run_migrations_via_proxy.py
+scripts/run_migrations_railway.py
+scripts/seed_via_proxy.py
+scripts/verify_schema.py
+scripts/insert_3_demos_railway.py
+scripts/rebuild_3_demos_railway.py
+scripts/rebuild_audio_sequential.py
+scripts/check_audio_status.py
+scripts/rephrase_notes_safe.py
 
 # === Claude Code runtime ===
 .claude/scheduled_tasks.lock
