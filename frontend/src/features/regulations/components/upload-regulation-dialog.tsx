@@ -15,7 +15,7 @@
 
 import { useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import { Loader2, Upload } from 'lucide-react'
+import { Info, Loader2, Upload } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { api, ApiError } from '@/lib/api'
@@ -41,6 +41,14 @@ import {
 import { cn } from '@/lib/utils'
 
 const REG_TYPES = ['DECRETO', 'LEGGE', 'ACCORDO', 'CIRCOLARE', 'NORMA_TECNICA'] as const
+
+// Soglia oltre la quale informiamo l'utente che il server continuera' a
+// processare in background anche se il client va in timeout. Verificato in
+// produzione (sessione F1.C): il D.Lgs 81/08 (~6 MB / 137 pp) e il Reg CE
+// 1272/2008 (22 MB / 1576 pp) completano lato server anche quando il client
+// httpx interrompe la connessione per ReadTimeout. 10 MB e' il punto in cui
+// inizia a essere prudente avvisare.
+const LARGE_FILE_THRESHOLD_MB = 10
 
 export function UploadRegulationDialog() {
   const queryClient = useQueryClient()
@@ -84,7 +92,21 @@ export function UploadRegulationDialog() {
       toast.error('Compila tutti i campi obbligatori.')
       return
     }
+    const sizeMB = file.size / 1024 / 1024
+    const isLarge = sizeMB > LARGE_FILE_THRESHOLD_MB
     setIsLoading(true)
+    // PDF grossi: il server completa anche se il client va in timeout. Mostriamo
+    // un toast informativo PRIMA del fetch cosi' l'utente sa che attesa lunga
+    // non vuol dire fallimento. Il toast successivo (success / network-error)
+    // resta comunque la fonte di verita' del risultato.
+    if (isLarge) {
+      toast.info(
+        `Il file e' grande (${sizeMB.toFixed(0)} MB). Se il client va in timeout, ` +
+          'il server continua a indicizzare in background: controlla la lista ' +
+          'normative tra 2-5 minuti.',
+        { duration: 8000 },
+      )
+    }
     try {
       const res = await api.uploadRegulation(file, { slug, title, reg_type: regType, region })
       toast.success(`Normativa indicizzata: ${res.chunks_count} chunk.`)
@@ -92,7 +114,22 @@ export function UploadRegulationDialog() {
       setOpen(false)
       reset()
     } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : 'Upload non riuscito.')
+      // Per i file grandi un timeout client e' un falso positivo: il server
+      // probabilmente sta ancora processando. Distinguiamo il messaggio.
+      const msg = err instanceof ApiError ? err.message : 'Upload non riuscito.'
+      if (isLarge && /timeout|aborted|network|failed to fetch/i.test(msg)) {
+        toast.warning(
+          'Connessione interrotta lato client. L\'elaborazione potrebbe essere ' +
+            'comunque in corso sul server: aspetta 2-5 minuti, poi ricarica la ' +
+            'lista normative per verificare.',
+          { duration: 10000 },
+        )
+        await queryClient.invalidateQueries({ queryKey: ['regulations'] })
+        setOpen(false)
+        reset()
+      } else {
+        toast.error(msg)
+      }
     } finally {
       setIsLoading(false)
     }
@@ -172,6 +209,30 @@ export function UploadRegulationDialog() {
               className='hidden'
               onChange={(e) => acceptFile(e.target.files?.[0] ?? undefined)}
             />
+          </div>
+
+          {/* Avviso permanente: limiti tecnici noti del parser pdfplumber.
+              Restano visibili PRIMA della selezione file cosi' l'utente sa
+              cosa funziona e cosa no senza dover provare. */}
+          <div className='border-border bg-muted/40 flex gap-2 rounded-md border p-2.5 text-xs'>
+            <Info
+              className='text-muted-foreground mt-0.5 size-3.5 shrink-0'
+              aria-hidden='true'
+            />
+            <div className='text-muted-foreground leading-relaxed'>
+              <p>
+                <strong className='text-foreground'>Solo PDF testuali.</strong>{' '}
+                I PDF scansionati come immagini non possono essere indicizzati
+                (manca OCR). Se il documento e' una scansione, riprova con la
+                versione testuale dalla Gazzetta Ufficiale, EUR-Lex o
+                normattiva.it.
+              </p>
+              <p className='mt-1'>
+                Per file molto grandi (oltre {LARGE_FILE_THRESHOLD_MB} MB),
+                l'elaborazione lato server puo' durare diversi minuti e
+                continua anche se il browser sembra scollegarsi.
+              </p>
+            </div>
           </div>
 
           {/* Metadata */}
