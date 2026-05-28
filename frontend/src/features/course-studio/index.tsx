@@ -1,5 +1,5 @@
 /**
- * Course Studio — `/courses/{id}/studio` (FASE 8-11 vast-hopping-sketch).
+ * Course Studio — `/courses/{id}/studio` (FASE 8-11, real PDF preview live).
  *
  * ─── Design intent (frontend-design) ──────────────────────────────────────
  * Purpose: editor in-app slide-per-slide. L'operatore naviga le slide, vede
