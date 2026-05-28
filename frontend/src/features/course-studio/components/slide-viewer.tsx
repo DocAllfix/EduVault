@@ -1,5 +1,5 @@
 /**
- * SlideViewer — render HTML che imita il layout PPTX (FASE 9).
+ * SlideViewer — renders the real PDF page as the slide preview (FASE 9, post-fix #150).
  *
  * ─── Design intent (frontend-design) ──────────────────────────────────────
  * Purpose: anteprima fedele 16:9 della slide selezionata, una per SlideType,
