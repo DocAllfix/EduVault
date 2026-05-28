@@ -255,7 +255,7 @@ Decisioni D1..D10 risolte. Ordine: D8 → D2+D1 → D3 → D9 → D4/D5 → D7 �
 | Fase | Descrizione | Stato | Data | Note |
 |------|-------------|-------|------|------|
 | F0 | Setup: migrazione 005 (7 tabelle), feature flags, deps, telemetria | ✅ | 2026-05-28 | Migrazione in prod 7/7 tabelle + 3 col `courses` + 22 idx, idempotente. Flag tutti False → v1 invariata. mypy/ruff verdi. Scoperto #R18 (`nexus_app` assente → GRANT condizionale). |
-| F1 | Catalogo cliente in DB (D8): scrape corsi8108.it + admin review | ⬜ | — | 54 corsi, nomi moduli reali, gate approvazione esperto |
+| F1 | Catalogo cliente in DB (D8) + 3 normative TIER 1 + bug citation_label + UI normativa↔corso | 🟡 | 2026-05-29 | 44 corsi attivi + 195 moduli + 102 link `regulation_course_type_links` in DB prod. 3 normative TIER 1 ingerite (Reg CE 852/2004 HACCP 147ch, DM 2/9/2021 antincendio 58ch chiude #R16, Reg CE 1272/2008 CLP 672ch). citation_label bug fixato (2879/2879 backfilled + ingestion patch a regime). Endpoint `GET /regulations/{slug}/linked-courses` + UI ChunksSheet "Corsi che usano questa normativa (N)" verificata E2E in prod via Chrome DevTools. **Resta**: F1.D.2 admin UI catalog-review con approvazione (gate VAA `approved_at`). |
 | F2 | Rerank 2-stadi (D2) + Edge Graph deterministico (D1) | ⬜ | — | Cohere rerank + edge-table con provenienza tracciata |
 | F3 | Scheletro narrativo validato (D3) | ⬜ | — | Gate 1-click utente prima della materializzazione slide |
 | F4 | Badge UI slide problematiche (D9) | ⬜ | — | Segnala, non blocca download |
