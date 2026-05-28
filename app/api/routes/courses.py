@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Any
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
@@ -361,6 +361,64 @@ async def download_course(
     files = [(f.name, f) for f in mp3s]
     files.append((Path(manifest).name, Path(manifest)))
     return _stream_zip_of_files(files)
+
+
+# ─────────────── POST /api/courses/{id}/artifact (admin) ──
+# Replace the PPTX or PDF on disk for an already-existing course. Used when
+# the operator hand-edited the file in PowerPoint and wants it to BE the
+# downloadable / preview source of truth without going through a rebuild.
+# Marks the course `dirty=false` and bumps `last_rebuilt_at` so the preview
+# cache (output/previews/{course_id}/{rebuild_token}/) invalidates correctly.
+
+
+_UPLOADABLE_FORMATS = {"pptx", "pdf"}
+
+
+@router.post("/{course_id}/artifact")
+async def upload_course_artifact(
+    course_id: str,
+    fmt: str = Form(...),
+    file: UploadFile = File(...),
+    user: dict[str, Any] = Depends(require_role("admin")),
+) -> dict[str, Any]:
+    """Admin-only: replace the PPTX or PDF artifact of an existing course."""
+    fmt = fmt.lower()
+    if fmt not in _UPLOADABLE_FORMATS:
+        raise HTTPException(400, f"fmt deve essere uno di {sorted(_UPLOADABLE_FORMATS)}")
+
+    pool = get_pool()
+    course = await _load_course_or_404(course_id, pool)
+    _enforce_ownership(course, user)
+
+    out_dir = Path("output")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    if fmt == "pptx":
+        target = out_dir / f"{course_id}.pptx"
+        col = "pptx_path"
+    else:
+        target = out_dir / f"{course_id}_dispensa.pdf"
+        col = "pdf_path"
+
+    raw = await file.read()
+    if not raw:
+        raise HTTPException(400, "Empty file")
+    with open(target, "wb") as fh:
+        fh.write(raw)
+
+    # Bump last_rebuilt_at so the preview PNG cache key changes → users get
+    # a fresh render of the new file instead of the cached old pages.
+    await pool.execute(
+        f"UPDATE courses SET {col}=$1, dirty=false, last_rebuilt_at=NOW() WHERE id=$2",
+        str(target),
+        uuid_mod.UUID(course_id),
+    )
+    return {
+        "status": "ok",
+        "course_id": course_id,
+        "fmt": fmt,
+        "path": str(target),
+        "bytes": len(raw),
+    }
 
 
 # ─────────────── DELETE /api/courses/{id} ───────────────
