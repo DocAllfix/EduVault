@@ -32,8 +32,8 @@ import sys
 import asyncpg
 
 # Pattern per estrarre short_title da regulations.title
-# Esempi: "D.Lgs. 81/2008" → "D.Lgs. 81/08"
-#         "Decreto Ministeriale 388/2003" → "DM 388/03"
+# Esempi: "D.Lgs. 81/2008" -> "D.Lgs. 81/08"
+#         "Decreto Ministeriale 388/2003" -> "DM 388/03"
 _SHORT_TITLE_PATTERNS = [
     # IMPORTANTE: ordine = specificità. "Decreto Legislativo" prima di "D.Lgs."
     # perché "D.Lgs." matcha anche dentro stringhe più ampie.
@@ -47,29 +47,92 @@ _SHORT_TITLE_PATTERNS = [
     (re.compile(r"Legge\s+(\d+)/(\d{2,4})", re.IGNORECASE), "L."),
 ]
 
+# Pattern speciali con label gia' completa (per casi che non si normalizzano
+# a "{TIPO} {N}/{YY}"). Provati prima dei pattern numerici di sopra.
+_SPECIAL_SHORT_TITLE: list[tuple[re.Pattern[str], str]] = [
+    # Regolamenti CE/UE: "Regolamento (CE) n. 852/2004" -> "Reg. CE 852/2004"
+    # Mantengo l'anno completo 4 cifre per i regolamenti europei (convenzione UE).
+    (re.compile(r"Regolamento\s+\(CE\)\s+n\.?\s*(\d+)/(\d{4})", re.IGNORECASE),
+     ""),  # placeholder, sovrascritto sotto
+    (re.compile(r"Regolamento\s+\(UE\)\s+(?:n\.?\s*)?(\d+)/(\d{4})", re.IGNORECASE),
+     ""),
+    # Decreti datati ("Decreto ... 2 settembre 2021") senza numero progressivo:
+    # produciamo "D.M. 02/09/2021".
+    (re.compile(
+        r"Decreto.{1,60}?(\d{1,2})\s+"
+        r"(gennaio|febbraio|marzo|aprile|maggio|giugno|luglio|"
+        r"agosto|settembre|ottobre|novembre|dicembre)\s+(\d{4})",
+        re.IGNORECASE,
+    ), ""),
+    # Accordi Stato-Regioni con anno (senza numero progressivo):
+    # "Accordo Stato-Regioni 2025" -> "Accordo SR 2025".
+    (re.compile(r"Accordo\s+Stato.?Regioni\b[^0-9]*?(\d{4})", re.IGNORECASE), ""),
+]
+
+
+_MONTH_MAP = {
+    "gennaio": "01", "febbraio": "02", "marzo": "03", "aprile": "04",
+    "maggio": "05", "giugno": "06", "luglio": "07", "agosto": "08",
+    "settembre": "09", "ottobre": "10", "novembre": "11", "dicembre": "12",
+}
+
+
+def _special_label(title: str) -> str | None:
+    """Ritorna label completa se uno dei pattern speciali matcha, altrimenti None."""
+    # Reg CE
+    m = re.search(r"Regolamento\s+\(CE\)\s+n\.?\s*(\d+)/(\d{4})", title, re.IGNORECASE)
+    if m:
+        return f"Reg. CE {m.group(1)}/{m.group(2)}"
+    # Reg UE
+    m = re.search(r"Regolamento\s+\(UE\)\s+(?:n\.?\s*)?(\d+)/(\d{4})", title, re.IGNORECASE)
+    if m:
+        return f"Reg. UE {m.group(1)}/{m.group(2)}"
+    # Decreto datato (giorno mese anno)
+    m = re.search(
+        r"Decreto.{1,60}?(\d{1,2})\s+"
+        r"(gennaio|febbraio|marzo|aprile|maggio|giugno|luglio|"
+        r"agosto|settembre|ottobre|novembre|dicembre)\s+(\d{4})",
+        title, re.IGNORECASE,
+    )
+    if m:
+        day = m.group(1).zfill(2)
+        mm = _MONTH_MAP[m.group(2).lower()]
+        yyyy = m.group(3)
+        return f"D.M. {day}/{mm}/{yyyy}"
+    # Accordo Stato-Regioni con anno
+    m = re.search(r"Accordo\s+Stato.?Regioni\b[^0-9]*?(\d{4})", title, re.IGNORECASE)
+    if m:
+        return f"Accordo SR {m.group(1)}"
+    return None
+
 
 _ART_PREFIX = re.compile(r"^\s*Art\.?\s*", re.IGNORECASE)
 _COMMA_PREFIX = re.compile(r"^\s*[Cc]omma\s*", re.IGNORECASE)
 
 
 def _strip_article_prefix(article: str) -> str:
-    """'Art. 26' → '26' (il prefisso lo aggiungiamo noi in compose_citation_label)."""
+    """'Art. 26' -> '26' (il prefisso lo aggiungiamo noi in compose_citation_label)."""
     return _ART_PREFIX.sub("", article).strip()
 
 
 def _strip_comma_prefix(paragraph: str) -> str:
-    """'Comma 2' → '2'."""
+    """'Comma 2' -> '2'."""
     return _COMMA_PREFIX.sub("", paragraph).strip()
 
 
 def short_title_from_regulation(title: str) -> str:
-    """Es: 'D.Lgs. 81/2008' → 'D.Lgs. 81/08'."""
+    """Es: 'D.Lgs. 81/2008' -> 'D.Lgs. 81/08'."""
+    # Pattern speciali (Reg CE/UE, DM datati, Accordi anno) prima dei pattern
+    # numerici per non perdere il match piu' specifico.
+    special = _special_label(title)
+    if special:
+        return special
     for pattern, label in _SHORT_TITLE_PATTERNS:
         m = pattern.search(title)
         if m:
             number = m.group(1)
             year = m.group(2)
-            # Normalizza anno a 2 cifre (2008 → 08)
+            # Normalizza anno a 2 cifre (2008 -> 08)
             if len(year) == 4:
                 year = year[-2:]
             return f"{label} {number}/{year}"
@@ -130,7 +193,7 @@ async def main(dry_run: bool = False) -> int:
     }
     print(f"Regulations loaded: {len(reg_short_titles)}")
     for rid, st in reg_short_titles.items():
-        print(f"  {rid[:8]} → {st!r}")
+        print(f"  {rid[:8]} -> {st!r}")
 
     # Carica chunk con citation_label NULL
     chunks = await conn.fetch(
@@ -151,7 +214,7 @@ async def main(dry_run: bool = False) -> int:
     print()
     print("Sample (first 10):")
     for label, _id in updates[:10]:
-        print(f"  → {label!r}")
+        print(f"  -> {label!r}")
 
     if dry_run:
         print()

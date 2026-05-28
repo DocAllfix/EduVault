@@ -78,3 +78,7 @@ assets/templates/slidesgo_health_safety_original.pptx
 
 # Local debug workspace for template iteration (FIX #30.x)
 testfixtemplate/
+scripts/seed_catalog_and_links.py
+scripts/catalog_draft_from_report.py
+scripts/ingest_3_regulations_v2.py
+storage/regulations_v2/

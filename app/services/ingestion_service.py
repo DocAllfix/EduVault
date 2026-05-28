@@ -39,6 +39,10 @@ from tenacity import (
 )
 
 from app.config import settings
+from app.services.citation_label import (
+    compose_citation_label,
+    short_title_from_regulation,
+)
 from app.services.dependencies import get_voyage_client
 
 logger = structlog.get_logger()
@@ -1202,6 +1206,20 @@ async def index_chunks(chunks: list[dict[str, object]], pool: object) -> None:
     Dedup via ``content_hash``: a chunk whose body already exists with
     ``is_current = true`` is skipped (BP §06.1.1 Stage 4).
     """
+    # Cache short_title per regulation_id (lookup 1 volta sola, non per ogni
+    # chunk). Serve a comporre citation_label deterministico — FIX #30.5a
+    # + sessione 2026-05-28 (la migrazione 004 aveva aggiunto la colonna ma
+    # nessuno la popolava a ingest-time, solo lo script backfill).
+    regulation_titles: dict[str, str] = {}
+
+    async def _short_title(regulation_id: str) -> str:
+        if regulation_id not in regulation_titles:
+            row = await pool.fetchval(  # type: ignore[attr-defined]
+                "SELECT title FROM regulations WHERE id = $1", regulation_id,
+            )
+            regulation_titles[regulation_id] = short_title_from_regulation(row or "")
+        return regulation_titles[regulation_id]
+
     batch_size = 500
     for i in range(0, len(chunks), batch_size):
         batch = chunks[i:i + batch_size]
@@ -1241,17 +1259,26 @@ async def index_chunks(chunks: list[dict[str, object]], pool: object) -> None:
             par_trunc = str(par)[:50] if par is not None else None
             hpath_trunc = str(hpath)[:500] if hpath is not None else None
 
+            # Composizione citation_label deterministica: short_title della
+            # regulation + art/comma o allegato. Popolato a ingest-time per
+            # evitare il backfill manuale che era stato necessario nelle 7
+            # normative pre-bugfix (sessione 2026-05-28).
+            short = await _short_title(str(chunk["regulation_id"]))
+            citation_label = compose_citation_label(
+                short, art_trunc, par_trunc, hpath_trunc,
+            )
+
             try:
                 await pool.execute(  # type: ignore[attr-defined]
                     "INSERT INTO regulation_chunks "
                     "(regulation_id, article, paragraph, hierarchy_path, body, "
-                    "chunk_type, tags, embedding, content_hash) "
-                    "VALUES ($1,$2,$3,$4,$5,$6,$7,$8::vector,$9)",
+                    "chunk_type, tags, embedding, content_hash, citation_label) "
+                    "VALUES ($1,$2,$3,$4,$5,$6,$7,$8::vector,$9,$10)",
                     chunk["regulation_id"], art_trunc, par_trunc,
                     hpath_trunc, chunk["body"],
                     classification["type"],
                     classification["tags"],
-                    embedding_literal, content_hash,
+                    embedding_literal, content_hash, citation_label,
                 )
             except Exception as exc:
                 # Skip THIS chunk only — don't abort the whole batch (REI: un
