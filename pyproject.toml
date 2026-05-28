@@ -64,8 +64,11 @@ dependencies = [
     # sono True. Nessuna è in_process (Cohere=API, Azure Speech=API), così non
     # cambiano il footprint memoria a flag False.
     "cohere>=5.0",                 # D2: rerank-multilingual-v3.0 API (no model locale)
-    "azure-cognitiveservices-speech>=1.40",  # D6: Speech SDK con SSML completo
     "rank-bm25>=0.2",              # D2: recall BM25 lato CPU (lightweight, no deps pesanti)
+    # NB: azure-cognitiveservices-speech (D6/F7) NON è qui di proposito: serve solo
+    # alla Fase 7 e potrebbe richiedere librerie di sistema sul container Railway.
+    # Verrà aggiunta in F7 testandola isolata, per non rischiare il build prod ora
+    # che il flag v2_audio_provider_azure è False (edge-tts resta il provider).
 ]
 
 [project.optional-dependencies]
