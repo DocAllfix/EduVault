@@ -31,8 +31,10 @@ export function AppTitle() {
                 className='size-8 shrink-0 object-contain'
               />
               <div className='grid leading-tight group-data-[collapsible=icon]:hidden'>
-                <span className='truncate text-sm font-bold'>Cfp EduVault</span>
-                <span className='truncate text-xs text-muted-foreground'>
+                <span className='truncate text-sm font-semibold tracking-tight'>
+                  Cfp EduVault
+                </span>
+                <span className='text-muted-foreground truncate text-xs'>
                   C.F.P. Montessori
                 </span>
               </div>

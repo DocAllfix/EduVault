@@ -23,29 +23,27 @@ type AuthLayoutProps = {
 
 export function AuthLayout({ children }: AuthLayoutProps) {
   return (
-    <div className='grid min-h-svh place-items-center bg-background px-4 py-8'>
-      <div className='w-full max-w-sm space-y-6'>
-        {/* Brand block — logo + wordmark + tagline */}
+    <div className='grid min-h-svh place-items-center bg-gradient-to-b from-background to-muted/40 px-4 py-8'>
+      <div className='w-full max-w-sm space-y-7'>
+        {/* Brand block — il logo C.F.P. Montessori contiene già il nome
+            esteso, quindi NON ripetiamo un wordmark testuale (era un
+            doppione visivo). Logo unico, scalato e centrato, con una sola
+            riga di contesto sotto. */}
         <div className='flex flex-col items-center gap-3 text-center'>
           <img
             src='/brand/logo.png'
             alt='C.F.P. Montessori'
-            className='h-12 w-auto object-contain dark:hidden'
+            className='h-16 w-auto object-contain dark:hidden'
           />
           {/* Transparent variant for dark mode (FASE 6.3 auto-gen) */}
           <img
             src='/brand/logo-transparent.png'
             alt='C.F.P. Montessori'
-            className='hidden h-12 w-auto object-contain dark:block'
+            className='hidden h-16 w-auto object-contain dark:block'
           />
-          <div className='space-y-1'>
-            <h1 className='text-xl font-semibold tracking-tight'>
-              Cfp EduVault
-            </h1>
-            <p className='text-sm text-muted-foreground'>
-              Generazione corsi normativi
-            </p>
-          </div>
+          <p className='text-sm text-muted-foreground'>
+            Generazione corsi normativi
+          </p>
         </div>
         {children}
       </div>

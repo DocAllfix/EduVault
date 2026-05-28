@@ -11,10 +11,10 @@
  * Constraints: REI-1 riusa shadcn; react-query per /slides; nessun tab.
  */
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useNavigate, useParams } from '@tanstack/react-router'
-import { ArrowLeft } from 'lucide-react'
+import { ArrowLeft, ChevronLeft, ChevronRight } from 'lucide-react'
 
 import { api, ApiError, type StudioSlide } from '@/lib/api'
 import { Button } from '@/components/ui/button'
@@ -30,6 +30,7 @@ import { AudioPlayer } from './components/audio-player'
 import { ImagePicker } from './components/image-picker'
 import { RegenerateDialog } from './components/regenerate-dialog'
 import { RebuildBanner } from './components/rebuild-banner'
+import { SlideActions } from './components/slide-actions'
 
 function slideTypeLabel(t: string): string {
   const map: Record<string, string> = {
@@ -57,6 +58,33 @@ export function CourseStudio() {
 
   const slides: StudioSlide[] = slidesQ.data?.slides ?? []
   const selected = slides.find((s) => s.index === selectedIdx) ?? slides[0]
+  const pos = selected ? slides.findIndex((s) => s.index === selected.index) : -1
+  const goPrev = () => {
+    if (pos > 0) setSelectedIdx(slides[pos - 1].index)
+  }
+  const goNext = () => {
+    if (pos >= 0 && pos < slides.length - 1) setSelectedIdx(slides[pos + 1].index)
+  }
+
+  // Navigazione orizzontale stile PowerPoint: frecce ← → da tastiera.
+  // Ignora se il focus è in un campo editabile (l'editor di destra).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null
+      const tag = t?.tagName
+      if (
+        tag === 'INPUT' ||
+        tag === 'TEXTAREA' ||
+        tag === 'SELECT' ||
+        t?.isContentEditable
+      )
+        return
+      if (e.key === 'ArrowLeft') goPrev()
+      else if (e.key === 'ArrowRight') goNext()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  })
 
   return (
     <>
@@ -103,8 +131,14 @@ export function CourseStudio() {
             </div>
 
             <div className="grid grid-cols-[200px_1fr_340px] gap-4">
-              {/* ─── Sidebar: lista slide ─── */}
-              <aside className="border-border h-[calc(100vh-16rem)] space-y-1 overflow-y-auto rounded-lg border p-2">
+              {/* ─── Sidebar: toolbar azioni + lista slide ─── */}
+              <aside className="flex h-[calc(100vh-16rem)] flex-col">
+                <SlideActions
+                  courseId={id}
+                  selected={selected}
+                  onSelectIndex={setSelectedIdx}
+                />
+                <div className="border-border flex-1 space-y-1 overflow-y-auto rounded-lg border p-2">
                 {slides.map((s) => (
                   <button
                     key={s.index}
@@ -124,10 +158,34 @@ export function CourseStudio() {
                     </span>
                   </button>
                 ))}
+                </div>
               </aside>
 
-              {/* ─── Center: viewer + audio ─── */}
+              {/* ─── Center: nav orizzontale + viewer + audio ─── */}
               <section className="space-y-3">
+                <div className="flex items-center justify-between gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={goPrev}
+                    disabled={pos <= 0}
+                    aria-label="Slide precedente"
+                  >
+                    <ChevronLeft className="mr-1 size-4" /> Precedente
+                  </Button>
+                  <span className="text-muted-foreground text-sm tabular-nums">
+                    Slide {pos + 1} di {slides.length}
+                  </span>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={goNext}
+                    disabled={pos < 0 || pos >= slides.length - 1}
+                    aria-label="Slide successiva"
+                  >
+                    Successiva <ChevronRight className="ml-1 size-4" />
+                  </Button>
+                </div>
                 <SlideViewer slide={selected} total={slides.length} />
                 <AudioPlayer courseId={id} slideIndex={selected.index} />
               </section>

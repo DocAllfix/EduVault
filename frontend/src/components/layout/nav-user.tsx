@@ -65,9 +65,17 @@ export function NavUser({ user: fallbackUser }: NavUserProps) {
   const displayRole = me?.role
   const displayName =
     displayEmail.split('@')[0]?.replace(/\./g, ' ') || fallbackUser.name
-  const initials = (displayEmail || fallbackUser.name)
-    .slice(0, 2)
-    .toUpperCase()
+  // Iniziali leggibili: derivate dal ruolo (AD/OP/RV) quando noto, così
+  // l'avatar è coerente con l'utente loggato (es. admin → "AD") invece di
+  // mostrare le prime due lettere dell'email o un fallback del template.
+  const roleInitials: Record<string, string> = {
+    admin: 'AD',
+    operator: 'OP',
+    reviewer: 'RV',
+  }
+  const initials =
+    (displayRole && roleInitials[displayRole]) ||
+    (displayEmail || fallbackUser.name).slice(0, 2).toUpperCase()
 
   return (
     <>
@@ -81,7 +89,7 @@ export function NavUser({ user: fallbackUser }: NavUserProps) {
               >
                 <Avatar className='h-8 w-8 rounded-lg'>
                   <AvatarImage src={fallbackUser.avatar} alt={displayName} />
-                  <AvatarFallback className='rounded-lg'>
+                  <AvatarFallback className='bg-primary/10 text-primary rounded-lg font-semibold'>
                     {initials}
                   </AvatarFallback>
                 </Avatar>
@@ -106,7 +114,7 @@ export function NavUser({ user: fallbackUser }: NavUserProps) {
                 <div className='flex items-center gap-2 px-1 py-1.5 text-start text-sm'>
                   <Avatar className='h-8 w-8 rounded-lg'>
                     <AvatarImage src={fallbackUser.avatar} alt={displayName} />
-                    <AvatarFallback className='rounded-lg'>
+                    <AvatarFallback className='bg-primary/10 text-primary rounded-lg font-semibold'>
                       {initials}
                     </AvatarFallback>
                   </Avatar>

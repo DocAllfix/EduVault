@@ -26,7 +26,7 @@ export function RebuildBanner({
     mutationFn: () => api.rebuildCourse(courseId),
     onSuccess: () => {
       toast.success(
-        'Rigenerazione avviata. PPTX/PDF/audio verranno aggiornati (5-10 min).',
+        'Rigenerazione avviata. PPTX e PDF pronti a breve; la narrazione vocale viene rigenerata in background (2-10 min).',
       )
       onRebuildStarted?.()
     },

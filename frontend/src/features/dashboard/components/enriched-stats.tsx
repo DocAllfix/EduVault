@@ -12,6 +12,7 @@ import { useNavigate } from '@tanstack/react-router'
 import { Clock, FileWarning, Layers } from 'lucide-react'
 
 import type { components } from '@/lib/api'
+import { cn } from '@/lib/utils'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { CourseStatusBadge } from './course-status-badge'
 
@@ -65,7 +66,14 @@ export function EnrichedStats({ stats }: { stats?: DashboardStats }) {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="text-foreground text-2xl font-bold">
+          <div
+            className={cn(
+              'font-semibold',
+              stats.dirty_count === 0
+                ? 'text-muted-foreground text-lg'
+                : 'text-destructive text-2xl font-bold'
+            )}
+          >
             {stats.dirty_count}
           </div>
           <p className="text-muted-foreground text-xs">

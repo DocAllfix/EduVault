@@ -535,6 +535,45 @@ async function rebuildCourse(
   )
 }
 
+// ── Slide management (FASE 6): add / move / delete / duplicate ──────────
+// Tutti ritornano l'array slide aggiornato (reindex contiguo lato backend).
+
+async function addSlide(
+  id: string,
+  afterIdx: number,
+  slideType: string,
+): Promise<StudioSlide[]> {
+  return request<StudioSlide[]>(
+    `/api/courses/${encodeURIComponent(id)}/slides`,
+    { method: 'POST', json: { after_idx: afterIdx, slide_type: slideType } },
+  )
+}
+
+async function moveSlide(
+  id: string,
+  idx: number,
+  direction: 'up' | 'down',
+): Promise<StudioSlide[]> {
+  return request<StudioSlide[]>(
+    `/api/courses/${encodeURIComponent(id)}/slides/${idx}/move`,
+    { method: 'POST', json: { direction } },
+  )
+}
+
+async function duplicateSlide(id: string, idx: number): Promise<StudioSlide[]> {
+  return request<StudioSlide[]>(
+    `/api/courses/${encodeURIComponent(id)}/slides/${idx}/duplicate`,
+    { method: 'POST' },
+  )
+}
+
+async function deleteSlide(id: string, idx: number): Promise<StudioSlide[]> {
+  return request<StudioSlide[]>(
+    `/api/courses/${encodeURIComponent(id)}/slides/${idx}`,
+    { method: 'DELETE' },
+  )
+}
+
 // ─────────────────────────── Admin ─────────────────────────────────────
 
 async function getMetrics(days: number = 7): Promise<MetricsResponse> {
@@ -586,6 +625,10 @@ export const api = {
   slideAudioUrl,
   regenerateSlide,
   rebuildCourse,
+  addSlide,
+  moveSlide,
+  duplicateSlide,
+  deleteSlide,
   // Regulations
   uploadRegulation,
   getRegulations,
