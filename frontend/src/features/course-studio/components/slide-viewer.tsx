@@ -13,11 +13,23 @@
 import { cn } from '@/lib/utils'
 import type { StudioSlide } from '@/lib/api'
 
-function bulletLines(body: string): string[] {
+function bulletLines(body: string | null | undefined): string[] {
+  // Backend may emit body=null with a separate `bullets: string[]` array
+  // (the strict SlideContent shape). Guard against both: if body is empty,
+  // the caller passes bullets joined elsewhere — return [] here.
+  if (!body) return []
   return body
     .split('\n')
     .map((b) => b.trim())
     .filter(Boolean)
+}
+
+function slideBulletText(slide: StudioSlide): string[] {
+  // Prefer body (string with \n) when populated; otherwise fall back to the
+  // structured bullets array that ships alongside it.
+  if (slide.body && slide.body.trim()) return bulletLines(slide.body)
+  const arr = (slide as unknown as { bullets?: string[] }).bullets
+  return Array.isArray(arr) ? arr.filter((b) => b && b.trim()) : []
 }
 
 function SlideFrame({
@@ -81,7 +93,7 @@ export function SlideViewer({ slide, total }: { slide: StudioSlide; total: numbe
             {slide.title}
           </h2>
           <ul className="text-foreground space-y-2 text-base">
-            {bulletLines(slide.body).map((line, i) => (
+            {slideBulletText(slide).map((line, i) => (
               <li key={i} className="flex gap-2">
                 <span className="text-primary">•</span>
                 <span>{line}</span>
@@ -99,7 +111,7 @@ export function SlideViewer({ slide, total }: { slide: StudioSlide; total: numbe
           </h2>
           <div className="flex flex-1 gap-6">
             <ul className="text-foreground flex-[3] space-y-2 text-base">
-              {bulletLines(slide.body).map((line, i) => (
+              {slideBulletText(slide).map((line, i) => (
                 <li key={i} className="flex gap-2">
                   <span className="text-primary">•</span>
                   <span>{line}</span>
@@ -146,7 +158,7 @@ export function SlideViewer({ slide, total }: { slide: StudioSlide; total: numbe
             )}
           </div>
           <p className="text-muted-foreground mt-2 text-center text-sm italic">
-            {bulletLines(slide.body)[0] ?? ''}
+            {slideBulletText(slide)[0] ?? ''}
           </p>
         </SlideFrame>
       )
@@ -184,7 +196,7 @@ export function SlideViewer({ slide, total }: { slide: StudioSlide; total: numbe
       )
 
     case 'CASE_STUDY': {
-      const sections = slide.body.split('---').map((s) => s.trim())
+      const sections = (slide.body ?? '').split('---').map((s) => s.trim())
       const labels = ['Situazione', 'Azione', 'Risultato']
       return (
         <SlideFrame footer={footer}>
@@ -227,7 +239,7 @@ export function SlideViewer({ slide, total }: { slide: StudioSlide; total: numbe
       return (
         <SlideFrame footer={footer}>
           <h2 className="text-foreground text-2xl font-semibold">{slide.title}</h2>
-          <p className="text-foreground mt-4">{slide.body}</p>
+          <p className="text-foreground mt-4">{slide.body ?? ''}</p>
         </SlideFrame>
       )
   }

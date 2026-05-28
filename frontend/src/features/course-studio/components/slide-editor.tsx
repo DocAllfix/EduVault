@@ -26,19 +26,22 @@ export function SlideEditor({
   slide: StudioSlide
 }) {
   const qc = useQueryClient()
-  const [title, setTitle] = useState(slide.title)
-  const [body, setBody] = useState(slide.body)
-  const [notes, setNotes] = useState(slide.speaker_notes)
-  const [ref, setRef] = useState(slide.normative_ref)
+  // Backend may emit null for any of these (strict SlideContent ships
+  // `body=None` + structured `bullets[]`). Textareas need string values,
+  // so coerce here once.
+  const [title, setTitle] = useState(slide.title ?? '')
+  const [body, setBody] = useState(slide.body ?? '')
+  const [notes, setNotes] = useState(slide.speaker_notes ?? '')
+  const [ref, setRef] = useState(slide.normative_ref ?? '')
   const [quizOptions, setQuizOptions] = useState<string[]>(slide.quiz_options ?? [])
   const [quizCorrect, setQuizCorrect] = useState<number>(slide.quiz_correct ?? 0)
 
   // Re-sync quando cambia la slide selezionata
   useEffect(() => {
-    setTitle(slide.title)
-    setBody(slide.body)
-    setNotes(slide.speaker_notes)
-    setRef(slide.normative_ref)
+    setTitle(slide.title ?? '')
+    setBody(slide.body ?? '')
+    setNotes(slide.speaker_notes ?? '')
+    setRef(slide.normative_ref ?? '')
     setQuizOptions(slide.quiz_options ?? [])
     setQuizCorrect(slide.quiz_correct ?? 0)
   }, [slide])
