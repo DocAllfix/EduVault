@@ -57,6 +57,7 @@ scripts/rebuild_3_demos_railway.py
 scripts/rebuild_audio_sequential.py
 scripts/check_audio_status.py
 scripts/rephrase_notes_safe.py
+scripts/upload_regulations_prod.py
 
 # === Claude Code runtime ===
 .claude/scheduled_tasks.lock
