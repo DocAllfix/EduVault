@@ -104,6 +104,53 @@ class Settings(BaseSettings):
     # === TTS — OPT-1: edge-tts, no API key required ===
     tts_voice: str = "it-IT-DiegoNeural"
 
+    # === v2 refactor — provider keys (Fase 0 piano vast-hopping-sketch v2) ===
+    # Tutti opzionali finché i corrispondenti feature flag sotto sono False.
+    cohere_api_key: str = ""             # D2 rerank-multilingual-v3.0 (Cohere API, no model in-process)
+    azure_speech_key: str = ""           # D6 Azure Cognitive Services Speech SDK (SSML completo)
+    azure_speech_region: str = ""        # es. "westeurope"
+    voyage_multimodal_model: str = "voyage-multimodal-3"  # D4 image library embedding
+
+    # === v2 refactor — feature flags (VAA-e: safety-net dietro flag) ===
+    # Ogni nuovo componente v2 legge il flag corrispondente. Default tutti False:
+    # comportamento pipeline v1 invariato finché il flag non viene alzato per
+    # famiglia di corsi nella promozione A/B (D10).
+    #
+    # NOTA: pydantic-settings v2 mappa nested dict da env solo via JSON
+    # (V2_FEATURES='{"rerank_enabled":true}'). Per semplicità ops, ogni flag è
+    # un campo bool top-level con prefisso V2_.
+    v2_rerank_enabled: bool = False          # D2: rerank Cohere a 2 stadi (recall+rerank)
+    v2_kg_traversal_enabled: bool = False    # D1: 1-hop graph traversal post-rerank
+    v2_drop_list_enabled: bool = True        # SAFETY-NET: drop-list regex v1 attive (D10 spegne per famiglia)
+    v2_skeleton_validation: bool = False     # D3: scheletro narrativo + gate 1-click utente
+    v2_catalog_from_db: bool = False         # D8: lettura catalogo da DB invece di catalog_config.py
+    v2_chat_enabled: bool = False            # D7: chat-panel in Course Studio (F1 actions)
+    v2_chat_mutations_enabled: bool = False  # D7 F2: tool-use mutations (oggi NO)
+    v2_image_library_enabled: bool = False   # D4: image library prima di Pexels web
+    v2_audio_provider_azure: bool = False    # D6: Azure Speech SDK con SSML (default edge-tts)
+    v2_quality_badges_enabled: bool = False  # D9: badge UI slide problematiche
+
+    @property
+    def v2_features(self) -> dict[str, bool]:
+        """Vista aggregata dei flag v2 per logging/debug.
+
+        Restituisce un dict {feature_name: enabled} comodo da serializzare in
+        un log structured event a startup, così l'operatore vede sempre
+        quali componenti v2 sono attivi nel container corrente.
+        """
+        return {
+            "rerank_enabled": self.v2_rerank_enabled,
+            "kg_traversal_enabled": self.v2_kg_traversal_enabled,
+            "drop_list_enabled": self.v2_drop_list_enabled,
+            "skeleton_validation": self.v2_skeleton_validation,
+            "catalog_from_db": self.v2_catalog_from_db,
+            "chat_enabled": self.v2_chat_enabled,
+            "chat_mutations_enabled": self.v2_chat_mutations_enabled,
+            "image_library_enabled": self.v2_image_library_enabled,
+            "audio_provider_azure": self.v2_audio_provider_azure,
+            "quality_badges_enabled": self.v2_quality_badges_enabled,
+        }
+
     # === Branding ===
     organization_name: str = "corsi8108"
 

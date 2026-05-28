@@ -58,6 +58,14 @@ dependencies = [
     "mutagen>=1.47",               # OPT-4: MP3 duration computation for edge-tts output
     "pydantic-settings>=2.3",      # OPT-2: typed env config (app.config.settings)
     "jinja2>=3.1",                 # OPT-3: PDF dispensa template engine
+
+    # === v2 refactor (piano vast-hopping-sketch v2, FASE 0) ===
+    # Tutte additive, attivate solo quando i flag in app.config.settings.v2_*
+    # sono True. Nessuna è in_process (Cohere=API, Azure Speech=API), così non
+    # cambiano il footprint memoria a flag False.
+    "cohere>=5.0",                 # D2: rerank-multilingual-v3.0 API (no model locale)
+    "azure-cognitiveservices-speech>=1.40",  # D6: Speech SDK con SSML completo
+    "rank-bm25>=0.2",              # D2: recall BM25 lato CPU (lightweight, no deps pesanti)
 ]
 
 [project.optional-dependencies]
