@@ -38,6 +38,7 @@ import { Route as AuthenticatedSettingsDisplayRouteImport } from './routes/_auth
 import { Route as AuthenticatedSettingsAppearanceRouteImport } from './routes/_authenticated/settings/appearance'
 import { Route as AuthenticatedSettingsAccountRouteImport } from './routes/_authenticated/settings/account'
 import { Route as AuthenticatedErrorsErrorRouteImport } from './routes/_authenticated/errors/$error'
+import { Route as AuthenticatedCoursesStudioRouteImport } from './routes/_authenticated/courses/studio'
 import { Route as AuthenticatedCoursesNewRouteImport } from './routes/_authenticated/courses/new'
 import { Route as AuthenticatedCoursesIdRouteImport } from './routes/_authenticated/courses/$id'
 import { Route as AuthenticatedCoursesIdStudioRouteImport } from './routes/_authenticated/courses/$id_.studio'
@@ -195,6 +196,12 @@ const AuthenticatedErrorsErrorRoute =
     path: '/errors/$error',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
+const AuthenticatedCoursesStudioRoute =
+  AuthenticatedCoursesStudioRouteImport.update({
+    id: '/courses/studio',
+    path: '/courses/studio',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const AuthenticatedCoursesNewRoute = AuthenticatedCoursesNewRouteImport.update({
   id: '/courses/new',
   path: '/courses/new',
@@ -231,6 +238,7 @@ export interface FileRoutesByFullPath {
   '/dashboard': typeof AuthenticatedDashboardRoute
   '/courses/$id': typeof AuthenticatedCoursesIdRoute
   '/courses/new': typeof AuthenticatedCoursesNewRoute
+  '/courses/studio': typeof AuthenticatedCoursesStudioRoute
   '/errors/$error': typeof AuthenticatedErrorsErrorRoute
   '/settings/account': typeof AuthenticatedSettingsAccountRoute
   '/settings/appearance': typeof AuthenticatedSettingsAppearanceRoute
@@ -262,6 +270,7 @@ export interface FileRoutesByTo {
   '/': typeof AuthenticatedIndexRoute
   '/courses/$id': typeof AuthenticatedCoursesIdRoute
   '/courses/new': typeof AuthenticatedCoursesNewRoute
+  '/courses/studio': typeof AuthenticatedCoursesStudioRoute
   '/errors/$error': typeof AuthenticatedErrorsErrorRoute
   '/settings/account': typeof AuthenticatedSettingsAccountRoute
   '/settings/appearance': typeof AuthenticatedSettingsAppearanceRoute
@@ -298,6 +307,7 @@ export interface FileRoutesById {
   '/_authenticated/': typeof AuthenticatedIndexRoute
   '/_authenticated/courses/$id': typeof AuthenticatedCoursesIdRoute
   '/_authenticated/courses/new': typeof AuthenticatedCoursesNewRoute
+  '/_authenticated/courses/studio': typeof AuthenticatedCoursesStudioRoute
   '/_authenticated/errors/$error': typeof AuthenticatedErrorsErrorRoute
   '/_authenticated/settings/account': typeof AuthenticatedSettingsAccountRoute
   '/_authenticated/settings/appearance': typeof AuthenticatedSettingsAppearanceRoute
@@ -332,6 +342,7 @@ export interface FileRouteTypes {
     | '/dashboard'
     | '/courses/$id'
     | '/courses/new'
+    | '/courses/studio'
     | '/errors/$error'
     | '/settings/account'
     | '/settings/appearance'
@@ -363,6 +374,7 @@ export interface FileRouteTypes {
     | '/'
     | '/courses/$id'
     | '/courses/new'
+    | '/courses/studio'
     | '/errors/$error'
     | '/settings/account'
     | '/settings/appearance'
@@ -398,6 +410,7 @@ export interface FileRouteTypes {
     | '/_authenticated/'
     | '/_authenticated/courses/$id'
     | '/_authenticated/courses/new'
+    | '/_authenticated/courses/studio'
     | '/_authenticated/errors/$error'
     | '/_authenticated/settings/account'
     | '/_authenticated/settings/appearance'
@@ -634,6 +647,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedErrorsErrorRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/courses/studio': {
+      id: '/_authenticated/courses/studio'
+      path: '/courses/studio'
+      fullPath: '/courses/studio'
+      preLoaderRoute: typeof AuthenticatedCoursesStudioRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/courses/new': {
       id: '/_authenticated/courses/new'
       path: '/courses/new'
@@ -694,6 +714,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedIndexRoute: typeof AuthenticatedIndexRoute
   AuthenticatedCoursesIdRoute: typeof AuthenticatedCoursesIdRoute
   AuthenticatedCoursesNewRoute: typeof AuthenticatedCoursesNewRoute
+  AuthenticatedCoursesStudioRoute: typeof AuthenticatedCoursesStudioRoute
   AuthenticatedErrorsErrorRoute: typeof AuthenticatedErrorsErrorRoute
   AuthenticatedAdminIndexRoute: typeof AuthenticatedAdminIndexRoute
   AuthenticatedAppsIndexRoute: typeof AuthenticatedAppsIndexRoute
@@ -712,6 +733,7 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedIndexRoute: AuthenticatedIndexRoute,
   AuthenticatedCoursesIdRoute: AuthenticatedCoursesIdRoute,
   AuthenticatedCoursesNewRoute: AuthenticatedCoursesNewRoute,
+  AuthenticatedCoursesStudioRoute: AuthenticatedCoursesStudioRoute,
   AuthenticatedErrorsErrorRoute: AuthenticatedErrorsErrorRoute,
   AuthenticatedAdminIndexRoute: AuthenticatedAdminIndexRoute,
   AuthenticatedAppsIndexRoute: AuthenticatedAppsIndexRoute,

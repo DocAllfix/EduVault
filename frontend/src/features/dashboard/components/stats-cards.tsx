@@ -18,6 +18,7 @@
  * value plus a toast at the parent level (Dashboard owns the query).
  */
 
+import { Link } from '@tanstack/react-router'
 import {
   BookOpen,
   Library,
@@ -44,6 +45,8 @@ interface CardSpec {
   label: string
   value: number | undefined
   icon: React.ComponentType<{ className?: string }>
+  /** Where clicking the card navigates. Internal route or in-page anchor. */
+  href: string
   /** Adds a subtle accent — used to mark the "live" generating card. */
   liveAccent?: boolean
 }
@@ -58,55 +61,68 @@ export function StatsCards({
       label: 'Corsi totali',
       value: stats?.courses_count,
       icon: BookOpen,
+      // Lista corsi vive nella stessa pagina (tabella sotto le KPI), anchor a
+      // quel block — più trasparente di un sotto-route che non esiste in v1.
+      href: '/#corsi',
     },
     {
       label: 'In generazione',
       value: generatingCount,
       icon: Loader2,
       liveAccent: (generatingCount ?? 0) > 0,
+      href: '/#corsi',
     },
     {
       label: 'Normative indicizzate',
       value: stats?.regulations_count,
       icon: Library,
+      href: '/regulations',
     },
     {
       label: 'Corsi certificati (L2)',
       value: stats?.l2_count,
       icon: ShieldCheck,
+      href: '/#corsi',
     },
   ]
 
   return (
     <div className='grid gap-4 sm:grid-cols-2 lg:grid-cols-4'>
       {cards.map((c) => (
-        <Card
+        <Link
           key={c.label}
-          className={cn(
-            c.liveAccent &&
-              'border-brand-primary/30 ring-1 ring-brand-primary/10',
-          )}
+          to={c.href}
+          className='focus-visible:ring-ring rounded-xl outline-none focus-visible:ring-2'
+          aria-label={`Vai a ${c.label}`}
         >
-          <CardHeader className='flex flex-row items-center justify-between space-y-0 pb-2'>
-            <CardTitle className='text-sm font-medium'>{c.label}</CardTitle>
-            <c.icon
-              className={cn(
-                'size-4 text-muted-foreground',
-                c.liveAccent && 'animate-spin text-brand-primary',
-              )}
-              aria-hidden='true'
-            />
-          </CardHeader>
-          <CardContent>
-            {isLoading ? (
-              <Skeleton className='h-8 w-16' />
-            ) : (
-              <div className='text-2xl font-bold tabular-nums'>
-                {c.value ?? '—'}
-              </div>
+          <Card
+            className={cn(
+              'hover:border-brand-primary/40 transition-colors hover:shadow-md',
+              c.liveAccent &&
+                'border-brand-primary/30 ring-1 ring-brand-primary/10',
             )}
-          </CardContent>
-        </Card>
+          >
+            <CardHeader className='flex flex-row items-center justify-between space-y-0 pb-2'>
+              <CardTitle className='text-sm font-medium'>{c.label}</CardTitle>
+              <c.icon
+                className={cn(
+                  'size-4 text-muted-foreground',
+                  c.liveAccent && 'animate-spin text-brand-primary',
+                )}
+                aria-hidden='true'
+              />
+            </CardHeader>
+            <CardContent>
+              {isLoading ? (
+                <Skeleton className='h-8 w-16' />
+              ) : (
+                <div className='text-2xl font-bold tabular-nums'>
+                  {c.value ?? '—'}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </Link>
       ))}
     </div>
   )

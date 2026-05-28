@@ -161,7 +161,7 @@ export function Dashboard() {
         <EnrichedStats stats={statsQuery.data} />
 
         {/* Courses list */}
-        <section aria-labelledby='courses-heading'>
+        <section id='corsi' aria-labelledby='courses-heading' className='scroll-mt-20'>
           <h2
             id='courses-heading'
             className='mb-3 text-lg font-semibold tracking-tight'

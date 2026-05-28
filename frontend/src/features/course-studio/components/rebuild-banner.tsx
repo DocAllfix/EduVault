@@ -8,7 +8,7 @@
  * può scaricare il file completo dal dettaglio corso.
  */
 
-import { useMutation } from '@tanstack/react-query'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Download, Loader2, RefreshCw } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -22,12 +22,20 @@ export function RebuildBanner({
   courseId: string
   onRebuildStarted?: () => void
 }) {
+  const qc = useQueryClient()
   const rebuildMut = useMutation({
     mutationFn: () => api.rebuildCourse(courseId),
     onSuccess: () => {
       toast.success(
         'Rigenerazione avviata. PPTX e PDF pronti a breve; la narrazione vocale viene rigenerata in background (2-10 min).',
       )
+      // Backend updates last_rebuilt_at + audio_manifest_path on completion.
+      // Invalidate everything the user can be looking at right now so detail,
+      // dashboard, slides list and slide previews all reflect the new state.
+      qc.invalidateQueries({ queryKey: ['course-slides', courseId] })
+      qc.invalidateQueries({ queryKey: ['course', courseId] })
+      qc.invalidateQueries({ queryKey: ['courses'] })
+      qc.invalidateQueries({ queryKey: ['dashboard-stats'] })
       onRebuildStarted?.()
     },
     onError: () => toast.error('Avvio rigenerazione fallito'),

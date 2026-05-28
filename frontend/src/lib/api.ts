@@ -515,6 +515,12 @@ function slideAudioUrl(id: string, idx: number): string {
   return buildUrl(`/api/courses/${encodeURIComponent(id)}/audio/${idx}`)
 }
 
+/** URL diretto del PNG-render della pagina PDF della slide (per <img src>).
+ *  Restituisce 404 finché il corso non è mai stato rigenerato/non ha PDF. */
+function slidePreviewUrl(id: string, idx: number): string {
+  return buildUrl(`/api/courses/${encodeURIComponent(id)}/slides/${idx}/preview.png`)
+}
+
 async function regenerateSlide(
   id: string,
   idx: number,
@@ -623,6 +629,7 @@ export const api = {
   patchSlideImage,
   searchSlideImages,
   slideAudioUrl,
+  slidePreviewUrl,
   regenerateSlide,
   rebuildCourse,
   addSlide,

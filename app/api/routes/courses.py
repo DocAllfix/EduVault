@@ -492,6 +492,61 @@ async def get_course_slide_audio(
                         filename=f"slide_{idx:04d}.mp3")
 
 
+@router.get("/{course_id}/slides/{idx}/preview.png")
+async def get_slide_preview_png(
+    course_id: str,
+    idx: int,
+    user: dict[str, Any] = Depends(get_current_user),
+) -> FileResponse:
+    """Render of the actual PDF page as PNG so Course Studio shows what the
+    operator will get in the PPTX/PDF (real layout, real images, real diagrams).
+
+    Cached on disk under output/previews/{course_id}/{rebuild_token}/{idx}.png
+    so repeat opens of the same slide are instant; cache is keyed on the
+    course's `last_rebuilt_at` timestamp so a rebuild invalidates it
+    automatically without manual cleanup.
+    """
+    pool = get_pool()
+    course = await _load_course_or_404(course_id, pool)
+    _enforce_ownership(course, user)
+
+    pdf_path_str = course.get("pdf_path")
+    if not pdf_path_str:
+        raise HTTPException(404, "PDF non disponibile per questo corso (mai rigenerato).")
+    pdf_path = Path(pdf_path_str)
+    if not pdf_path.is_file():
+        raise HTTPException(404, "PDF mancante su disco — rigenera il corso.")
+
+    # Cache token derived from the rebuild timestamp (or created_at fallback).
+    ts = course.get("last_rebuilt_at") or course.get("created_at")
+    token = str(int(ts.timestamp())) if ts else "v0"
+
+    cache_dir = Path("output") / "previews" / str(course_id) / token
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    png_path = cache_dir / f"{idx:04d}.png"
+
+    if not png_path.is_file():
+        # Lazy import keeps cold-start cheap when nobody opens the preview.
+        import pypdfium2 as pdfium  # type: ignore[import-not-found]
+
+        pdf = pdfium.PdfDocument(str(pdf_path))
+        try:
+            if idx < 0 or idx >= len(pdf):
+                raise HTTPException(404, f"Slide {idx} fuori range PDF ({len(pdf)} pagine).")
+            page = pdf[idx]
+            # 1.6 ≈ 153 DPI: leggible on retina without bloating the cache.
+            pil_image = page.render(scale=1.6).to_pil()
+            pil_image.save(png_path, format="PNG", optimize=True)
+        finally:
+            pdf.close()
+
+    return FileResponse(
+        str(png_path),
+        media_type="image/png",
+        headers={"Cache-Control": "public, max-age=3600"},
+    )
+
+
 @router.get("/{course_id}/image/search", response_model=ImageSearchResult)
 @limiter.limit("30/minute")
 async def search_slide_images(

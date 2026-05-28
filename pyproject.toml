@@ -33,6 +33,9 @@ dependencies = [
     "httpx>=0.27",                 # Async HTTP client (Anthropic, Brave, Voyage)
     "pillow>=10.0",                # Image conversion + integrity validation
     "pdfplumber>=0.11",            # Structured PDF parsing for normative docs
+    "pypdfium2>=4.30",             # PDF -> PNG rendering for Course Studio slide previews
+                                   # (the viewer renders the real PDF page so the operator
+                                   # sees exactly what will be in the PPTX; no system deps).
     "bcrypt>=4.1",                 # Password hashing
     "pyotp>=2.9",                  # TOTP (v1.1 ready, dormant in v1.0 per §1.1 note)
     "pyjwt>=2.9",                  # JWT encode/decode (BP §08.1 uses `import jwt`)

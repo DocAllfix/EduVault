@@ -21,8 +21,10 @@
 
 import { DotsHorizontalIcon } from '@radix-ui/react-icons'
 import { type Row } from '@tanstack/react-table'
-import { Download, FileText, Headphones, Presentation, ShieldCheck, Trash2 } from 'lucide-react'
+import { Download, FileText, Headphones, Pencil, Presentation, ShieldCheck, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
+
+import { useNavigate } from '@tanstack/react-router'
 
 import { api, ApiError, type CourseSummary, type DownloadFormat } from '@/lib/api'
 import { Button } from '@/components/ui/button'
@@ -91,7 +93,10 @@ export function CoursesRowActions({
   onDelete,
   onOpenDetail,
 }: CoursesRowActionsProps) {
+  const navigate = useNavigate()
   const course = row.original
+  const canStudio =
+    course.status === 'completed' || course.status === 'certified'
   const canDownload =
     course.status === 'completed' || course.status === 'certified'
   const canCertify =
@@ -111,6 +116,16 @@ export function CoursesRowActions({
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align='end' className='w-44'>
+        {canStudio && (
+          <DropdownMenuItem
+            onClick={() =>
+              navigate({ to: '/courses/$id/studio', params: { id: course.id } })
+            }
+          >
+            <Pencil className='me-2 size-4' aria-hidden='true' />
+            Apri Studio
+          </DropdownMenuItem>
+        )}
         <DropdownMenuItem onClick={() => onOpenDetail(course)}>
           Dettaglio
         </DropdownMenuItem>

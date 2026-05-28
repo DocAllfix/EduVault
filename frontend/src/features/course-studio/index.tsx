@@ -186,7 +186,12 @@ export function CourseStudio() {
                     Successiva <ChevronRight className="ml-1 size-4" />
                   </Button>
                 </div>
-                <SlideViewer slide={selected} total={slides.length} />
+                <SlideViewer
+                  slide={selected}
+                  total={slides.length}
+                  courseId={id}
+                  key={`${id}-${selected.index}`}
+                />
                 <AudioPlayer courseId={id} slideIndex={selected.index} />
               </section>
 

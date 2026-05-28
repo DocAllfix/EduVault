@@ -10,8 +10,9 @@
  *   il 16:9; nessun overflow (i constraints FASE 1 garantiscono il fit).
  */
 
+import { useState } from 'react'
 import { cn } from '@/lib/utils'
-import type { StudioSlide } from '@/lib/api'
+import { api, type StudioSlide } from '@/lib/api'
 
 function bulletLines(body: string | null | undefined): string[] {
   // Backend may emit body=null with a separate `bullets: string[]` array
@@ -53,7 +54,71 @@ function SlideFrame({
   )
 }
 
-export function SlideViewer({ slide, total }: { slide: StudioSlide; total: number }) {
+/** Primary viewer: shows the REAL rendered PDF page so the operator sees
+ *  exactly what they'll get in the PPTX (layout, brand, images, diagrams).
+ *  Falls back to the schematic React layout if the PNG can't be fetched
+ *  (e.g. course never rebuilt, PDF missing, network error). */
+function PdfPagePreview({
+  courseId,
+  slide,
+  total,
+  onError,
+}: {
+  courseId: string
+  slide: StudioSlide
+  total: number
+  onError: () => void
+}) {
+  // Token authenticated URL (the <img> tag doesn't send Authorization headers,
+  // same approach used by AudioPlayer for the MP3 stream).
+  const token =
+    typeof window !== 'undefined'
+      ? localStorage.getItem('nexus.accessToken')
+      : null
+  const base = api.slidePreviewUrl(courseId, slide.index)
+  const src = token ? `${base}?token=${encodeURIComponent(token)}` : base
+
+  return (
+    <div className='border-border relative aspect-video w-full overflow-hidden rounded-lg border bg-white shadow-sm'>
+      <img
+        src={src}
+        alt={`Anteprima slide ${slide.index + 1}: ${slide.title ?? ''}`}
+        className='h-full w-full object-contain'
+        onError={onError}
+      />
+      <div className='text-muted-foreground absolute inset-x-0 bottom-0 flex items-center justify-between bg-white/85 px-4 py-1.5 text-xs backdrop-blur-sm'>
+        <span className='truncate'>{slide.normative_ref || '—'}</span>
+        <span className='tabular-nums'>
+          {slide.index + 1} / {total}
+        </span>
+      </div>
+    </div>
+  )
+}
+
+export function SlideViewer({
+  slide,
+  total,
+  courseId,
+}: {
+  slide: StudioSlide
+  total: number
+  courseId?: string
+}) {
+  // Try the real PDF render first; only fall back to the schematic preview
+  // when the backend can't serve a PNG (no PDF on disk yet / load error).
+  const [pdfFailed, setPdfFailed] = useState(false)
+  if (courseId && !pdfFailed) {
+    return (
+      <PdfPagePreview
+        courseId={courseId}
+        slide={slide}
+        total={total}
+        onError={() => setPdfFailed(true)}
+      />
+    )
+  }
+
   const footer = (
     <>
       <span>{slide.normative_ref || '—'}</span>

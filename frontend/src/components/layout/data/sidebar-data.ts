@@ -15,6 +15,7 @@ import {
   Command,
   LayoutDashboard,
   Library,
+  Pencil,
   Plus,
   Sliders,
 } from 'lucide-react'
@@ -46,6 +47,11 @@ export const sidebarData: SidebarData = {
           title: 'Nuovo Corso',
           url: '/courses/new',
           icon: Plus,
+        },
+        {
+          title: 'Course Studio',
+          url: '/courses/studio',
+          icon: Pencil,
         },
       ],
     },
