@@ -9,10 +9,21 @@
  */
 
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { Download, Loader2, RefreshCw } from 'lucide-react'
+import { AlertTriangle, Download, Loader2, RefreshCw } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { api } from '@/lib/api'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
 
 export function RebuildBanner({
@@ -66,17 +77,40 @@ export function RebuildBanner({
         </p>
       </div>
       <div className="flex gap-2">
-        <Button
-          onClick={() => rebuildMut.mutate()}
-          disabled={rebuildMut.isPending}
-        >
-          {rebuildMut.isPending ? (
-            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-          ) : (
-            <RefreshCw className="mr-2 h-4 w-4" />
-          )}
-          Rigenera tutto
-        </Button>
+        <AlertDialog>
+          <AlertDialogTrigger asChild>
+            <Button disabled={rebuildMut.isPending}>
+              {rebuildMut.isPending ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <RefreshCw className="mr-2 h-4 w-4" />
+              )}
+              Rigenera tutto
+            </Button>
+          </AlertDialogTrigger>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle className="flex items-center gap-2">
+                <AlertTriangle className="text-amber-600 size-5" aria-hidden="true" />
+                Rigenerare PPTX, PDF e audio?
+              </AlertDialogTitle>
+              <AlertDialogDescription>
+                La rigenerazione ricostruisce PPTX, PDF e narrazione vocale
+                <strong> dai contenuti correnti del corso nel sistema</strong>.
+                Se hai modificato manualmente il PPTX in PowerPoint e lo hai
+                ricaricato come versione definitiva, quelle modifiche manuali
+                <strong> verranno sovrascritte</strong>. Procedi solo se vuoi
+                applicare le modifiche fatte qui in Course Studio.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Annulla</AlertDialogCancel>
+              <AlertDialogAction onClick={() => rebuildMut.mutate()}>
+                Sì, rigenera tutto
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
         <Button
           variant="outline"
           onClick={() => downloadMut.mutate()}

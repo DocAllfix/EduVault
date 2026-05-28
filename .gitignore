@@ -58,6 +58,7 @@ scripts/rebuild_audio_sequential.py
 scripts/check_audio_status.py
 scripts/rephrase_notes_safe.py
 scripts/upload_regulations_prod.py
+scripts/upload_desktop_artifacts.py
 
 # === Claude Code runtime ===
 .claude/scheduled_tasks.lock
