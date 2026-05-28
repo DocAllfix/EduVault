@@ -173,6 +173,69 @@ async def list_chunks(
     ]
 
 
+@router.get("/{slug_or_id}/linked-courses", response_model=list[LinkedCourseSummary])
+async def list_linked_courses(
+    slug_or_id: str,
+    user: dict[str, Any] = Depends(get_current_user),
+) -> list[LinkedCourseSummary]:
+    """Lista dei corsi del catalogo che dichiarano questa normativa come ref.
+
+    Accetta sia lo slug (`dlgs_81_08`) sia il UUID. Risolve via `regulations.slug`
+    prima per UX (la UI userà gli slug), poi cade su UUID se non match. Output
+    JOIN con `course_type_catalog` per esporre title/hours/target/approved
+    senza N+1 lookup lato client.
+    """
+    pool = get_pool()
+
+    # Risolvi slug -> slug canonico (la tabella regulation_course_type_links usa
+    # regulation_slug, non l'UUID, perché i link possono pre-esistere alla
+    # ingestione della normativa). Se l'input è già uno slug, lo prendiamo
+    # diretto; se è un UUID, lo mappiamo.
+    canonical_slug: str | None = None
+    try:
+        uuid_mod.UUID(slug_or_id)
+        canonical_slug = await pool.fetchval(
+            "SELECT slug FROM regulations WHERE id = $1",
+            uuid_mod.UUID(slug_or_id),
+        )
+    except ValueError:
+        canonical_slug = slug_or_id
+
+    if not canonical_slug:
+        raise HTTPException(404, "Normativa non trovata")
+
+    rows = await pool.fetch(
+        """
+        SELECT
+            l.course_type_slug,
+            c.title,
+            c.hours,
+            c.target,
+            l.source AS link_source,
+            l.notes  AS link_notes,
+            (c.approved_at IS NOT NULL) AS course_approved
+        FROM regulation_course_type_links AS l
+        JOIN course_type_catalog AS c
+          ON c.slug = l.course_type_slug
+        WHERE l.regulation_slug = $1
+        ORDER BY c.title
+        """,
+        canonical_slug,
+    )
+    return [
+        LinkedCourseSummary(
+            course_type_slug=r["course_type_slug"],
+            title=r["title"],
+            hours=float(r["hours"]),
+            target=r["target"],
+            link_source=r["link_source"],
+            link_notes=r["link_notes"],
+            course_approved=r["course_approved"],
+        )
+        for r in rows
+    ]
+
+
 @router.delete("/{regulation_id}")
 async def delete_regulation(
     regulation_id: str,
