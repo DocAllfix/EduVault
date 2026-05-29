@@ -12,7 +12,67 @@
 > disponibile. L'aggiornamento avviene PRIMA del corrispondente aggiornamento
 > Tracker (REI-12) — così il debt è sempre visibile e tracciato.
 >
-> **Ultimo aggiornamento:** 2026-05-29 — **v2 refactor FASE 2 step 1-8 chiusi (rerank Cohere + graph_service + backfill 21451 edge + 1-hop traversal). Solo F2.9 A/B prod residuo.**
+> **Ultimo aggiornamento:** 2026-05-29 — **ANALISTA REVIEW 17: V2 BOCCIATA, regress strutturale. Tutti i 3 V2 archiviati, flag v2_rerank_enabled e v2_kg_traversal_enabled spenti su Railway. F2.11 velocizzazione sospesa. Pipeline cliente torna a legacy (drop-list + query expansion).**
+
+**ANALISTA REVIEW 17 (2026-05-29) — sintesi diagnosi**:
+- I 3 V2 A/B (ANT/GEN/PRE) sono **regress vs baseline review 10/12/13**. Verdetto netto: nessuno ship.
+- **Patologia nuova: cross-corso contamination**. PRE M3 "Incidenti mancati" ha ~90% slide su altri corsi del catalogo (Modulo A RSPP, Coordinatore in edilizia, Datore di Lavoro RSPP, incaricati antincendio). GEN M1+M2 ~20-50% cross-corso (RSPP, Preposti, Coordinatore). ANT M0 ~70/84 slide su ruoli formativi/abilitazione docenti/ASL ispettiva invece di principi dell'incendio.
+- Le mie metriche regex storiche (M1 medico/bio, M3 ATEX) **non vedono la patologia nuova** perché cercano i pattern vecchi. Vittoria sulle metriche storiche (M1 1.2% vs 0% baseline, M3 0% vs 0.9% baseline) **irrilevante** rispetto al cross-corso reale. Pattern classico: "metrica misura il problema vecchio; patologia si sposta in dimensione nuova; tu vedi verde sui numeri e rosso sul file".
+- **Causa tecnica triplice**:
+  1. Cohere rerank-multilingual-v3.0 troppo "topic-broad": classifica come rilevante qualsiasi chunk topicalmente vicino a "formazione sicurezza", senza filtrare per il sotto-tema specifico del modulo.
+  2. KG `gerarchico_sibling` (18308 edge = 85% del totale) weight 0.7 + 1-hop è la porta principale del cross-corso. Sibling normativi (art. 35-37 D.Lgs 81/08) attraggono materiale di formazione-in-generale di tutti i corsi del catalogo.
+  3. D3 scheletro narrativo **non implementato**: senza spina dorsale per-modulo, rerank+KG sono retrieval topic-libero. Analista aveva indicato in review 16 "B3 è B1+retrieval-per-voce, è l'unico che attacca la causa". V2 è proseguito senza B3 → conferma empirica della previsione.
+- **Sensore D9 corpus-thin ANT M0 = 0.473** ha funzionato come misura, **ma non c'è azione collegata**: il sistema ha visto "modulo povero" ma ha riempito 84 slide con cross-corso invece di limitarsi a 10-15 slide reali con badge "modulo richiede più corpus". Pattern classico: "sensore senza azione = spia accesa che nessuno guarda".
+
+**Discrepanza grave D-160 (REI-17)**: il MESSAGGIO 1 inviato all'analista riportava "V2 MIGLIORA del 73% (M1 PRE 1.0% vs 3.7%)". Le metriche regex erano TECNICAMENTE corrette ma misuravano il pattern sbagliato. Avrei dovuto fare sample-read di 30 slide per modulo prima di dichiarare vittoria. Fallimento di metodo da non ripetere: davanti a un nuovo retrieval architetturalmente diverso, NON usare le stesse regex pensate per la patologia vecchia come unico oracolo.
+
+**5 cure proposte dall'analista, tutte universali (verificato 1-by-1):**
+1. **D3 scheletro narrativo validato** (~3 giorni) — l'LLM propone 6-10 sotto-temi per modulo, esperto valida 1-click, retrieval per voce non per titolo. CURA STRUTTURALE PRINCIPALE.
+2. **Filtro post-rerank title-alignment** (~3-4h) — `cosine(chunk.embedding, module_title.embedding)` con soglia, scarta cross-topic. 20 LOC, universale.
+3. **Restringere KG sibling** (~2h) — peso 0.7→0.4 + vincolo "same-normativa AND same-course_type_catalog". Tipi `cita`/`attua` invariati (sono direzionali e safe).
+4. **D9 vincolante + nuovo sensore cross_course_contamination_rate** (~1 giorno) — il corpus-thin diventa BlockingError (non più log), nuovo sensore traccia il `course_type_slug` di provenienza dei chunk reranked.
+5. **Ingestione corpus antincendio** (parallel, dominio) — ⚠️ **CORREZIONE REI-16 (D-161)**: l'analista ha indicato DM 10/03/1998, ma quel decreto è **ABROGATO dal 29/10/2022**, sostituito dai 3 DM del settembre 2021 (verificato via web 2026-05-29). Corpus corretto VIGENTE: **DM 03/09/2021 "minicodice"** (criteri generali, manca in DB) + **DM 01/09/2021** (controllo impianti, manca) + `dm_02_09_2021` già in DB (58 chunks, da valutare re-parsing). UNI EN ISO sono coperte da copyright → non liberamente ingeribili come i decreti GU. Segnalato all'analista nel MESSAGGIO 3 per conferma prima di procedere. Ingerire il DM 1998 violerebbe REI-2 (normativa = fonte di verità) inserendo norma non applicabile.
+
+**Azioni immediate (2026-05-29):**
+- ✅ V2_RERANK_ENABLED=false, V2_KG_TRAVERSAL_ENABLED=false su Railway prod (verificato via railway variables)
+- ✅ 3 corsi V2 archiviati (DELETE /api/courses): `02e69035`, `8089d9d8`, `3b6763e6`
+- ✅ F2.11 velocizzazione SOSPESA (analista esplicito: "prima di ottimizzare la velocità di un sistema, vale la pena assicurarsi che il sistema produca la cosa giusta")
+- 🟡 MESSAGGIO 3 in preparazione con 2 dubbi architetturali: (a) ordine B2+B3 vs D3 (rapida riduzione cross-corso oppure debt rumore?), (b) definizione concreta cross_course_contamination_rate quando un chunk appartiene a piu' course_types (set, non singolo).
+- ⏸️ F2.12-F2.14 (cure B2/B3/B4) e F3 (D3 scheletro) IN ATTESA risposta analista su ordine.
+
+**ANALISTA RISPOSTA a review 17 (2026-05-29) — direzione vincolante sulle 4 cure + 4 nuove discrepanze quiz:**
+
+**Dubbio 1 — SEQUENZA, non parallelo.** D3 → calibra B2+B3 con D3 attivo → B4. ~2 settimane. Motivazione: D3 cambia il retrieval da by-title a by-subtopic, quindi le soglie cosine di B2 (title-alignment) e i pesi di B3 (KG sibling) vanno calibrati DOPO D3, sui dati che D3 produce — calibrarle ora = calibrarle sul mondo sbagliato. "Una variabile per volta" (disciplina ribadita). **Avvertenza esplicita analista**: "tra D3 e B2+B3 ci sarà la tentazione di dire 'D3 da solo è già molto meglio, ridimensiono B2' — RESISTI: D3 da solo migliora ma NON chiude la classe cross-corso, la chiude solo accoppiato al filtro title-alignment. I 4 meccanismi sono un sistema, non 4 optional." Calibrazione = generare con D3 attivo + soglie candidate (B2: 0.55/0.65/0.75; B3 peso sibling: 0.3/0.4/0.5) su 3-4 corsi che coprano i casi limite (GEN ombrello, ANT corpus-thin, PRE cross-corso forte, idealmente HACCP dominio diverso), sample-read manuale 15-20 slide/modulo, scegliere il compromesso falsi-positivi/falsi-negativi. UNA passata, set sufficiente.
+
+**Dubbio 2 — Interpretazione 3 RAFFINATA.** `cross_course_contamination_rate`:
+```
+cross_corso_chunk(chunk, target_module, target_course):
+  other_modules = [m for c in catalog for m in c.modules if c.slug != target_course.slug]
+  max_other = max(cosine(chunk.body_emb, m.title_emb) for m in other_modules)
+  target_score = cosine(chunk.body_emb, target_module.title_emb)
+  return max_other > target_score AND max_other > SOGLIA  # es. 0.55
+cross_course_contamination_rate(top30):
+  return count(c for c in top30 if cross_corso_chunk(c, ...)) >= K  # K=5, conta assoluta non %
+```
+Raffinamento chiave: **escludere i module_titles del corso target dal confronto** (sennò un chunk intra-corso PRE M3↔M4 verrebbe flaggato come cross-corso — ma intra-corso è problema diverso e di solito legittimo). Conta ASSOLUTA (K=5/8), non percentuale (% su 30 è volatile, 1 chunk = 3.3%). Scartate interpretazione 1 (course_type provenance — verde su tutto) e interpretazione 2 (chunk_specificity 1/N — costoso + va ricalcolato a ogni corso nuovo + algoritmo giudice di sé stesso). **+ sensore gemello `cross_module_repetition_rate`**: quante volte lo stesso chunk_id finisce reranked in moduli diversi DELLO STESSO corso (duplicato cross-modulo, patologia adiacente).
+
+**Corpus antincendio — confermato con correzione.** DM 03/09/2021 (minicodice, prioritario, criteri tecnici generali) + DM 01/09/2021 (controllo impianti) da ingerire. DM 02/09/2021 l'analista chiedeva di RIPARSARE (58 chunks sospetti). UNI EN 3 / UNI 9994 **FUORI dal corpus** (copyright), ma referenziabili come edge `cita` verso `external_reference` placeholder (citazione bibliografica del titolo norma ≠ riproduzione contenuto, conforme copyright).
+
+**→ DM 02/09/2021 INVESTIGATO 2026-05-29: NON è parsing povero, è thin per natura.** L'ipotesi "58 chunks = parsing rotto" verificata e SMENTITA dai dati: in DB ha **137 KB di testo su 58 chunks** (media 2364 char/chunk), allegati corposi (ALLEGATO II=11.728, IV=5.515, IX=2.897 char). Confronto col PDF locale (23pp, 66 KB pdfplumber): il DB ha **207% del testo del PDF locale** → ingestione F1 da fonte GU più ampia, parsing OK. Anomalie: 1 solo chunk frammento (<30 char) su 58 = irrilevante, no re-parse. **Conferma: il sensore D9 ANT M0=0.473 segnalava corpus-thin REALE, non artefatto.** Il DM 02/09/2021 è genuinamente snello. Fix corretto = ingerire DM 03/09 + 01/09, NON riparsare il 02/09. Da comunicare all'analista nel prossimo giro.
+
+**D-160** [REI-17, a verbale]: "V2 +73% sulla regex M1 medico/bio misurava il pattern sbagliato". Audit metrico ≠ verifica al render. Sample-read manuale 30 slide/modulo obbligatoria prima di dichiarare "migliora" su retrieval architetturalmente nuovo.
+
+**D-161** [REI-16/REI-2, a verbale]: ogni proposta di ingestione normativa DEVE verificare lo stato di vigenza PRIMA del download. (Analista aveva proposto DM 10/03/1998, abrogato dal 29/10/2022 — verificato via web. La regola "il sistema cita la fonte vigente" vale anche per chi propone l'ingestione.)
+
+**D-162** [layer rendering]: "Cura applicata a livello slide, non a livello layout, su elementi template-ereditati." Il fix quiz precedente rimuoveva `nx_correct_marker` + `nx_correct_bar` slide-per-slide (92 shape su 46 quiz × 2 = aritmetica perfetta), MA la barra verde viveva nel **layout NX QUIZ**, non nelle singole slide → sopravviveva per ereditarietà. Verifica della cura = RENDER post-fix, NON conteggio shape rimosse. Vale per ogni mutazione (rimozione/override/sostituzione) che competa con eredità slide_layout/slide_master.
+
+**D-163** [effetto collaterale canale]: "Quando rimuovi un elemento UI rotto, traccia dove finisce l'informazione che portava." Il fix quiz aveva spostato "Risposta corretta: X" nelle note relatore "per non perdere l'info" → ma la voce TTS narra le note → avrebbe pronunciato la risposta corretta ad alta voce a ogni quiz. Prima di spostare info, verifica che il nuovo canale non abbia effetti downstream indesiderati.
+
+**D-164** [fix pipeline NON fatto, root template] → **✅ FIXATO 2026-05-29 (parziale, per decisione utente)**: i 3 demo cliente erano stati sanati a posteriori (script rimozione shape da layout+slides post-build), MA il builder continuava a generare la barra nel layout NX QUIZ di OGNI nuovo corso. **Fix root applicato**: rimosso `nx_correct_bar` (AUTO_SHAPE fill 769E2E, barra verde orfana a T=4.06 tra le card A/B e C/D — elemento decorativo che non indicava nessuna risposta, solo rumore visivo) dal Layout 5 'NX QUIZ' di `assets/templates/nexus_master_v4_patched.pptx`. Backup `.pre_D164_bar_removal.bak`. Layout passa da 19 a 18 shape. `nx_correct_bar` non era referenziato in nessun codice builder (verificato via grep) → rimozione zero-impatto. Template ricarica OK, tutti i placeholder builder presenti, slide QUIZ renderizzabile. **DECISIONE UTENTE 2026-05-29**: lasciato `nx_correct_marker` (canale del testo "Risposta corretta: X" scritto dal builder a slide_builder_v2.py:632) — la scelta mostra-sì/mostra-no la risposta sulle slide quiz è rimandata ("decido dopo, per ora solo togli la barra verde rotta"). Quando si deciderà: o text box pulito (mostra) o rimozione completa marker+testo (quiz in bianco). **Ogni nuovo corso d'ora in poi nasce senza barra verde orfana.** Lo script di sanatoria resta utile solo per i 3 demo storici già consegnati.
+
+**Primo audit intermedio richiesto dall'analista** (quando D3 implementato): mandare (a) 1 scheletro proposto dall'LLM su GEN M1 "Prevenzione e protezione" per giudicare qualità proposta pre-validazione, (b) dump top-30 reranked per quella voce di scheletro per vedere distribuzione score prima di calibrare B2. "Non è ferma/continua, è calibriamo B2 sui dati giusti."
+
+PRECEDENTE: 2026-05-29 — **v2 refactor FASE 2 step 1-8 chiusi (rerank Cohere + graph_service + backfill 21451 edge + 1-hop traversal). Solo F2.9 A/B prod residuo.**
 
 **Fase 2 step 5-8 — knowledge graph (D1 piano vast-hopping-sketch):**
 - **F2.5 `app/services/graph_service.py` NUOVO** (~520 righe, mypy+ruff verdi):

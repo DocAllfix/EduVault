@@ -90,3 +90,6 @@ scripts/_inspect_hierarchy_paths.py
 scripts/backfill_edges_existing.py
 scripts/smoke_test_kg_traversal.py
 scripts/setup_langgraph_checkpoints.py
+scripts/analyze_v2_timing.py
+storage/ab_test_results/
+scripts/compare_v2_vs_baseline.py
