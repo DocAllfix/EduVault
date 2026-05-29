@@ -93,3 +93,4 @@ scripts/setup_langgraph_checkpoints.py
 scripts/analyze_v2_timing.py
 storage/ab_test_results/
 scripts/compare_v2_vs_baseline.py
+scripts/ingest_dm_antincendio_2021.py

@@ -99,7 +99,11 @@ COURSE_CATALOG: dict[str, dict[str, object]] = {
     },
     "antincendio_livello_1": {
         "title": "Addetto Antincendio Livello 1",
-        "regs": ["dlgs_81_08", "dm_02_09_2021"],
+        # Corpus antincendio VIGENTE 2026 (post-review-17 analista): i 3 DM
+        # del settembre 2021 sostituiscono il DM 10/03/1998 ABROGATO dal
+        # 29/10/2022. dm_02_09 (gestione+livelli formativi), dm_03_09
+        # (minicodice criteri generali), dm_01_09 (controlli impianti).
+        "regs": ["dlgs_81_08", "dm_02_09_2021", "dm_03_09_2021", "dm_01_09_2021"],
         "min_hours": 4,
         "max_hours": 4,
         "default_modules": [
