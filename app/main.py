@@ -82,6 +82,30 @@ async def startup() -> None:
     # Once PHASE 5 lands the module, this resolves at startup time.
     from app.services.generation_service import recover_interrupted_jobs
 
+    # F2.9.3 fix: AsyncPostgresSaver.setup() crea le tabelle checkpoint
+    # (checkpoints, checkpoint_writes, checkpoint_migrations, checkpoint_blobs)
+    # se mancanti. Era stato lasciato come "esegui una tantum a deploy time"
+    # (BP §05.3) ma in pratica nessuno lo eseguiva → la prima generazione
+    # corso falliva con `UndefinedTable: relation "checkpoints" does not exist`
+    # (debt #R11 noto da FASE 6). Lo facciamo qui all'avvio: la chiamata e'
+    # idempotente (CREATE TABLE IF NOT EXISTS sotto al cofano).
+    try:
+        from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+        async with AsyncPostgresSaver.from_conn_string(
+            settings.database_url
+        ) as saver:
+            await saver.setup()
+        logger.info("langgraph_checkpoint_tables_ready")
+    except Exception as exc:
+        # Non blocchiamo lo startup per un fail del setup: il backend resta
+        # operativo per endpoint che non usano la pipeline. Il primo course
+        # creation fara' emergere il problema con errore esplicito.
+        logger.warning(
+            "langgraph_setup_failed",
+            error_class=type(exc).__name__,
+            error_msg=str(exc)[:200],
+        )
+
     await recover_interrupted_jobs(pool)
     logger.info("nexus_started", version="6.0")
 

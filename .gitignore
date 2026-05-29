@@ -89,3 +89,4 @@ scripts/smoke_test_graph_service.py
 scripts/_inspect_hierarchy_paths.py
 scripts/backfill_edges_existing.py
 scripts/smoke_test_kg_traversal.py
+scripts/setup_langgraph_checkpoints.py
