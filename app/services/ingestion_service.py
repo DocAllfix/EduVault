@@ -306,8 +306,16 @@ _FALLBACK_CHAIN_CONTENT: list[tuple[str, str, str]] = [
 ]
 
 _FALLBACK_CHAIN_CLASSIFY: list[tuple[str, str, str]] = [
-    ("deepseek",     "deepseek_classify_model",           "L0_deepseek_v4_flash"),
-    ("azure_openai", "azure_openai_deployment_classify",  "L1_azure_classify"),
+    # 2026-05-29 F2.9 A/B: Azure gpt-4.1-mini PRIMARY perche' i 3 demo
+    # approvati dall'analista (review 10/12/13) sono stati generati con
+    # Azure. Per il confronto A/B v2-vs-baseline devo isolare le variabili:
+    # il rerank Cohere e l'1-hop graph sono le UNICHE differenze. Mettere
+    # DeepSeek primary introdurrebbe rumore sull'analisi qualita' (e' un
+    # provider piu' aggressivo nel JSON parsing, talvolta restituisce
+    # strutture non perfettamente conformi). Storico chain era DeepSeek
+    # primary per costo, ma per A/B onesto privilegio identita' col baseline.
+    ("azure_openai", "azure_openai_deployment_classify",  "L0_azure_classify"),
+    ("deepseek",     "deepseek_classify_model",           "L1_deepseek_v4_flash"),
     ("openai",       "openai_classify_model",             "L2_openai_4o_mini"),
     ("anthropic",    "llm_classify_model",                "L3_anthropic_haiku"),
 ]
