@@ -22,7 +22,7 @@ import asyncio
 import json
 import time
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Literal, cast
 
 import asyncpg
 import structlog
@@ -97,17 +97,24 @@ def build_normative_fingerprint(slides: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-async def run_pipeline(job_id: str, course_id: str) -> None:
+async def run_pipeline(
+    job_id: str, course_id: str, phase: Literal["research", "content"] = "research"
+) -> None:
     """Main wrapper: acquires the semaphore and wraps the pipeline in a
     global timeout. A stuck job must never monopolise the instance.
 
     Maps every failure mode to a terminal ``generation_jobs.status`` so the
     UI / WS layer can stop polling.
+
+    ``phase`` (D3, vast-hopping-sketch): ``"research"`` (default) runs the full
+    pipeline today; with ``v2_features['skeleton_validation']`` it stops after
+    research at ``skeleton_pending``. ``"content"`` is invoked by the skeleton
+    approve endpoint to resume from the (edited) skeleton and build outputs.
     """
     async with _job_semaphore:
         try:
             await asyncio.wait_for(
-                _run_pipeline_inner(job_id, course_id),
+                _run_pipeline_inner(job_id, course_id, phase=phase),
                 timeout=PIPELINE_TIMEOUT_SECONDS,
             )
         except asyncio.TimeoutError:
@@ -142,8 +149,212 @@ async def run_pipeline(job_id: str, course_id: str) -> None:
             )
 
 
-async def _run_pipeline_inner(job_id: str, course_id: str) -> None:
-    """Inner pipeline logic, isolated for clean timeout/cancel propagation."""
+async def _run_research_and_skeleton(
+    *,
+    job_id: str,
+    course_id: str,
+    initial_state: dict[str, Any],
+    pipeline_config: Any,
+    db: Any,
+) -> None:
+    """D3 research phase: run research, generate skeletons, stop at gate.
+
+    The graph is compiled with ``stop_before_content=True`` so ``ainvoke``
+    returns right after research (``interrupt_before=["content"]``). We read the
+    resulting ``pacing_plan`` from the checkpoint state, generate one
+    ``ModuleSkeleton`` per module (grounding (a): title + course_type + sibling
+    titles, NO chunks), persist them to ``courses.module_skeletons_json``, and
+    set status ``skeleton_pending``. No content, no build.
+    """
+    import json as _json
+    import uuid as _uuid
+
+    from app.models.pipeline import PacingPlan
+    from app.services.skeleton_service import generate_module_skeleton
+
+    await db.execute(
+        "UPDATE generation_jobs SET status='research' WHERE id=$1", job_id
+    )
+
+    async with create_pipeline(
+        settings.database_url, stop_before_content=True
+    ) as pipeline:
+        await pipeline.ainvoke(
+            cast(NexusPipelineState, initial_state), config=pipeline_config
+        )
+        snapshot = await pipeline.aget_state(pipeline_config)
+
+    state_values = snapshot.values
+    course_context = state_values.get("course_context")
+    if course_context is None:
+        raise ValueError("research produced no course_context (skeleton phase)")
+    # course_context may be a CourseContext model or a dict (LangGraph serializes
+    # state); normalize access to the pacing_plan + modules.
+    pacing_raw = (
+        course_context.get("pacing_plan")
+        if isinstance(course_context, dict)
+        else getattr(course_context, "pacing_plan", None)
+    )
+    pacing = PacingPlan.model_validate(pacing_raw) if pacing_raw is not None else None
+    if pacing is None or not pacing.modules:
+        raise ValueError("research produced no pacing_plan modules (skeleton phase)")
+
+    course_row = await db.fetchrow(
+        "SELECT course_type, title FROM courses WHERE id=$1", _uuid.UUID(course_id)
+    )
+    course_type_slug = course_row["course_type"]
+    course_title = course_row["title"] or course_type_slug
+    all_titles = [m.title for m in pacing.modules]
+
+    # Generate skeletons (bounded concurrency, mirrors content_agent).
+    sem = asyncio.Semaphore(4)
+
+    async def _one(m: Any) -> dict[str, Any]:
+        async with sem:
+            sk = await generate_module_skeleton(
+                module_index=m.module_index,
+                module_title=m.title,
+                course_type_slug=course_type_slug,
+                course_title=course_title,
+                sibling_module_titles=all_titles,
+                course_id=course_id,
+            )
+            return sk.model_dump()
+
+    skeletons = await asyncio.gather(*(_one(m) for m in pacing.modules))
+    skeletons_sorted = sorted(skeletons, key=lambda s: int(s["module_index"]))
+
+    payload = {
+        "version": 1,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "modules": skeletons_sorted,
+    }
+    await db.execute(
+        "UPDATE courses SET module_skeletons_json=$1, status='skeleton_pending' "
+        "WHERE id=$2",
+        _json.dumps(payload),
+        _uuid.UUID(course_id),
+    )
+    await db.execute(
+        "UPDATE generation_jobs SET status='skeleton_pending' WHERE id=$1", job_id
+    )
+    logger.info(
+        "skeleton_pending_ready",
+        course_id=course_id,
+        job_id=job_id,
+        modules=len(skeletons_sorted),
+    )
+
+
+async def _resume_content_from_skeleton(
+    *,
+    job_id: str,
+    course_id: str,
+    initial_state: dict[str, Any],
+    pipeline_config: Any,
+    db: Any,
+) -> dict[str, Any]:
+    """D3 content phase: materialize edited skeleton → resume content.
+
+    Reads the (operator-edited) skeleton from ``courses.module_skeletons_json``,
+    runs per-sub-topic retrieval to build ``chunks_by_module``, rebuilds the
+    ``CourseContext`` with those chunks, then resumes the graph from the
+    ``content`` node via ``aupdate_state(..., as_node="research")`` +
+    ``ainvoke(None)`` — so content sees the by-sub-topic chunks, not the stale
+    by-title ones from the research checkpoint.
+    """
+    import json as _json
+    import uuid as _uuid
+
+    from app.models.pipeline import CourseContext, ModuleSkeleton
+    from app.services.knowledge_repo import KnowledgeRepository
+    from app.services.skeleton_service import materialize_module_from_skeleton
+
+    await db.execute(
+        "UPDATE generation_jobs SET status='content' WHERE id=$1", job_id
+    )
+
+    row = await db.fetchrow(
+        "SELECT module_skeletons_json, course_type, region FROM courses WHERE id=$1",
+        _uuid.UUID(course_id),
+    )
+    raw = row["module_skeletons_json"]
+    if raw is None:
+        raise ValueError("content phase: no module_skeletons_json to materialize")
+    payload = _json.loads(raw) if isinstance(raw, str) else raw
+    skeletons = [ModuleSkeleton.model_validate(m) for m in payload["modules"]]
+
+    # Resolve regulation_ids for the course (same as research_agent).
+    from config.catalog_config import COURSE_CATALOG
+
+    catalog_entry = COURSE_CATALOG.get(row["course_type"], {})
+    reg_slugs_raw = catalog_entry.get("regs") if catalog_entry else None
+    reg_slugs = reg_slugs_raw if isinstance(reg_slugs_raw, list) else ["dlgs_81_08"]
+    repo = KnowledgeRepository(db)
+    reg_ids = await repo.resolve_slugs_to_ids([str(s) for s in reg_slugs])
+    normative_slug = str(reg_slugs[0]) if reg_slugs else "dlgs_81_08"
+    region = row["region"] or "NAZIONALE"
+
+    # Materialize chunks per module via by-sub-topic retrieval.
+    chunks_by_module: dict[int, list[Any]] = {}
+    all_chunks: list[Any] = []
+    seen_global: set[str] = set()
+    for sk in skeletons:
+        module_chunks = await materialize_module_from_skeleton(
+            skeleton=sk,
+            course_target=initial_state["course_request"].get("target", "discente"),
+            normative_slug=normative_slug,
+            regulation_ids=reg_ids,
+            region=region,
+            repo=repo,
+            course_id=course_id,
+        )
+        chunks_by_module[sk.module_index] = module_chunks
+        for c in module_chunks:
+            if c.chunk_id not in seen_global:
+                seen_global.add(c.chunk_id)
+                all_chunks.append(c)
+
+    async with create_pipeline(
+        settings.database_url, stop_before_content=True
+    ) as pipeline:
+        snapshot = await pipeline.aget_state(pipeline_config)
+        cc_raw = snapshot.values.get("course_context")
+        # Rebuild CourseContext keeping pacing_plan + style_patterns, swapping in
+        # the by-sub-topic chunks.
+        cc = (
+            CourseContext.model_validate(cc_raw)
+            if not isinstance(cc_raw, CourseContext)
+            else cc_raw
+        )
+        new_cc = cc.model_copy(
+            update={"chunks": all_chunks, "chunks_by_module": chunks_by_module}
+        )
+        await pipeline.aupdate_state(
+            pipeline_config,
+            {"course_context": new_cc.model_dump()},
+            as_node="research",
+        )
+        result = await pipeline.ainvoke(None, config=pipeline_config)
+    return cast(dict[str, Any], result)
+
+
+async def _run_pipeline_inner(
+    job_id: str, course_id: str, phase: Literal["research", "content"] = "research"
+) -> None:
+    """Inner pipeline logic, isolated for clean timeout/cancel propagation.
+
+    D3: ``phase`` gates the skeleton split when
+    ``v2_features['skeleton_validation']`` is on:
+      - ``research``: run research, stop at ``interrupt_before=["content"]``,
+        generate per-module skeletons, persist them, set ``skeleton_pending``,
+        and RETURN (no content, no build).
+      - ``content``: read the (edited) skeleton from the DB, materialize chunks
+        per sub-topic, resume the graph from ``content`` via aupdate_state, then
+        run the existing build block.
+    With the flag off, ``phase`` is ignored and the pipeline runs end-to-end as
+    today.
+    """
     db = get_pool()
     start_time = time.time()
 
@@ -194,17 +405,39 @@ async def _run_pipeline_inner(job_id: str, course_id: str) -> None:
     # and mypy strict rejects the literal-dict overload, even though
     # `{"configurable": {"thread_id": ...}}` is the canonical LangGraph idiom
     # (BP §05.3) and our initial_state already matches the 8-field shape.
-    from typing import cast
-
     from langchain_core.runnables import RunnableConfig
 
     pipeline_config = cast(
         RunnableConfig, {"configurable": {"thread_id": job_id}}
     )
-    async with create_pipeline(settings.database_url) as pipeline:
-        result = await pipeline.ainvoke(
-            cast(NexusPipelineState, initial_state), config=pipeline_config
+    skeleton_on = bool(settings.v2_features.get("skeleton_validation"))
+
+    if skeleton_on and phase == "research":
+        # ═══ D3 RESEARCH PHASE: stop at skeleton_pending ═══
+        await _run_research_and_skeleton(
+            job_id=job_id,
+            course_id=course_id,
+            initial_state=initial_state,
+            pipeline_config=pipeline_config,
+            db=db,
         )
+        return  # gate: no content, no build until the operator approves
+
+    if skeleton_on and phase == "content":
+        # ═══ D3 CONTENT PHASE: resume from edited skeleton ═══
+        result = await _resume_content_from_skeleton(
+            job_id=job_id,
+            course_id=course_id,
+            initial_state=initial_state,
+            pipeline_config=pipeline_config,
+            db=db,
+        )
+    else:
+        # ═══ LEGACY PATH (flag off): full pipeline in one invoke ═══
+        async with create_pipeline(settings.database_url) as pipeline:
+            result = await pipeline.ainvoke(
+                cast(NexusPipelineState, initial_state), config=pipeline_config
+            )
 
     # FIX #27.1 (2026-05-26): modules are produced in PARALLEL (asyncio.gather in
     # content_agent) and arrive in COMPLETION order, not module order. Without

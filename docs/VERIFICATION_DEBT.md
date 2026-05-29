@@ -12,7 +12,29 @@
 > disponibile. L'aggiornamento avviene PRIMA del corrispondente aggiornamento
 > Tracker (REI-12) — così il debt è sempre visibile e tracciato.
 >
-> **Ultimo aggiornamento:** 2026-05-29 — **ANALISTA REVIEW 17: V2 BOCCIATA, regress strutturale. Tutti i 3 V2 archiviati, flag v2_rerank_enabled e v2_kg_traversal_enabled spenti su Railway. F2.11 velocizzazione sospesa. Pipeline cliente torna a legacy (drop-list + query expansion).**
+> **Ultimo aggiornamento:** 2026-05-29 — **D3 backend (modelli + skeleton_service) validato + AUDIT analista PASS con sign-off. Procedo STEP 4-7 (pipeline interrupt + generation split + API + UI).**
+
+**ANALISTA AUDIT D3 GEN M1 (2026-05-29) — SIGN-OFF su 3 domande + direttive calibrazione:**
+- **Scheletro FIRMABILE** ✓ procedi. 10 sotto-temi ancorati al perimetro "Prevenzione e protezione", zero cross-corso. Conferma empirica che il principio (a) [tassonomia precede corpus] regge.
+- **Residuo formazione/abilitazione nel top-30: LASCIARE a B2, NON aggiustare prompt/retrieval_query ora.** Il rumore di superficie È il ground-truth per calibrare B2. Aggiustare a monte = rompere la disciplina di calibrazione sequenziale + perdere l'oracolo umano (sample-read).
+- **Procedi STEP 4-7** ✓.
+
+**DIRETTIVE CALIBRAZIONE B2 (da usare quando arriva F2.12 — NON dimenticare):**
+- B2 = `cosine(chunk.body_emb, sub_topic.text_emb)` con soglia ~0.55-0.60. **MAI** `cosine(chunk.body, module_title)` (= regressione a V2).
+- **Ground-truth = AUDIT GEN M1 sub-topic 1** (`storage/ab_test_results/D3_AUDIT_GEN_M1.md`): la soglia corretta DEVE eliminare le 4-5 righe rumorose (riga 4 "esonero frequenza" 0.951, riga 7 "Art.40 fascicolo opera" 0.875, riga 15 "4 ore Formazione" 0.823, riga 25 "Art.37 durata modulo" 0.580) TENENDO le 15-20 di cuore (Art.15/30/33/36/225/251). Se taglia 8 o salva 25 → soglia sbagliata. La sample-read umana è l'oracolo contro cui tarare.
+
+**DIRETTIVE CALIBRAZIONE B3 (quando arriva F2.13):**
+- B3 NON è solo "peso sibling 0.4". È **strutturale**: se l'edge `gerarchico_sibling`/`gerarchico_parent` attraversa **Titoli diversi del D.Lgs**, scarta o decadi forte. Pattern: ALLEGATO XVI (Titolo IV Cantieri, scope coordinatori) tirato dentro Art.15 (Titolo I) per ereditarietà = traversata troppo larga. Gli allegati cross-Titolo sono il pattern da osservare. La regola "stesso Titolo" è più stringente e più giusta del solo peso.
+
+**OSSERVAZIONI SCHELETRO (note calibrazione futura, NON blocchi):**
+- Sotto-tema #9 "Controllo e vigilanza sull'applicazione" ha un piede in M2 "Organizzazione della prevenzione". Fragile per natura del corpus: a valle il top-30 by-subtopic della voce #9 potrebbe pescare "sanzioni/ricorsi/pagamento somme aggiuntive" (vecchio cluster sanzionatorio). Se accade → riformulare in skeleton-generator-v2 con anchor più stretto ("vigilanza del datore sulle misure INTERNE", non "controllo ispettivo esterno"). Tenuto nello scheletro corrente. **DA OSSERVARE quando arriva il top-30 voce #9.**
+- **D-167** [esplorativo, non urgente]: lo scheletro è "manualistico-normativo" per default (mappa che farebbe un giurista del D.Lgs), manca dell'angolo DIDATTICO-pedagogico che aggiungerebbe un formatore: (a) gerarchia dei controlli (eliminazione→sostituzione→tecnici→amministrativi→DPI), (b) partecipazione del lavoratore come attore preventivo. Conseguenza diretta del grounding (a). Future: testare un grounding (a+) con hint pedagogico esplicito nel prompt skeleton ("proponi sotto-temi pensando a come un formatore strutturerebbe la lezione, non come un giurista mapperebbe la norma") su 2-3 corsi prima di renderlo default. È anche il punto dove la review-utente fa la differenza promessa al cliente (l'esperto aggiunge "gerarchia controlli" come voce in 5s via UI).
+
+**STRESS-TEST RICHIESTO dall'analista** (dopo UI attiva, prima di B2): audit scheletro su **PRE M3 "Incidenti e infortuni mancati"** (caso peggiore cross-corso V2) + **ANT M0 "Principi dell'incendio"** (caso corpus-thin). Se la tassonomia (a) pura regge anche su quei due → conferma che scala oltre il caso facile GEN M1. Quello è il vero stress-test prima di B2.
+
+**D-166** [TOC normativo non strutturato]: opzione (d) deferred — `article` ha "Art. 15" ma non il titolo "Misure generali di tutela", andrebbe estratto dai body (rumore case/frammenti). (a) pura dimostrata sufficiente su GEN M1. Tornare su (d) SOLO se in futuro (a) produce uno scheletro discutibile (visibile via sample-read). Non rincorrere ora.
+
+PRECEDENTE: 2026-05-29 — **ANALISTA REVIEW 17: V2 BOCCIATA, regress strutturale. Tutti i 3 V2 archiviati, flag v2_rerank_enabled e v2_kg_traversal_enabled spenti su Railway. F2.11 velocizzazione sospesa. Pipeline cliente torna a legacy (drop-list + query expansion).**
 
 **ANALISTA REVIEW 17 (2026-05-29) — sintesi diagnosi**:
 - I 3 V2 A/B (ANT/GEN/PRE) sono **regress vs baseline review 10/12/13**. Verdetto netto: nessuno ship.

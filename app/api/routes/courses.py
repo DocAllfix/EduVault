@@ -18,6 +18,7 @@ import asyncio
 import io
 import uuid as uuid_mod
 import zipfile
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -28,6 +29,7 @@ from pydantic import BaseModel
 
 from app.api.dependencies import get_current_user, limiter, require_role
 from app.models.core import SlideDensity
+from app.models.pipeline import ModuleSkeleton
 from app.models.requests import CourseRequest, CourseResponse
 from app.services import studio_service
 from app.services.certification_service import certify_course
@@ -97,6 +99,33 @@ class ImagePatch(BaseModel):
 
 class ImageSearchResult(BaseModel):
     candidates: list[str]
+
+
+# ─── D3 skeleton review body models (vast-hopping-sketch) ───
+
+
+class SkeletonResponse(BaseModel):
+    """The course's module skeletons + approval state, for the review UI."""
+
+    course_id: str
+    status: str
+    modules: list[ModuleSkeleton]
+    approved_at: str | None = None
+
+
+class SkeletonUpdate(BaseModel):
+    """Operator edit of the skeleton (reorder / text / add-remove).
+
+    Each module is validated by ``ModuleSkeleton`` (6-10 items, contiguous
+    ordinals) on the way in — the manual edit path (NL chat is D7).
+    """
+
+    modules: list[ModuleSkeleton]
+
+
+class SkeletonApproveResponse(BaseModel):
+    status: str
+    job_id: str
 
 
 # ─────────────── helpers ───────────────
@@ -284,6 +313,112 @@ async def certify(
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     return CertifyResponse(approved_course_id=approved_id)
+
+
+# ─────────────── D3 skeleton review (vast-hopping-sketch) ───────────────
+
+
+@router.get("/{course_id}/skeleton", response_model=SkeletonResponse)
+async def get_skeleton(
+    course_id: str,
+    user: dict[str, Any] = Depends(require_role("admin", "reviewer")),
+) -> SkeletonResponse:
+    """Return the course's per-module skeletons for the review gate.
+
+    404 if the course has no skeleton yet (flag off, or not at skeleton_pending).
+    """
+    import json as _json
+
+    pool = get_pool()
+    course = await _load_course_or_404(course_id, pool)
+    _enforce_ownership(course, user)
+    raw = course.get("module_skeletons_json")
+    if raw is None:
+        raise HTTPException(404, "Nessuno scheletro per questo corso")
+    payload = _json.loads(raw) if isinstance(raw, str) else raw
+    modules = [ModuleSkeleton.model_validate(m) for m in payload.get("modules", [])]
+    approved_at = course.get("skeleton_approved_at")
+    return SkeletonResponse(
+        course_id=course_id,
+        status=str(course.get("status")),
+        modules=modules,
+        approved_at=approved_at.isoformat() if approved_at else None,
+    )
+
+
+@router.put("/{course_id}/skeleton", response_model=SkeletonResponse)
+async def update_skeleton(
+    course_id: str,
+    body: SkeletonUpdate,
+    user: dict[str, Any] = Depends(require_role("admin", "reviewer")),
+) -> SkeletonResponse:
+    """Persist an operator edit of the skeleton (reorder / text / add-remove).
+
+    Only allowed while the course is at ``skeleton_pending`` (before approval).
+    Each module is already validated by ``ModuleSkeleton`` (6-10 items,
+    contiguous ordinals) via the request body.
+    """
+    import json as _json
+
+    pool = get_pool()
+    course = await _load_course_or_404(course_id, pool)
+    _enforce_ownership(course, user)
+    if course.get("status") != "skeleton_pending":
+        raise HTTPException(
+            409, "Lo scheletro è modificabile solo prima dell'approvazione"
+        )
+    payload = {
+        "version": 1,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "modules": [m.model_dump() for m in body.modules],
+    }
+    await pool.execute(
+        "UPDATE courses SET module_skeletons_json=$1 WHERE id=$2",
+        _json.dumps(payload),
+        uuid_mod.UUID(course_id),
+    )
+    return SkeletonResponse(
+        course_id=course_id,
+        status="skeleton_pending",
+        modules=body.modules,
+        approved_at=None,
+    )
+
+
+@router.post("/{course_id}/skeleton/approve", response_model=SkeletonApproveResponse)
+@limiter.limit("10/minute")
+async def approve_skeleton(
+    request: Request,
+    course_id: str,
+    user: dict[str, Any] = Depends(require_role("admin", "reviewer")),
+) -> SkeletonApproveResponse:
+    """1-click validation gate: stamp approval + fire the content phase.
+
+    The (possibly edited) skeleton in ``module_skeletons_json`` becomes the
+    source for per-sub-topic retrieval. Fires ``run_pipeline(phase="content")``
+    fire-and-forget under the global Semaphore(1) (REI-3).
+    """
+    pool = get_pool()
+    course = await _load_course_or_404(course_id, pool)
+    _enforce_ownership(course, user)
+    if course.get("status") != "skeleton_pending":
+        raise HTTPException(409, "Il corso non è in attesa di approvazione scheletro")
+    if course.get("module_skeletons_json") is None:
+        raise HTTPException(409, "Nessuno scheletro da approvare")
+
+    await pool.execute(
+        "UPDATE courses SET skeleton_approved_at=NOW(), skeleton_approved_by=$1, "
+        "status='content' WHERE id=$2",
+        str(user["id"]),
+        uuid_mod.UUID(course_id),
+    )
+    job_id = await pool.fetchval(
+        "INSERT INTO generation_jobs (course_id, status, progress_percent) "
+        "VALUES ($1, 'queued', 0) RETURNING id",
+        uuid_mod.UUID(course_id),
+    )
+    asyncio.create_task(run_pipeline(str(job_id), course_id, "content"))
+    return SkeletonApproveResponse(status="content", job_id=str(job_id))
 
 
 # ─────────────── GET /api/courses/{id}/download/{format} ───────────────

@@ -79,6 +79,8 @@ class NexusPipelineState(TypedDict):
 @asynccontextmanager
 async def create_pipeline(
     database_url: str,
+    *,
+    stop_before_content: bool = False,
 ) -> AsyncIterator[CompiledStateGraph[NexusPipelineState, None, NexusPipelineState, NexusPipelineState]]:
     """Build and compile the 2-node LangGraph pipeline with PG checkpointing.
 
@@ -89,6 +91,16 @@ async def create_pipeline(
                 initial_state,
                 config={"configurable": {"thread_id": job_id}},
             )
+
+    ``stop_before_content`` (D3, vast-hopping-sketch): when True, compile with
+    ``interrupt_before=["content"]`` so the graph HALTS after ``research`` and
+    before ``content``. This is a human-in-the-loop STOP for the skeleton
+    validation gate — NOT a third node (the graph stays research→content per the
+    blueprint invariant). The orchestrator (generation_service) generates the
+    skeleton, persists it, and stops; on approval it resumes ``content`` via
+    ``aupdate_state(..., as_node="research")`` + ``ainvoke(None, config)`` so the
+    edited skeleton's chunks (not the checkpoint's stale ones) drive content.
+    With False the behavior is exactly today's (flag-off path unchanged).
 
     The ``async with`` is mandatory: it owns the underlying psycopg
     connection used by the checkpointer (REI-16 D18).
@@ -105,4 +117,9 @@ async def create_pipeline(
         builder.set_entry_point("research")
         builder.add_edge("research", "content")
         builder.set_finish_point("content")
-        yield builder.compile(checkpointer=checkpointer)
+        if stop_before_content:
+            yield builder.compile(
+                checkpointer=checkpointer, interrupt_before=["content"]
+            )
+        else:
+            yield builder.compile(checkpointer=checkpointer)
