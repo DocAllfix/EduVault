@@ -45,9 +45,28 @@
 
 **Discrepanza D-152 (edge graph chunk-chunk) — IMPLEMENTATA**: l'edge-table esiste, è popolata, ed è consumabile via 1-hop traversal. Resta `llm_verified` non attivato (costo, validare A/B prima). Edge cross-regulation (D.Lgs 81/08 ↔ Reg CE 1272 ↔ Accordo 2025) — non implementato (resolver e' intra-reg only). Work-item: aggiungere `_resolve_target_chunk_cross_reg` con slug-map se A/B mostra valore di citazioni cross-norma.
 
+**F2.9 A/B prod IN ESECUZIONE (2026-05-29 11:58 UTC+2, dopo 3 round di fix):**
+- Round 1 (11:38): primi 3 corsi falliti subito con `UndefinedTable: relation "checkpoints" does not exist` — debt **#R11** noto da FASE 6 mai chiuso. AsyncPostgresSaver.setup() non eseguito su prod, i 3 demo originali erano insertati direttamente in `courses` senza far girare la pipeline. Fix permanente in commit `787b286`: chiamata `setup()` idempotente all'avvio del backend, dopo pool init e prima di `recover_interrupted_jobs`. Closes #R11.
+- Round 2 (11:46): 3 corsi falliti per `OpenAIError: Missing credentials` su DeepSeek L0 della chain. `DEEPSEEK_API_KEY` era vuota su Railway; settata + redeploy. **MA** richiamo dell'utente: il baseline dei 3 demo approvati dall'analista (review 10/12/13) era con Azure gpt-4.1-mini, non DeepSeek. Per A/B onesto v2-vs-baseline devo isolare le variabili → la sola differenza ammissibile è (rerank Cohere + 1-hop KG). Commit `ecd7e92`: chain CLASSIFY rimaneggiata in `_FALLBACK_CHAIN_CLASSIFY` mettendo Azure L0 (era L1), DeepSeek scalato a L1.
+- Round 3 (11:58): 3 corsi A/B avviati dopo deploy commit `ecd7e92`. **Pipeline v2 vista LIVE in azione**: Antincendio L1 4h, log `phase=recall_hybrid` + `phase=rerank_cohere` + `phase=graph_traversal` + `module_retrieval_v2_done` PER OGNI MODULO:
+  - M0 "Principi dell'incendio": top_score **0.473** (borderline ma >0.45 ALERT threshold), edges_followed=324, final_size=210 chunks
+  - M1 "Prevenzione incendi": top_score 0.997, edges_followed=252, final_size=168
+  - M2 "Protezione antincendio": top_score 0.987, edges_followed=224, final_size=161
+  - M3 "Procedure operative": top_score 0.980, edges_followed=251, final_size=162
+  - Totale 701 chunks dai 4 moduli, `modules_under_alert=[]` (nessun ALERT). M0 a 0.473 è un sensore D9 utile: il corpus DM 02/09/2021 ha solo 58 chunks e "Principi dell'incendio" è il modulo più teorico → top_score 5× più basso degli altri 3 è coerente col disegno D2/D9 (distingue limite-corpus da problema-algoritmico).
+- **12 corsi zombi archiviati** dai 3 round falliti.
+- **Pipeline v2 in produzione FUNZIONA tecnicamente.** Il content_agent ora consuma i ScoredChunks v2: verifica qualità finale richiede attesa fine 3 corsi (~30-45 min) + confronto manuale.
+
+**Course IDs finali A/B (round 3)**:
+- Flag attivati su Railway prod: `V2_RERANK_ENABLED=true`, `V2_KG_TRAVERSAL_ENABLED=true`. Backend redeployato con commit `b476538` (build digest sha256:9c961698c7d9, healthcheck PASS).
+- **Antincendio L1 4h** `02e69035-ba1b-4fd3-9d6c-1bc4b0224138` (344 slide stimati) — testa il sensore D9 `module_corpus_thin` (corpus DM 02/09/2021 = 58 chunks vs 1819 del D.Lgs 81/08). Vista live a 11:58: M0 top 0.473 (borderline), M1-M3 top 0.98+.
+- **Generale 4h** `8089d9d8-e830-4405-85c3-188481679c06` (344 slide stimati) — confronto regressione vs Demo #2 v3 review 13: target è confermare che M1 "Prevenzione e protezione" non riemerga al 46% medico/biologico ora che il rerank Cohere sostituisce le 38 query expansion hardcoded + drop-list M1.
+- **Preposti 8h** `3b6763e6-b51e-4a16-9880-b582f7d44e65` (688 slide stimati) — confronto vs Demo #3 v2 review 12: target è M3 "Incidenti e infortuni mancati" che era "patologia confermata empirica: 5 chunk, lost 47/40/41 su M1/M4/M5", verificare se rerank+kg_1hop riequilibra senza dover ricorrere a drop-list specifica.
+- Polling in background, attesa ~30-45 min totale (REI-3 Semaphore(1) si applica sul builder PPTX).
+
 **Cosa NON verifica ancora (debt F2):**
-- F2.8 verificato in smoke STANDALONE, ma flag `v2_kg_traversal_enabled` resta **OFF in prod**. Attivazione + A/B in produzione → F2.9.
-- F2.9 (Antincendio L1 corpus-thin badge atteso + Specifica 4h regressione) richiede generazione corso completa, ingerire la normativa Antincendio L1 se non già fatto, e flag-on temporaneo su Railway prod. Lasciato OFF perché va decisa la modalità: 2 corsi paralleli (rerank-only vs rerank+graph) richiede ~30 min di run + review.
+- Edge cross-regulation (D.Lgs 81/08 ↔ Reg CE 1272 ↔ Accordo 2025) — non implementato (resolver intra-reg only). Work-item: aggiungere `_resolve_target_chunk_cross_reg` con slug-map se A/B mostra valore di citazioni cross-norma.
+- Edge `llm_verified` NON popolati al primo backfill (enable_llm=False): se A/B mostra che il 1-hop deterministic basta, possiamo lasciare LLM disabilitato (risparmio costo). Se manca semantica di "definizione concetto", attivare LLM-pass mirato.
 
 **Fase 2 step 1-4 — cuore del retrieval v2 (D2 del piano vast-hopping-sketch):**
 - **F2.1 COHERE_API_KEY** settata su Railway `EduVault` (`--skip-deploys`). Provider attivo: `rerank-multilingual-v3.0` free tier (1000 req/mese, sufficienti per A/B test e prima sessione prod). Chiave residente SOLO in env var Railway + memoria locale di questa sessione, **mai committed in repo** (gitignore copre tutti gli script smoke).
