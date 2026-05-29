@@ -59,16 +59,27 @@ class KnowledgeRepository:
         """Vector search filtered by regulation and region.
 
         The regional filter uses regulations.region (reliable JOIN), NOT
-        chunk tags (which carry no regional info). NULL-safe: NAZIONALE
-        regulations always pass; region-specific ones pass only when the
-        requested region matches (BP §06.3).
+        chunk tags (which carry no regional info). NULL-safe.
+
+        Region semantics (D-168, 2026-05-30):
+          - 'NAZIONALE' regulations always pass (legge italiana applicabile
+            ovunque sul territorio).
+          - 'EUROPEA' regulations always pass: regolamenti UE (Reg. CE/UE)
+            sono fonti direttamente applicabili nel diritto italiano senza
+            recepimento, efficaci su tutto il territorio nazionale a
+            prescindere dalla region del corso. Esempi: Reg. CE 852/2004
+            (HACCP), Reg. CE 1272/2008 (CLP). Pre-D-168 il filtro li
+            scartava silenziosamente → cosine_size=0 sistematico → BM25
+            compensava in recall_hybrid ma con degrado retrieval invisibile.
+          - Region-specific regulations (LOMBARDIA, LAZIO, ...) passano solo
+            quando ``region`` corrisponde.
 
         Behaviour on unknown ``region``: this method does NOT validate the
         region string. An unrecognised value (e.g. "ATLANTIDE") simply
         matches no region-specific row — the query still returns NAZIONALE
-        chunks. Hard validation of "regional course + non-regional region"
-        lives in the research_agent (BP §05.4, FASE 3.3) which raises
-        ValueError before reaching this method.
+        + EUROPEA chunks. Hard validation of "regional course + non-regional
+        region" lives in the research_agent (BP §05.4, FASE 3.3) which
+        raises ValueError before reaching this method.
         """
         sql = """
             SELECT rc.id, rc.regulation_id, rc.article, rc.paragraph, rc.hierarchy_path,
@@ -78,7 +89,8 @@ class KnowledgeRepository:
             JOIN regulations r ON rc.regulation_id = r.id
             WHERE rc.regulation_id = ANY($2::uuid[])
               AND rc.is_current = true
-              AND (r.region = 'NAZIONALE' OR ($3::text IS NOT NULL AND r.region = $3::text))
+              AND (r.region IN ('NAZIONALE', 'EUROPEA')
+                   OR ($3::text IS NOT NULL AND r.region = $3::text))
             ORDER BY rc.embedding <=> $1::vector
             LIMIT $4
         """

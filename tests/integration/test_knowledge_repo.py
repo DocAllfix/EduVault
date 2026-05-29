@@ -111,7 +111,9 @@ async def test_search_chunks_passes_pgvector_literal_and_regional_join() -> None
     args = pool.fetch.await_args.args
     sql, embedding_param, ids_param, region_param, top_k_param = args
     assert "JOIN regulations r" in sql
-    assert "r.region = 'NAZIONALE'" in sql
+    # D-168 (2026-05-30): NAZIONALE + EUROPEA always pass; region-specific
+    # only when matching. Pre-fix was `r.region = 'NAZIONALE' OR ...`.
+    assert "r.region IN ('NAZIONALE', 'EUROPEA')" in sql
     assert "<=> $1::vector" in sql
     assert embedding_param == "[0.5,0.6]"  # serialized, not raw list
     assert region_param == "CAMPANIA"

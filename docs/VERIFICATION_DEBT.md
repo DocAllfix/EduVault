@@ -12,7 +12,57 @@
 > disponibile. L'aggiornamento avviene PRIMA del corrispondente aggiornamento
 > Tracker (REI-12) — così il debt è sempre visibile e tracciato.
 >
-> **Ultimo aggiornamento:** 2026-05-29 — **D3 backend (modelli + skeleton_service) validato + AUDIT analista PASS con sign-off. Procedo STEP 4-7 (pipeline interrupt + generation split + API + UI).**
+> **Ultimo aggiornamento:** 2026-05-30 — **E2E HACCP PASS + ANALISTA SIGN-OFF su (a) pura universale + 2 nuovi debt: D-169 (mancata migration 007 al momento di definire skeleton_pending = a mio carico), D-169-bis (audit filtri silenziosi in knowledge_repo richiesto prima del ground-truth). Ground-truth allargato a 5 moduli (HACCP M2 aggiunto post D-168 fix + GEN M2 confermato).**
+
+**ANALISTA SIGN-OFF E2E HACCP (2026-05-30) — D3 universale, due osservazioni a verbale:**
+- **(a) pura DIMOSTRATA UNIVERSALE**: 4 audit + 1 E2E + verifica indipendente sul render (pattern più larghi: Coordinatore CSE/CSP, fascicolo opera, POS, antincendio, primo soccorso, edilizia/cantiere/amianto, DPI industriali) → tutti zero, 1 falso positivo verificato (slide 279 "preposto" = significato generico HACCP "responsabile di settore", non riferimento al corso Preposti). Cross-corso reale = zero su 336 slide. **D3 production-ready come fondazione, non era fortuna 81/08.**
+- **D-169 [a mio carico]**: ogni nuovo stato semantico del flusso DEVE essere accompagnato da migration CHECK constraint nel suggerimento iniziale, non scoperto in E2E. Stessa famiglia di D-162/163 (cura applicata al livello giusto). Per D3 avrei dovuto suggerire migration 007 al momento di definire `skeleton_pending` come stato nel modello, non dopo che CheckViolationError ha colpito.
+- **D-169-bis [audit richiesto pre-ground-truth]**: D-168 quasi certamente NON è l'unico filtro silenzioso. Scrematura veloce di tutti i `WHERE` di filtraggio in `knowledge_repo.search_chunks` + altre query retrieval/recall: filtri su region (D-168, fixing), language (possibile multilinguismo Reg CE?), regulation_type, effective_date, status. Non per fixare tutto: per **listare i filtri attivi e razionale aggiornato**, evitando di scoprire D-170/171/172 uno a uno durante la calibrazione. Mezza giornata.
+
+**DIRETTIVE FINALI ANALISTA POST-E2E (2026-05-30):**
+1. **Fix D-168 PRIMA del ground-truth**, confermato. Argomentazione: soglie relative su distribuzioni che includono caso BM25-only producono parametri sbilanciati. Post-fix: retrieval di prova HACCP M3 voce 1 atteso top_score >0.6 (corpus c'è, 147 chunk Reg CE 852).
+2. **Audit D-169-bis** stessa finestra del fix D-168.
+3. **Ground-truth = 5 moduli, non 4** (regimi distinti):
+  - GEN M1 = regime denso, corpus saturo (top 0.99, media 0.75)
+  - GEN M2 = regime cross-titolo intra-corpus (da misurare)
+  - PRE M3 = regime sparso, corpus moderato (top 0.64, media 0.10)
+  - ANT M0 = regime sparso post-ingestione (top 0.81, media 0.11)
+  - **HACCP M2 = regime EUROPEA post-D-168** (da misurare, dovrebbe assomigliare a GEN/PRE per densità)
+4. **Classificazione IN COPPIA**: io mando i top-30 grezzi di 1 voce per modulo (150 chunk totali), io faccio una prima classificazione on-topic/adjacent legittimo/off-topic chiaro con motivazione testuale per i non ovvi, analista rivede e corregge dove l'esperto-utente del cliente avrebbe deciso diversamente. Da 4-6h a 1-2h in coppia; classificazione esplicita in tabella diventa oracolo ricalibrabile in futuro.
+
+**D-169** [a mio carico, 2026-05-30]: mancata migration 007 al momento di definire skeleton_pending. Pattern preventivo: ogni nuovo stato semantico del flusso (status) deve essere accompagnato da migration CHECK constraint nel suggerimento iniziale, non scoperto in E2E. Discovery via CheckViolationError costo: 1 ciclo HACCP perso + debug + applicazione migration prod. Lezione: stessa famiglia di D-162/163 (cura applicata al livello giusto).
+
+**D-169-bis** [analista, 2026-05-30, audit pre-ground-truth]: scrematura tutti i `WHERE` di filtraggio in query retrieval/recall (knowledge_repo.search_chunks, recall_hybrid BM25 corpus load, kg_1hop hydration). Listare ogni filtro attivo + razionale aggiornato. Evitare di scoprire D-170/171/172 silenziosamente durante calibrazione B2. Filtri da auditare: region, language, regulation_type, effective_date, status, is_current. Output: tabella `{file:linea, filtro_SQL, razionale_documentato, conformità_intent}`.
+
+### D-169-bis AUDIT — tabella filtri silenziosi nelle query retrieval/recall (2026-05-30)
+
+**Schema rilevante (fonte: `001_initial.sql` + `005_v2_foundation.sql`):**
+- `regulations`: `id, title, type, issuing_body, issue_date, effective_date, region, status('VIGENTE'|'ABROGATA'|'MODIFICATA'), slug`. **NESSUNA colonna `language`** → il rischio "filtri multi-lingua" è teorico, non applicabile (non esiste filtro impostabile).
+- `regulation_chunks`: `id, regulation_id, article, paragraph, hierarchy_path, body, chunk_type, tags, embedding, content_hash, is_current(bool)`.
+- `regulation_chunk_edges`: `id, src_chunk_id, dst_chunk_id, kind, weight, source('deterministic'|'llm_verified'), extraction_context`.
+
+**Filtri attivi in retrieval/recall (esclude write-paths e dashboard count):**
+
+| File:linea | Filtro SQL | Razionale documentato | Conformità intent |
+|------------|-----------|----------------------|-------------------|
+| `knowledge_repo.py:41` | `regulations WHERE status = 'VIGENTE'` (in `resolve_slugs_to_ids`) | Non genero corsi su normativa ABROGATA/MODIFICATA. | **OK**. Architetturale corretto: ABROGATA → fonte non efficace; MODIFICATA dovrebbe essere transient di backfill. Da rivedere SE in futuro si vuole supportare citazione storica di norma abrogata (raro in safety formativa). |
+| `knowledge_repo.py:90` | `rc.regulation_id = ANY($2::uuid[])` (in `search_chunks`) | Parametrico: filtra ai regulations del catalog entry del corso. | **OK**. Filtro parametrico voluto, niente leakage cross-corso. |
+| `knowledge_repo.py:91` | `rc.is_current = true` (in `search_chunks`) | Esclude chunk superseded da re-ingestione. | **OK con caveat**. Pattern de-duplicazione: re-ingestione marca i vecchi `is_current=false`. **DA TENERE OCCHIO**: se il delta-update marca by-mistake `is_current=false` su chunk validi → recall_size cala silenziosamente. Verificare almeno 1 volta in audit periodico che `COUNT(WHERE is_current=true) ≈ N_chunk_attesi`. |
+| `knowledge_repo.py:92-93` | `r.region IN ('NAZIONALE','EUROPEA') OR r.region = $3::text` (post D-168 fix) | NAZIONALE = legge italiana applicabile ovunque; EUROPEA = Reg. CE/UE direttamente applicabili senza recepimento; region-specific solo se richiesta. | **OK post-fix D-168**. Audit chiuso su region. |
+| `retrieval_v2.py:255-256` | `regulation_chunks WHERE regulation_id = ANY($1) AND is_current = true` (in `recall_hybrid` per caricare body BM25) | Carica il corpus BM25 in-memory per la stessa scope di regulation della query. | **OK con caveat D-168-bis**: questa query **non filtra per region** (BM25 lato Python non lo fa, e ha senso perché regulation_id è già limitato dal catalog entry). **Ma è proprio per questo che D-168 è stato compensato silenziosamente** — BM25 trovava i chunk Reg CE 852 dove cosine non li vedeva. Nessuna correzione richiesta: BM25 deve attingere a tutto il corpus delle regulation_ids; il filtro region è semanticamente errato a questo livello. |
+| `retrieval_v2.py:310` | `regulation_chunks WHERE rc.id = ANY($1) AND rc.is_current = true` (idratazione chunk vincitori BM25 in `recall_hybrid`) | Idrata i chunk emersi via BM25 che non sono in cosine_chunks. | **OK**. Filtro id-based + is_current coerente con knowledge_repo. |
+| `retrieval_v2.py:500` | `regulation_chunk_edges WHERE src_chunk_id = ANY($1) AND source = 'deterministic'` (in `expand_via_kg_1hop`) | F2.8 VAA-b: solo edge deterministici (regex citazione + gerarchia parsata). Gli edge `llm_verified` esistono ma sono esclusi dal 1-hop traversal per qualità (rumore residuo amplificato in dedup). | **OK con flag**. Comportamento intenzionale dietro feature flag `kg_traversal_enabled`. Se in futuro A/B mostra beneficio degli `llm_verified` in 1-hop, riattivabile via parametro. |
+| `retrieval_v2.py:533` | `regulation_chunks WHERE id = ANY($1) AND is_current = true` (idratazione destinazioni edge KG 1-hop) | Idrata chunk destinazione degli edge seguiti. | **OK**. |
+| `graph_service.py:145, 304, 455, 522, 672` | `regulation_chunks WHERE regulation_id = $1 AND is_current = true` (load chunk in `_ChunkResolver`, sibling extraction, llm_edges candidates, body fetch, deterministic extraction) | Caricamento corpus per estrazione edge. | **OK**. Scope strict per regulation. |
+| `content_agent.py:187` | `regulation_chunks WHERE id = ANY($1)` (lookup `citation_label` per chunk in slide) | Solo `id = ANY`, **niente `is_current`** | **CONSIDERARE**: se uno chunk usato in retrieval è poi marcato `is_current=false` da re-ingestione, citation_label resta lookup-abile (dato che il filtro non c'è). Per il momento OK perché il chunk_id arriva da `relevance_score` calcolato up-stream con `is_current=true`. Race-condition teorica (re-ingestione mid-pipeline) ma non vissuta nei demo. Annotato come pattern, non fix. |
+| `generation_service.py:499-500, 510-511` | `regulation_chunks WHERE id = ANY($1) [+SUBSTRING regulation_id prefix]` (citation post-build) | Lookup citation_label e short_title per slide finali. Senza `is_current=true`. | **OK**: stesso ragionamento di content_agent — l'id è di chunk già usato up-stream. |
+
+**Conclusione audit D-169-bis (2026-05-30):**
+- **Filtri sospetti rimasti: 0** — tutti i filtri di retrieval/recall hanno razionale aggiornato e nessun altro produce uno scarto silenzioso analogo a D-168.
+- **Filtri `is_current=true` da osservare**: la disciplina di marcatura `is_current` in `ingestion_service.delta_update` rimane il punto di vulnerabilità più probabile per silent drop. Non è materia di fix preventivo: è da osservare nel monitoring (`cosine_size` vs `bm25_size` divergenze inattese).
+- **Race condition citation_label**: pattern teorico, non fix preventivo. Tracciabile se mai succederà.
+- **Nessun filtro su `language` esistente né impostabile** — schema senza colonna language. Il rischio era teorico.
+- **D-169-bis CHIUSO**: nessun D-170/171/172 emerso. Procedere col ground-truth.
 
 **ANALISTA AUDIT D3 GEN M1 (2026-05-29) — SIGN-OFF su 3 domande + direttive calibrazione:**
 - **Scheletro FIRMABILE** ✓ procedi. 10 sotto-temi ancorati al perimetro "Prevenzione e protezione", zero cross-corso. Conferma empirica che il principio (a) [tassonomia precede corpus] regge.
