@@ -73,6 +73,12 @@ RERANK_TOP_N = 30
 # letteratura: smussa rank tail senza penalizzare troppo il top.
 RRF_K = 60
 
+# F2.8: peso applicato ai chunk recuperati via 1-hop graph traversal. Diminuito
+# rispetto al rerank score per non sovrapesare gli edge "secondari". 0.7
+# coerente con il peso degli edge LLM-verified (la cui qualita' e' analoga:
+# rilevanza indiretta).
+KG_TRAVERSAL_WEIGHT_DECAY = 0.7
+
 
 @dataclass(frozen=True)
 class ScoredChunk:
@@ -443,7 +449,120 @@ async def rerank_chunks(
 
 
 # ---------------------------------------------------------------------------
-# 4) End-to-end: recall + rerank per modulo
+# 4) 1-hop knowledge graph traversal (D1+F2.8, opzionale dietro flag)
+# ---------------------------------------------------------------------------
+
+
+async def expand_via_kg_1hop(
+    *,
+    reranked: list[ScoredChunk],
+    repo: KnowledgeRepository,
+    course_id: str | None = None,
+    module_idx: int | None = None,
+) -> list[ScoredChunk]:
+    """Aggiungi chunk 1-hop dei top reranked tramite regulation_chunk_edges.
+
+    Per ogni top-30 reranked, segue gli edge `source='deterministic'` (cita,
+    modifica, attua, gerarchico_parent/sibling, e_definito_da se LLM-verified
+    e' stato attivato) e idratta i chunk destinazione con `weight = score *
+    KG_TRAVERSAL_WEIGHT_DECAY * edge.weight`. Risultato: lista combinata
+    [reranked originali + 1-hop nuovi], deduplicata per chunk_id (vince score
+    piu' alto).
+
+    Filtraggio VAA-b:
+      - SOLO edge con `source='deterministic'`. Gli edge `llm_verified` (anche
+        gateati) hanno rumore residuo: usarli in 1-hop amplifica via dedup
+        chunk con rilevanza incerta. Riattivabile via parametro se A/B mostra
+        beneficio.
+
+    Costo: 1 query batch su `regulation_chunk_edges` con `WHERE src IN
+    (top_30_ids)` + 1 fetch dei chunk destinazione. ~50ms su corpus reale.
+
+    Telemetria: emette `kg_1hop_expansion` con count edge seguiti + count
+    chunk nuovi aggiunti (sensore: 0 nuovi = grafo sparso per quel modulo).
+    """
+    if not reranked:
+        return reranked
+
+    src_ids = [sc.chunk.chunk_id for sc in reranked]
+    pool = repo.pool
+
+    with timed(
+        PipelinePhase.GRAPH_TRAVERSAL,
+        course_id=course_id,
+        module_idx=module_idx,
+        source="kg_1hop_deterministic",
+    ) as ev:
+        # Query batch: tutti gli edge `deterministic` uscenti dai top reranked.
+        edge_rows = await pool.fetch(
+            "SELECT src_chunk_id::text AS src, dst_chunk_id::text AS dst, "
+            "kind, weight FROM regulation_chunk_edges "
+            "WHERE src_chunk_id = ANY($1::uuid[]) AND source = 'deterministic'",
+            src_ids,
+        )
+
+        existing_ids: set[str] = {sc.chunk.chunk_id for sc in reranked}
+        # Per ogni dst nuovo, calcola lo score combinato: max(src_score) *
+        # decay * edge_weight. Cosi' se piu' top reranked puntano allo stesso
+        # dst (es. art. 36 citato da art. 35 E art. 37), vince il path con
+        # source piu' rilevante.
+        src_score_map = {sc.chunk.chunk_id: sc.score for sc in reranked}
+        new_scores: dict[str, float] = {}
+        for er in edge_rows:
+            dst_id = er["dst"]
+            if dst_id in existing_ids:
+                continue
+            src_score = src_score_map.get(er["src"], 0.0)
+            edge_weight = float(er["weight"])
+            combined = src_score * KG_TRAVERSAL_WEIGHT_DECAY * edge_weight
+            if combined > new_scores.get(dst_id, 0.0):
+                new_scores[dst_id] = combined
+
+        ev["edges_followed"] = len(edge_rows)
+        ev["new_chunks_proposed"] = len(new_scores)
+
+        if not new_scores:
+            return reranked
+
+        # Idratazione batch dei chunk destinazione.
+        new_ids = list(new_scores.keys())
+        rows = await pool.fetch(
+            "SELECT id::text AS chunk_id, regulation_id::text AS regulation_id, "
+            "article, paragraph, hierarchy_path, body, chunk_type, tags "
+            "FROM regulation_chunks "
+            "WHERE id = ANY($1::uuid[]) AND is_current = true",
+            new_ids,
+        )
+
+        expanded: list[ScoredChunk] = list(reranked)
+        for row in rows:
+            chunk = NormativeChunk(
+                chunk_id=row["chunk_id"],
+                regulation_id=row["regulation_id"],
+                article=row["article"],
+                paragraph=row["paragraph"],
+                hierarchy_path=row["hierarchy_path"],
+                body=row["body"],
+                chunk_type=row["chunk_type"],
+                tags=row["tags"] or [],
+                relevance_score=new_scores[row["chunk_id"]],
+            )
+            expanded.append(
+                ScoredChunk(
+                    chunk=chunk,
+                    score=new_scores[row["chunk_id"]],
+                    source="kg_1hop",
+                )
+            )
+
+        # Riordina per score decrescente (i nuovi entrano dove meritano).
+        expanded.sort(key=lambda sc: -sc.score)
+        ev["final_size"] = len(expanded)
+        return expanded
+
+
+# ---------------------------------------------------------------------------
+# 5) End-to-end: recall + rerank + (opzionale) kg traversal per modulo
 # ---------------------------------------------------------------------------
 
 
@@ -463,6 +582,9 @@ async def retrieve_for_module(
     Step 1: autogen query (LLM)
     Step 2: recall_hybrid (BM25+cosine RRF top_k=200)
     Step 3: rerank Cohere top_n=30 (o fallback RRF se chiave non settata)
+    Step 4: (F2.8 opzionale) 1-hop KG traversal dei top reranked quando
+            `v2_kg_traversal_enabled=True` — aggiunge chunk collegati via edge
+            deterministici con weight decay 0.7.
 
     NaN / corpus vuoto / Cohere down sono tutti gestiti senza eccezioni:
     si ottiene una lista (possibilmente vuota) e i sensori D9 ne segnalano la
@@ -484,13 +606,21 @@ async def retrieve_for_module(
         course_id=course_id,
         module_idx=module_idx,
     )
-    return await rerank_chunks(
+    reranked = await rerank_chunks(
         query=query,
         candidates=candidates,
         top_n=RERANK_TOP_N,
         course_id=course_id,
         module_idx=module_idx,
     )
+    if settings.v2_features.get("kg_traversal_enabled"):
+        return await expand_via_kg_1hop(
+            reranked=reranked,
+            repo=repo,
+            course_id=course_id,
+            module_idx=module_idx,
+        )
+    return reranked
 
 
 # math import only used here so far; keep at end so isort/ruff don't move it.

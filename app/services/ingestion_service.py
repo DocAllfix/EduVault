@@ -1369,6 +1369,45 @@ async def ingest_regulation_file(
 
     await index_chunks(list(classified), pool)
 
+    # F2.6 (D1 piano v2): step POST-embed di edge extraction. Dietro flag
+    # `v2_features.kg_traversal_enabled` (default OFF) per non aggiungere
+    # latenza all'ingestion finche' il graph non e' necessario al retrieval.
+    # Quando il flag e' on, chiamiamo graph_service.extract_and_index_edges
+    # che fa hierarchical + deterministic + (opzionalmente) llm-verified gated.
+    # Il graph LLM-verified resta a sua volta condizionale: passiamo
+    # enable_llm=None per delegare la decisione al servizio (legge il flag).
+    if settings.v2_features.get("kg_traversal_enabled"):
+        # Lazy import: graph_service importa indirettamente call_llm, evito
+        # ciclo di import quando il flag e' off.
+        from app.services.graph_service import extract_and_index_edges
+        try:
+            # Cast Pool: in questa funzione il pool e' tipizzato come `object`
+            # per retrocompat con i call site v1 (ingestion_service esponeva
+            # pool object generico). graph_service vuole un asyncpg.Pool reale.
+            import asyncpg as _asyncpg
+            assert isinstance(pool, _asyncpg.Pool), (
+                "extract_and_index_edges richiede asyncpg.Pool"
+            )
+            edge_counts = await extract_and_index_edges(
+                regulation_id=regulation_id,
+                pool=pool,
+            )
+            logger.info(
+                "regulation_edges_indexed",
+                regulation_id=regulation_id,
+                edge_counts=edge_counts,
+            )
+        except Exception as exc:
+            # Non rompiamo l'ingestion per un fallimento di graph extraction:
+            # il chunk e' indicizzato, il graph e' un additional layer. Loggiamo
+            # e proseguiamo. (Backfill F2.7 puo' riparare in seguito.)
+            logger.warning(
+                "regulation_edges_failed",
+                regulation_id=regulation_id,
+                error_class=type(exc).__name__,
+                error_msg=str(exc)[:200],
+            )
+
     logger.info(
         "regulation_ingested",
         regulation_id=regulation_id,

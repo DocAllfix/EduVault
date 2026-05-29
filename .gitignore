@@ -85,3 +85,7 @@ scripts/smoke_test_retrieval_v2.py
 storage/regulations_v2/
 scripts/_discover_db_schema.py
 scripts/smoke_test_research_agent_v2.py
+scripts/smoke_test_graph_service.py
+scripts/_inspect_hierarchy_paths.py
+scripts/backfill_edges_existing.py
+scripts/smoke_test_kg_traversal.py

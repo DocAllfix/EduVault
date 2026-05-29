@@ -12,7 +12,42 @@
 > disponibile. L'aggiornamento avviene PRIMA del corrispondente aggiornamento
 > Tracker (REI-12) — così il debt è sempre visibile e tracciato.
 >
-> **Ultimo aggiornamento:** 2026-05-29 — **v2 refactor FASE 2 step 1-4 chiusi (rerank Cohere + recall ibrido BM25+cosine RRF + research_agent branch dietro flag)**.
+> **Ultimo aggiornamento:** 2026-05-29 — **v2 refactor FASE 2 step 1-8 chiusi (rerank Cohere + graph_service + backfill 21451 edge + 1-hop traversal). Solo F2.9 A/B prod residuo.**
+
+**Fase 2 step 5-8 — knowledge graph (D1 piano vast-hopping-sketch):**
+- **F2.5 `app/services/graph_service.py` NUOVO** (~520 righe, mypy+ruff verdi):
+  - `_ChunkResolver` cache in-memory (article+paragraph → chunk_id) caricato 1 volta per regulation. **Critico per performance**: la versione N+1 query-per-match droppava la connessione TCP proxy Railway sul D.Lgs 81/08 (1819 chunks).
+  - `extract_deterministic_edges(chunk_id, body, regulation_id, pool, resolver)` — regex pattern: `art. N` (+ comma adiacente) / `allegato N` + classify_intent `cita`/`modifica`/`attua` da contesto pre-match 80 char. Self-edge skip + dedup intra-chunk.
+  - `extract_hierarchical_edges(regulation_id, pool)` — parsing `hierarchy_path` con separatore `" > "`, genera `gerarchico_parent` (prefix exact match) + `gerarchico_sibling` (shared_path). Su regulations con AST regolare (D.Lgs 81/08, Reg CE 1272) trova 9000+ edge.
+  - `extract_llm_edges(...)` — proposta LLM `e_definito_da` + **gate VAA Jaccard ≥ 0.15 su entità normative estratte** OR ref overlap shared. Solo dopo verifica programmatica l'edge entra con `source='llm_verified'`, `weight=0.7`, `extraction_context={gate_method, gate_value}`. Pattern: "sistema propone, gate verifica". DISABILITATO al primo pass.
+  - `persist_edges(...)` — `executemany` batch + `pool.acquire()` esplicito + pre-count via `UNNEST` 3-colonne. Idempotente via `UNIQUE(src,dst,kind) ON CONFLICT DO NOTHING`. Sostituisce il pattern N execute() per edge che droppava la connection sul proxy Railway.
+  - `extract_and_index_edges(regulation_id, pool, enable_llm)` — orchestrator: 1) hierarchical regulation-wide; 2) deterministic per chunk con resolver caricato 1 volta; 3) LLM opzionale.
+- **Smoke test F2.5 4/4 PASS** contro `dm_388_2003` (23 chunks): h=2, det=10, idempotency OK (seconda insert=0), cleanup OK. Tempo: 3 sec post-refactor (era 10 sec con N+1).
+- **F2.6 hook in `ingestion_service.ingest_regulation_file`** (subito dopo `index_chunks`, prima del `logger.info("regulation_ingested")`): if `v2_features.kg_traversal_enabled` → `extract_and_index_edges()`. Try/except non-bloccante (graph è additional layer, ingestion non rompe per fallimento graph). mypy verde sul mio scope (errori preesistenti su `_classify_one` typing dict invariance fuori scope).
+- **F2.7 backfill `scripts/backfill_edges_existing.py` (gitignored) — eseguito su prod via TCP proxy**:
+  - 7 regulations VIGENTE processate, **21451 edge totali in 78s**:
+    - `accordo_stato_regioni_2011` (27 chunks): 38 hier + 13 det = 51 edge in 5.4s
+    - `accordo_stato_regioni_2025` (133 chunks): 814 hier + 28 det = 842 edge in 6.4s
+    - `dlgs_81_08` (**1819 chunks**): 9574 hier + 568 det = **10142 edge in 16.2s** (era N+1 timeout pre-refactor)
+    - `dm_02_09_2021` (58 chunks): 63 hier + 16 det = 79 edge in 3.8s
+    - `dm_388_2003` (23 chunks): 2 hier + 10 det = 12 edge in 4.1s
+    - `reg_ce_1272_2008` (**672 chunks, regolamento più denso**): 9537 hier + 346 det = 9883 edge in 37s
+    - `reg_ce_852_2004` (147 chunks): 385 hier + 57 det = 442 edge in 4.7s
+  - **Distribuzione kind+source post-backfill**:
+    - `gerarchico_sibling` deterministic: 18308 (corpus con AST regolare)
+    - `gerarchico_parent` deterministic: 2105
+    - `cita` deterministic: 1003
+    - `attua` deterministic: 26 (contesto "in attuazione" pre-match)
+    - `modifica` deterministic: 9 (contesto "modifica/sostituisce/abroga" pre-match)
+  - **0 edge `llm_verified`** (al primo pass enable_llm=False — costo non giustificato finché 1-hop traversal su deterministic non avrà mostrato beneficio).
+- **F2.8 `expand_via_kg_1hop()` in `retrieval_v2.py`**: post-rerank Cohere, se `v2_kg_traversal_enabled=True` segue gli edge `source='deterministic'` dai top-30, idratta i dst con `score = src_score * 0.7 * edge_weight`, deduplica per chunk_id (max score vince), riordina decrescente. Solo edge deterministic per VAA-b (l'LLM resta gated nella sua fase).
+- **Smoke test F2.8 PASS** su `dlgs_81_08` modulo "Concetti generali": 30 rerank Cohere + **148 chunk 1-hop** = 178 totali. Top rerank = Art. 15 score 0.970 (misure generali tutela), top kg_1hop = Art. 6 score 0.652 (organi/funzioni — citato da Art. 15). Telemetria emette `graph_traversal` con `edges_followed=267, new_chunks_proposed=148`.
+
+**Discrepanza D-152 (edge graph chunk-chunk) — IMPLEMENTATA**: l'edge-table esiste, è popolata, ed è consumabile via 1-hop traversal. Resta `llm_verified` non attivato (costo, validare A/B prima). Edge cross-regulation (D.Lgs 81/08 ↔ Reg CE 1272 ↔ Accordo 2025) — non implementato (resolver e' intra-reg only). Work-item: aggiungere `_resolve_target_chunk_cross_reg` con slug-map se A/B mostra valore di citazioni cross-norma.
+
+**Cosa NON verifica ancora (debt F2):**
+- F2.8 verificato in smoke STANDALONE, ma flag `v2_kg_traversal_enabled` resta **OFF in prod**. Attivazione + A/B in produzione → F2.9.
+- F2.9 (Antincendio L1 corpus-thin badge atteso + Specifica 4h regressione) richiede generazione corso completa, ingerire la normativa Antincendio L1 se non già fatto, e flag-on temporaneo su Railway prod. Lasciato OFF perché va decisa la modalità: 2 corsi paralleli (rerank-only vs rerank+graph) richiede ~30 min di run + review.
 
 **Fase 2 step 1-4 — cuore del retrieval v2 (D2 del piano vast-hopping-sketch):**
 - **F2.1 COHERE_API_KEY** settata su Railway `EduVault` (`--skip-deploys`). Provider attivo: `rerank-multilingual-v3.0` free tier (1000 req/mese, sufficienti per A/B test e prima sessione prod). Chiave residente SOLO in env var Railway + memoria locale di questa sessione, **mai committed in repo** (gitignore copre tutti gli script smoke).
