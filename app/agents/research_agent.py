@@ -28,6 +28,7 @@ import re
 import structlog
 
 from app.agents.pipeline import NexusPipelineState
+from app.config import settings
 from app.models.knowledge import NormativeChunk
 from app.models.pipeline import CourseContext, PacingPlan
 from app.models.requests import CourseRequest
@@ -1006,6 +1007,112 @@ async def retrieve_chunks_per_module(
     return result
 
 
+# ═══════════════════════════════════════════════════════════════════════
+# F2.4 — Hybrid retrieval v2 (D2 piano vast-hopping-sketch)
+# ═══════════════════════════════════════════════════════════════════════
+
+
+async def _retrieve_chunks_per_module_v2(
+    *,
+    pacing_plan: PacingPlan,
+    regulation_ids: list[str],
+    region: str,
+    knowledge_repo: KnowledgeRepository,
+    course_target: str,
+    normative_slug: str,
+    course_id: str | None = None,
+) -> dict[int, list[NormativeChunk]]:
+    """Retrieval v2 per-modulo via BM25+cosine+Cohere rerank (D2 piano).
+
+    Sostituisce ``retrieve_chunks_per_module`` quando ``v2_rerank_enabled``
+    e' on. Per ogni modulo del pacing_plan chiama
+    ``retrieval_v2.retrieve_for_module`` (autogen query + recall_hybrid top_k=200
+    + rerank top_n=30 oppure RRF fallback se Cohere down/disabled).
+
+    Cambia rispetto al path legacy:
+      - Non c'e' il filtro MIN_RELEVANCE (sostituito da MIN_RERANK_SCORE_ALERT
+        che e' un SENSORE, non un gate — VAA-d).
+      - Non c'e' dedup quota-aware: il rerank gia' ordina semanticamente i
+        candidati e i moduli dovrebbero ricevere chunk distinti senza zero-sum
+        artificioso. Se in A/B la dedup serve ancora, si riattiva via flag.
+      - Drop-list resta attiva: viene applicata FUORI da questa funzione
+        (nel flusso chiamante, dietro il proprio flag `drop_list_enabled`)
+        durante la transizione D10.
+
+    Ordine output: l'ordine in ogni lista riflette il rerank score decrescente
+    (top-30 per modulo). Per il content_agent significa che i primi N chunk
+    sono i piu' pertinenti — utile per il prompting top-down.
+    """
+    from app.services.retrieval_v2 import (
+        MIN_RERANK_SCORE_ALERT,
+        retrieve_for_module,
+    )
+
+    result: dict[int, list[NormativeChunk]] = {}
+    per_module_top_score: dict[int, float] = {}
+
+    for m in pacing_plan.modules:
+        try:
+            scored = await retrieve_for_module(
+                module_title=m.title,
+                course_target=course_target,
+                normative_slug=normative_slug,
+                regulation_ids=regulation_ids,
+                region=region,
+                repo=knowledge_repo,
+                course_id=course_id,
+                module_idx=m.module_index,
+            )
+        except Exception as exc:
+            logger.warning(
+                "module_retrieve_v2_failed",
+                module_index=m.module_index,
+                title=m.title,
+                error_class=type(exc).__name__,
+                error_msg=str(exc)[:200],
+            )
+            result[m.module_index] = []
+            continue
+
+        # Mappiamo ScoredChunk -> NormativeChunk, popolando relevance_score
+        # dal rerank score per consistenza col path legacy (cosi' audit e
+        # quality checks downstream possono leggere lo stesso campo).
+        chunks: list[NormativeChunk] = []
+        for sc in scored:
+            sc.chunk.relevance_score = sc.score
+            chunks.append(sc.chunk)
+        result[m.module_index] = chunks
+
+        top_score = scored[0].score if scored else 0.0
+        per_module_top_score[m.module_index] = top_score
+        logger.info(
+            "module_retrieval_v2_done",
+            module_index=m.module_index,
+            title=m.title,
+            count=len(chunks),
+            top_score=round(top_score, 4),
+            under_alert_threshold=top_score < MIN_RERANK_SCORE_ALERT,
+            source=scored[0].source if scored else "empty",
+        )
+
+    expected_keys = {m.module_index for m in pacing_plan.modules}
+    actual_keys = set(result.keys())
+    assert actual_keys == expected_keys, (
+        f"module_index mismatch (v2): pacing={sorted(expected_keys)}, "
+        f"retrieval={sorted(actual_keys)}"
+    )
+
+    logger.info(
+        "per_module_retrieval_v2_summary",
+        total=sum(len(v) for v in result.values()),
+        per_module_top_score={k: round(v, 4) for k, v in per_module_top_score.items()},
+        modules_under_alert=[
+            k for k, v in per_module_top_score.items() if v < MIN_RERANK_SCORE_ALERT
+        ],
+    )
+    return result
+
+
 def _flatten_unique(
     chunks_by_module: dict[int, list[NormativeChunk]],
 ) -> list[NormativeChunk]:
@@ -1405,28 +1512,62 @@ async def research_agent(state: NexusPipelineState) -> dict[str, object]:
         # della dedup (cautela #4 analista review 2: chunks_by_module
         # e chunks (post _flatten_unique) devono vedere lo stesso
         # insieme — disallineamento silenzioso altrimenti).
-        chunks_by_module = await retrieve_chunks_per_module(
-            pacing_plan=pacing_plan,
-            regulation_ids=regulation_ids,
-            region=request.region,
-            knowledge_repo=knowledge_repo,
-            # FIX #31.8 LEVA A (2026-05-27, analista review 11): top_k
-            # scalabile con duration_hours per coprire scaling fino a
-            # 32h del catalogo cliente. Storia:
-            # - #31.2 fissò top_k=70 calibrato su 4h × 4 moduli (E25,
-            #   Generale 4h: ognuno ~50 chunk post-dedup).
-            # - Demo #3 Preposti 8h × 6 moduli ha rivelato top_k=70
-            #   sotto-dimensionato: M3 "Incidenti mancati" 5 chunk.
-            # - Formula: top_k = min(150, int(35 + 8 * duration_hours))
-            #   4h → 67 (≈ vecchio 70, retrocompat)
-            #   8h → 99 (+41% vs vecchio, copre 6 moduli stretti)
-            #   16h → 163 → cap 150
-            #   32h → 291 → cap 150 (mitigato da B+C)
-            # search_chunks è O(log N) su HNSW pgvector → costo
-            # trascurabile (~+30s atteso su 8h, irrilevante su 15 min).
-            top_k_per_module=min(150, int(35 + 8 * request.duration_hours)),
-            min_relevance=MIN_RELEVANCE,
-        )
+        #
+        # v2 — D2 (piano vast-hopping-sketch, F2.4): quando il flag
+        # `v2_rerank_enabled` e' on, sostituiamo questa retrieval con
+        # BM25+cosine RRF recall (top_k=200) + Cohere rerank top_n=30 per
+        # modulo (`retrieval_v2.retrieve_for_module`). La drop-list resta
+        # attiva dietro il proprio flag (`drop_list_enabled`) per il
+        # periodo di transizione A/B di D10. Spiegazione VAA:
+        #   (a) verifica al render: top_score loggato per ogni modulo
+        #   (b) provenienza: ScoredChunk.source tracciata e propagata
+        #   (d) sensore vs gate: MIN_RERANK_SCORE_ALERT alimenta badge D9
+        #                        ma NON taglia (MIN_RELEVANCE legacy non
+        #                        si applica al path v2)
+        if settings.v2_features.get("rerank_enabled"):
+            # Estrazione robusta dello slug normativo principale:
+            # `COURSE_CATALOG` e' `dict[str, dict[str, object]]`. Se la chiave
+            # `regulation_slugs` esiste ed e' una lista non vuota, prendo il
+            # primo elemento; altrimenti fallback a "dlgs_81_08" come default
+            # storico (tutti i corsi 81/08 lo includono comunque).
+            _slugs_raw = catalog_entry.get("regulation_slugs") if catalog_entry else None
+            _normative_slug = (
+                str(_slugs_raw[0])
+                if isinstance(_slugs_raw, list) and _slugs_raw
+                else "dlgs_81_08"
+            )
+            chunks_by_module = await _retrieve_chunks_per_module_v2(
+                pacing_plan=pacing_plan,
+                regulation_ids=regulation_ids,
+                region=request.region,
+                knowledge_repo=knowledge_repo,
+                course_target=request.course_type,
+                normative_slug=_normative_slug,
+                course_id=_course_id_for_log,
+            )
+        else:
+            chunks_by_module = await retrieve_chunks_per_module(
+                pacing_plan=pacing_plan,
+                regulation_ids=regulation_ids,
+                region=request.region,
+                knowledge_repo=knowledge_repo,
+                # FIX #31.8 LEVA A (2026-05-27, analista review 11): top_k
+                # scalabile con duration_hours per coprire scaling fino a
+                # 32h del catalogo cliente. Storia:
+                # - #31.2 fissò top_k=70 calibrato su 4h × 4 moduli (E25,
+                #   Generale 4h: ognuno ~50 chunk post-dedup).
+                # - Demo #3 Preposti 8h × 6 moduli ha rivelato top_k=70
+                #   sotto-dimensionato: M3 "Incidenti mancati" 5 chunk.
+                # - Formula: top_k = min(150, int(35 + 8 * duration_hours))
+                #   4h → 67 (≈ vecchio 70, retrocompat)
+                #   8h → 99 (+41% vs vecchio, copre 6 moduli stretti)
+                #   16h → 163 → cap 150
+                #   32h → 291 → cap 150 (mitigato da B+C)
+                # search_chunks è O(log N) su HNSW pgvector → costo
+                # trascurabile (~+30s atteso su 8h, irrilevante su 15 min).
+                top_k_per_module=min(150, int(35 + 8 * request.duration_hours)),
+                min_relevance=MIN_RELEVANCE,
+            )
 
         # Ricostruisco `chunks` come unione deduplicata per
         # CourseContext.chunks (audit + fingerprint). Il filtro relevance

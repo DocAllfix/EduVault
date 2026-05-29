@@ -12,7 +12,27 @@
 > disponibile. L'aggiornamento avviene PRIMA del corrispondente aggiornamento
 > Tracker (REI-12) — così il debt è sempre visibile e tracciato.
 >
-> **Ultimo aggiornamento:** 2026-05-29 — **v2 refactor FASE 1 chiusa (catalogo cliente in DB + 3 normative TIER 1 ingerite + bug citation_label fixato + UI normativa-corso live)**.
+> **Ultimo aggiornamento:** 2026-05-29 — **v2 refactor FASE 2 step 1-4 chiusi (rerank Cohere + recall ibrido BM25+cosine RRF + research_agent branch dietro flag)**.
+
+**Fase 2 step 1-4 — cuore del retrieval v2 (D2 del piano vast-hopping-sketch):**
+- **F2.1 COHERE_API_KEY** settata su Railway `EduVault` (`--skip-deploys`). Provider attivo: `rerank-multilingual-v3.0` free tier (1000 req/mese, sufficienti per A/B test e prima sessione prod). Chiave residente SOLO in env var Railway + memoria locale di questa sessione, **mai committed in repo** (gitignore copre tutti gli script smoke).
+- **F2.2 `app/services/retrieval_v2.py` NUOVO** (~470 righe, mypy --strict + ruff verdi):
+  - `autogen_module_query()` 1 LLM call (chain `task=classify` → DeepSeek/Azure/OpenAI/Anthropic) che genera la query semantica per il modulo. Output JSON `{"query": "<15-30 parole>"}` per essere compatibile con `response_format=json_object` imposto dalla fallback chain di `ingestion_service.call_llm`. Fallback a `module_title` puro se l'LLM emette query <5 parole.
+  - `recall_hybrid()` BM25Okapi (su body in-memory, ~3 MB su 7 normative × 2879 chunk) + cosine via `knowledge_repo.search_chunks` esistente (Voyage 1024-dim su HNSW pgvector), fusi via **Reciprocal Rank Fusion** k=60. Top_k 200. Chunk che vincono SOLO via BM25 e non sono nel ranking cosine vengono idratati con un singolo fetch su `repo.pool`.
+  - `rerank_chunks()` Cohere `rerank-multilingual-v3.0` con `cohere.AsyncClientV2` (lazy import). Top_n 30. Se la chiave non è settata o l'API è down → fallback automatico a "ordine RRF già fatto da recall_hybrid" con `source='rrf_fallback'`. Nessuna eccezione propagata: degrada, non rompe.
+  - `retrieve_for_module()` end-to-end (query autogen + recall + rerank).
+  - **VAA-b provenienza tracciata** in ogni `ScoredChunk` con `source ∈ {'rerank_cohere', 'rrf_fallback', 'bm25_only'}`. **VAA-d sensore non gate**: `MIN_RERANK_SCORE_ALERT = 0.45` alimenta il futuro badge D9 `module_corpus_thin` ma NON filtra i chunk (il vecchio MIN_RELEVANCE legacy filtrava, e il path v2 ne è esente di proposito).
+- **F2.3 SMOKE TEST 4/4 PASS contro DB prod Railway (TCP proxy + corpus reale 7 normative 2879 chunk)** — script `scripts/smoke_test_retrieval_v2.py` (gitignored):
+  - TEST 1 autogen → 18-29 parole in italiano, ~3.8 s/modulo.
+  - TEST 2 recall_hybrid → 100 candidati con bm25_size=100 + cosine_size=100 fused (~920 ms).
+  - TEST 3 rerank → 10 ScoredChunk con `source=rerank_cohere`, **top_score 0.967** (>> 0.45 soglia), ~22.8 s su 200 docs.
+  - TEST 4 retrieve_for_module E2E → 30 ScoredChunk, top_score 0.945, source=rerank_cohere.
+- **F2.4 research_agent BRANCH dietro flag** — `app/agents/research_agent.py:1525-1540` aggiunto `if settings.v2_features.get("rerank_enabled")` che switch a nuova `_retrieve_chunks_per_module_v2()` (~100 righe). Funzione nuova invece di branchare dentro la legacy per non toccare il path provato dai 3 demo dell'analista. mypy verde sul mio scope (l'errore residuo `:1205 "object" has no attribute "fetch"` è **preesistente** del `cluster_scores` legacy — confermato via `git stash` su HEAD precedente). Smoke test `scripts/smoke_test_research_agent_v2.py` (gitignored) → 3 moduli (Concetti generali / Rischi specifici DPI / Segnaletica) → ciascuno 30 chunks, top_score 0.976 / 0.972 / 0.992, `modules_under_alert=[]`. **Semanticamente i chunk #1 sono perfetti**: art. 15 (misure generali tutela) / allegato V (DPI) / allegato XIII (segnaletica).
+- **Discrepanze D-151 (rerank 2-stadi) e D-152 (edge graph) avanzamento**: D-151 ora ha l'implementazione e il branch flagged in prod-ready; **D-152 resta aperta** (graph_service.py F2.5-F2.7 mancano).
+
+**Cosa NON verifica ancora (debt):**
+- F2.4 verificato in smoke STANDALONE su corpus reale, ma **NON ancora in pipeline end-to-end** (research_agent → content_agent → production_builder). Il content_agent consuma `relevance_score` (popolato dal rerank Cohere) ma potrebbe esserci sorpresa nell'ordinamento delle slide o nel matching SPREAD-hint, perché la struttura interna `chunks_by_module` ora riflette ordine rerank decrescente invece di ordine dedup-quota.
+- Flag `v2_rerank_enabled` resta **OFF in prod**: pipeline v1 invariata per i 3 demo. Attivare il flag e fare A/B (F2.9) chiuderà davvero la verifica al render della fase 2 retrieval.
 
 **Fase 1 — risultati misurabili in produzione (verificati via TCP proxy + Chrome DevTools live):**
 - **Catalogo cliente in DB**: 44 corsi attivi + 195 moduli scrapati da corsi8108.it. 102 link `regulation_course_type_links` con `source` tracciato (96 `scrape`, 6 `remap` rimappature `accordo_2016->2025` e `dm_1998->2021`). Distribuzione: `dlgs_81_08` 28 corsi, `accordo_stato_regioni_2011` 19, `accordo_stato_regioni_2025` 13, `dlgs_106_09` 7. Gate VAA: nessun catalog entry ha `approved_at IS NOT NULL` → la generazione resterà bloccata finché l'admin non approva via UI (work item F1.D.2).

@@ -81,4 +81,7 @@ testfixtemplate/
 scripts/seed_catalog_and_links.py
 scripts/catalog_draft_from_report.py
 scripts/ingest_3_regulations_v2.py
+scripts/smoke_test_retrieval_v2.py
 storage/regulations_v2/
+scripts/_discover_db_schema.py
+scripts/smoke_test_research_agent_v2.py
