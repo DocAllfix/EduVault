@@ -497,6 +497,53 @@ async function getCourseSlide(id: string, idx: number): Promise<StudioSlide> {
   )
 }
 
+// ─── D3 skeleton review (vast-hopping-sketch) ───
+
+export interface SkeletonItem {
+  ordinal: number
+  sub_topic: string
+  retrieval_query: string
+}
+
+export interface ModuleSkeleton {
+  module_index: number
+  title: string
+  items: SkeletonItem[]
+  approved: boolean
+}
+
+export interface SkeletonResponse {
+  course_id: string
+  status: string
+  modules: ModuleSkeleton[]
+  approved_at?: string | null
+}
+
+async function getCourseSkeleton(id: string): Promise<SkeletonResponse> {
+  return request<SkeletonResponse>(
+    `/api/courses/${encodeURIComponent(id)}/skeleton`,
+  )
+}
+
+async function updateCourseSkeleton(
+  id: string,
+  modules: ModuleSkeleton[],
+): Promise<SkeletonResponse> {
+  return request<SkeletonResponse>(
+    `/api/courses/${encodeURIComponent(id)}/skeleton`,
+    { method: 'PUT', json: { modules } },
+  )
+}
+
+async function approveCourseSkeleton(
+  id: string,
+): Promise<{ status: string; job_id: string }> {
+  return request<{ status: string; job_id: string }>(
+    `/api/courses/${encodeURIComponent(id)}/skeleton/approve`,
+    { method: 'POST' },
+  )
+}
+
 async function patchCourseSlide(
   id: string,
   idx: number,
@@ -656,6 +703,10 @@ export const api = {
   moveSlide,
   duplicateSlide,
   deleteSlide,
+  // D3 skeleton review
+  getCourseSkeleton,
+  updateCourseSkeleton,
+  approveCourseSkeleton,
   // Regulations
   uploadRegulation,
   getRegulations,

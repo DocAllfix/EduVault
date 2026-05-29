@@ -31,6 +31,7 @@ import { ImagePicker } from './components/image-picker'
 import { RegenerateDialog } from './components/regenerate-dialog'
 import { RebuildBanner } from './components/rebuild-banner'
 import { SlideActions } from './components/slide-actions'
+import { SkeletonReview } from './components/skeleton-review'
 
 function slideTypeLabel(t: string): string {
   const map: Record<string, string> = {
@@ -51,9 +52,18 @@ export function CourseStudio() {
   const navigate = useNavigate()
   const [selectedIdx, setSelectedIdx] = useState(0)
 
+  // D3: a course in `skeleton_pending` has no slides yet — it shows the
+  // skeleton review gate instead of the slide IDE. Cheap status query first.
+  const courseQ = useQuery({
+    queryKey: ['course-detail', id] as const,
+    queryFn: () => api.getCourse(id),
+  })
+  const isSkeletonPending = courseQ.data?.status === 'skeleton_pending'
+
   const slidesQ = useQuery({
     queryKey: ['course-slides', id] as const,
     queryFn: () => api.getCourseSlides(id),
+    enabled: !isSkeletonPending, // don't 409 on a skeleton-pending course
   })
 
   const slides: StudioSlide[] = slidesQ.data?.slides ?? []
@@ -85,6 +95,35 @@ export function CourseStudio() {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   })
+
+  // D3 gate: skeleton-pending course → review UI instead of the slide IDE.
+  if (isSkeletonPending) {
+    return (
+      <>
+        <Header>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => navigate({ to: '/courses/$id', params: { id } })}
+          >
+            <ArrowLeft className="mr-2 h-4 w-4" /> Dettaglio corso
+          </Button>
+          <div className="ml-auto flex items-center gap-2">
+            <ThemeSwitch />
+            <ProfileDropdown />
+          </div>
+        </Header>
+        <Main>
+          <SkeletonReview
+            courseId={id}
+            onApproved={() =>
+              navigate({ to: '/courses/$id', params: { id } })
+            }
+          />
+        </Main>
+      </>
+    )
+  }
 
   return (
     <>
