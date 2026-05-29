@@ -19,9 +19,28 @@
 - **Residuo formazione/abilitazione nel top-30: LASCIARE a B2, NON aggiustare prompt/retrieval_query ora.** Il rumore di superficie È il ground-truth per calibrare B2. Aggiustare a monte = rompere la disciplina di calibrazione sequenziale + perdere l'oracolo umano (sample-read).
 - **Procedi STEP 4-7** ✓.
 
-**DIRETTIVE CALIBRAZIONE B2 (da usare quando arriva F2.12 — NON dimenticare):**
-- B2 = `cosine(chunk.body_emb, sub_topic.text_emb)` con soglia ~0.55-0.60. **MAI** `cosine(chunk.body, module_title)` (= regressione a V2).
-- **Ground-truth = AUDIT GEN M1 sub-topic 1** (`storage/ab_test_results/D3_AUDIT_GEN_M1.md`): la soglia corretta DEVE eliminare le 4-5 righe rumorose (riga 4 "esonero frequenza" 0.951, riga 7 "Art.40 fascicolo opera" 0.875, riga 15 "4 ore Formazione" 0.823, riga 25 "Art.37 durata modulo" 0.580) TENENDO le 15-20 di cuore (Art.15/30/33/36/225/251). Se taglia 8 o salva 25 → soglia sbagliata. La sample-read umana è l'oracolo contro cui tarare.
+**DIRETTIVE CALIBRAZIONE B2 — CORRETTE DALL'ANALISTA 2026-05-29 post stress-test (REGOLE NON-NEGOZIABILI):**
+- B2 = `cosine(chunk.body_emb, sub_topic.text_emb)` calcolata con **embedding Voyage diretto** (1024-dim, gli stessi già nel DB per i chunk; il sub_topic va embedded via Voyage, NON via Cohere). MAI `cosine(chunk.body, module_title)` (= regressione V2). MAI sul rerank score normalizzato (= collassa le 2 metriche e perdi il filtro). Il rerank Cohere è topical-broad; il cosine Voyage diretto è semantico-stretto. **B2 sfrutta il GAP fra i due**: Cohere fa il recall (top-30), Voyage filtra la specificità che Cohere perde.
+- **Soglia RELATIVA, non assoluta.** GEN M1 ha distribuzione max 0.994 / media 0.747; PRE M3 ha max 0.642 / media 0.099. Una soglia fissa su un regime distrugge l'altro. Formula: `scarta se cosine_to_subtopic < (max_cosine_to_subtopic - delta)` oppure percentile relativo al top di quella query. Il delta è tunable; il principio "relativo non assoluto" è non-negoziabile.
+- **Ground-truth = sample-read manuale su 3 (4) moduli, NON solo GEN M1**:
+  - **GEN M1** (facile, regime denso): scarta righe 4/7/15/25 (formazione/abilitazione), tieni Art.15/30/33/36/225/251.
+  - **GEN M2 "Organizzazione della prevenzione"** (cross-Titolo: Coordinatori in edilizia + Modulo A RSPP + sanzioni in V2). Regime diverso da PRE M3 (cross-Titolo vs cross-corso).
+  - **PRE M3 voce 1** (cross-corso + corpus moderato, REGIME RIBALTATO): on-topic veri (Art. 19/37/18/226/28) sono **in fondo** al top-30 con score bassi; off-topic (Allegati IV/I formazione/abilitazione) sono **in alto**. La soglia DEVE invertire correttamente questo mis-ranking: premiare chunk in fondo con alta semantica-diretta col sub_topic, penalizzare top Cohere con bassa semantica-diretta.
+  - **ANT M0** se economico (quarto, regime corpus-thin coperto post-ingestione DM 03/09).
+  - Calibrare su un solo modulo (GEN M1) → soglia tarata sul caso facile → risultati pessimi su PRE M3.
+
+**GATE DISCIPLINARE PRE-B2 (dall'analista, non-negoziabili):**
+1. **E2E completo flag-on PRIMA della calibrazione B2.** D3 è validato pezzo per pezzo (modelli/skeleton_service/smoke resume) ma non end-to-end con research→skeleton_pending→approve→content su corso reale. Calibrare su un sistema non E2E-verificato incorpora artefatti del flow (edge case approve, serializzazione skeleton DB) nella soglia. Prima E2E, poi calibrazione.
+2. **Oracolo umano sui 3-4 moduli, NON uno solo** (vedi sopra).
+3. **Quarto audit "neutro" fuori dal dominio 81/08-base** prima di partire con B2 — suggerito HACCP o RLS 32h. Check di universalità sul catalogo intero, non solo sui 3 corsi di review storica. Se (a) pura tiene anche su un dominio non-81/08 → confermato che scala.
+
+**DIRETTIVA B3 (più semplice ma confermata):** edge `gerarchico_sibling`/`gerarchico_parent` che attraversa Titoli diversi del D.Lgs → decade fortemente o scarta. Pattern: ALLEGATO XVI (Titolo IV Cantieri) tirato dentro Art.15 (Titolo I) per ereditarietà = traversata troppo larga. La regola "stesso Titolo" è più stringente e più giusta del solo peso 0.4.
+
+**NUOVE OSSERVAZIONI SCHELETRI POST-STRESS-TEST (non bloccanti, registrate):**
+- Pattern "manualistico-normativo" confermato anche su PRE M3 e ANT M0 (estensione di D-167): scheletri ben strutturati come mappe normative, mancano dell'angolo didattico-pedagogico (PRE M3 #3 "Analisi cause" è metodologico astratto, manca "5-perché/fishbone/learning culture"; ANT M0 manca "perché studiamo questo: casi recenti in aziende italiane"). Conferma che la (a) pura è production-ready per il valore strutturale (cross-corso-clean); l'arricchimento didattico è punto d'ingaggio dell'esperto via UI ("aggiungi voce"), non urgente, raffinamento futuro del prompt skeleton-generator.
+- PRE M3 voce #6 "Analisi dei dati per miglioramento continuo" è fragile (potrebbe pescare DVR/PDCA generico in qualunque altro corso). PRE M3 #4/#5 hanno mini-overlap interno (preposto/procedure). NON bloccanti, da osservare al top-30 quando arriverà.
+
+**DIRETTIVA SCHELETRO STRESS-TEST PRE M3 — già FATTO 2026-05-29: stress-test eseguito.** Sub-topic 1 voce 1 produce un retrieval con distribuzione molto diversa da GEN M1 (max 0.642, media 0.099, on-topic veri in fondo). Questo regime IS il caso di calibrazione per B2 relativo.
 
 **DIRETTIVE CALIBRAZIONE B3 (quando arriva F2.13):**
 - B3 NON è solo "peso sibling 0.4". È **strutturale**: se l'edge `gerarchico_sibling`/`gerarchico_parent` attraversa **Titoli diversi del D.Lgs**, scarta o decadi forte. Pattern: ALLEGATO XVI (Titolo IV Cantieri, scope coordinatori) tirato dentro Art.15 (Titolo I) per ereditarietà = traversata troppo larga. Gli allegati cross-Titolo sono il pattern da osservare. La regola "stesso Titolo" è più stringente e più giusta del solo peso.
@@ -38,6 +57,16 @@
 - Su 3 moduli (GEN M1 + PRE M3 + ANT M0) (a) pura tiene. D3 fondazione pronta. Residuo medio → B2/B3.
 
 **D3 IMPLEMENTAZIONE** (commit 9551958, 6e61cca, 134add0, 77bc66b): backend completo (modelli 5 test, skeleton_service, pipeline interrupt, generation split, API) + frontend (skeleton-review.tsx, tsc EXIT 0). mypy/ruff verdi. **Smoke LangGraph resume PASS** (interrupt+aget_state+aupdate_state as_node+ainvoke None su 1.2.1). **BUG thread_id job_id→course_id scoperto e fixato durante lo smoke** (134add0) — research/content sono 2 job ma 1 thread checkpoint. **DEBT D3**: NON ancora E2E completo flag-on su corso reale (research→skeleton_pending→approve→content). Validato pezzo per pezzo. Flag `skeleton_validation` OFF in prod = zero impatto cliente.
+
+**E2E D3 HACCP LOMBARDIA — PASS completo 2026-05-29 → 2026-05-30** (`/Desktop/V2_AB_TEST_20260529_125641/D3_E2E_HACCP/`):
+- Setup: V2_RERANK_ENABLED=true + V2_SKELETON_VALIDATION=true + V2_KG_TRAVERSAL_ENABLED=false su Railway prod. Migration 007 applicata.
+- Path completo verificato sul campo: research→skeleton_pending (3 min, 4 scheletri Azure mini) → GET skeleton OK → POST approve OK → content phase (10 min) → completed.
+- **PPTX 52 MB con immagini Pexels reali**, 336 slide, distribuzione perfettamente equa **84+84+84+84**, citation_ref popolata 328/336 (98%) tutte `Reg. CE 852/2004, allegato/art.`
+- **CROSS-CORSO check sul prodotto FINALE (non solo scheletro)**: pattern regex su RSPP/Coordinatore/Preposti/antincendio nei titoli+bullets+notes di tutte le 336 slide → **0/336 = 0.0%**. D3 strutturalmente efficace END-TO-END, non solo allo stadio scheletro. La pipeline materialize_by_subtopic → content_agent → builder rispetta il perimetro normativo HACCP.
+- M3 "Autocontrollo" 84 slide (era a 2 in #22 — patologia esclusa). Primi titoli M3 mostrano l'angolo giuridico-procedurale ("Relazione Commissione", "Abrogazione direttiva 93/43/CEE") = pattern D-167 confermato (manualistico-normativo, manca angolo didattico). NON cross-corso, è meta-normativo. Atteso.
+- **L'analista aveva ragione**: l'E2E ha pescato 1 bug bloccante (D-168 region filter europeo, parzialmente compensato da BM25) e 1 bug strutturale fatale che migration 007 ha risolto (CHECK constraints). Calibrare B2 senza E2E avrebbe incorporato questi artefatti nella soglia.
+
+**D-168** [BUG strutturale retrieval region filter — scoperto da E2E HACCP 2026-05-29]: il filtro region in `knowledge_repo.search_chunks` (`r.region = 'NAZIONALE' OR (region_param IS NOT NULL AND r.region = region_param)`) SCARTA tutti i regolamenti con `region='EUROPEA'` (Reg CE 852/2004 HACCP, Reg CE 1272/2008 CLP). Conseguenza: `cosine_size=0` sempre per corsi che dipendono da regolamenti europei → recall_hybrid degrada a solo BM25 → top_score rerank sotto soglia ALERT (visto su HACCP M3 = 0.367 under_alert_threshold=true). BM25 funziona perché è caricato in-memory via `regulation_id`, NON filtrato per region. Fix candidato: estendere il filtro a `r.region IN ('NAZIONALE','EUROPEA') OR r.region = region_param` (regolamenti europei sono fonti universali come quelli nazionali). Bug strutturale di v2 retrieval, NON specifico HACCP — colpisce ogni corso col Reg CE nei `regulation_slugs`. Non bloccante per D3 (BM25 sta facendo il recall), ma bloccante per qualità retrieval v2 nei domini europei. Da fixare PRIMA di B2 calibrazione (il ground-truth multi-modulo non deve includere casi con cosine_size=0 perché distorce la calibrazione della soglia).
 
 **D-166** [TOC normativo non strutturato]: opzione (d) deferred — `article` ha "Art. 15" ma non il titolo "Misure generali di tutela", andrebbe estratto dai body (rumore case/frammenti). (a) pura dimostrata sufficiente su GEN M1. Tornare su (d) SOLO se in futuro (a) produce uno scheletro discutibile (visibile via sample-read). Non rincorrere ora.
 
