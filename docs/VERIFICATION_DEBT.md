@@ -32,6 +32,13 @@
 
 **STRESS-TEST RICHIESTO dall'analista** (dopo UI attiva, prima di B2): audit scheletro su **PRE M3 "Incidenti e infortuni mancati"** (caso peggiore cross-corso V2) + **ANT M0 "Principi dell'incendio"** (caso corpus-thin). Se la tassonomia (a) pura regge anche su quei due → conferma che scala oltre il caso facile GEN M1. Quello è il vero stress-test prima di B2.
 
+**→ STRESS-TEST ESEGUITO 2026-05-29: (a) PURA SCALA, PASS su entrambi** (`D3_STRESS_PRE_M3_ANT_M0.md`, su Desktop):
+- **PRE M3** (era 90% cross-corso V2): scheletro 7 sotto-temi TUTTI su incidenti/infortuni mancati, ZERO sconfinamento RSPP/Coordinatore/Datore. Patologia 90% eliminata alla radice. top_score voce1=0.642 (corpus near-miss meno ricco = densità, non cross-corso).
+- **ANT M0** (era 0.473 corpus-thin V2): scheletro 8 sotto-temi tecnici antincendio puri, ZERO ruoli formativi/ASL. **top_score voce1=0.814** (quasi 2× il 0.473): corpus DM 03/09 ingerito + retrieval by-subtopic. Da corpus-thin a coperto.
+- Su 3 moduli (GEN M1 + PRE M3 + ANT M0) (a) pura tiene. D3 fondazione pronta. Residuo medio → B2/B3.
+
+**D3 IMPLEMENTAZIONE** (commit 9551958, 6e61cca, 134add0, 77bc66b): backend completo (modelli 5 test, skeleton_service, pipeline interrupt, generation split, API) + frontend (skeleton-review.tsx, tsc EXIT 0). mypy/ruff verdi. **Smoke LangGraph resume PASS** (interrupt+aget_state+aupdate_state as_node+ainvoke None su 1.2.1). **BUG thread_id job_id→course_id scoperto e fixato durante lo smoke** (134add0) — research/content sono 2 job ma 1 thread checkpoint. **DEBT D3**: NON ancora E2E completo flag-on su corso reale (research→skeleton_pending→approve→content). Validato pezzo per pezzo. Flag `skeleton_validation` OFF in prod = zero impatto cliente.
+
 **D-166** [TOC normativo non strutturato]: opzione (d) deferred — `article` ha "Art. 15" ma non il titolo "Misure generali di tutela", andrebbe estratto dai body (rumore case/frammenti). (a) pura dimostrata sufficiente su GEN M1. Tornare su (d) SOLO se in futuro (a) produce uno scheletro discutibile (visibile via sample-read). Non rincorrere ora.
 
 PRECEDENTE: 2026-05-29 — **ANALISTA REVIEW 17: V2 BOCCIATA, regress strutturale. Tutti i 3 V2 archiviati, flag v2_rerank_enabled e v2_kg_traversal_enabled spenti su Railway. F2.11 velocizzazione sospesa. Pipeline cliente torna a legacy (drop-list + query expansion).**
