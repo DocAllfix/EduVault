@@ -95,3 +95,4 @@ storage/ab_test_results/
 scripts/compare_v2_vs_baseline.py
 scripts/ingest_dm_antincendio_2021.py
 scripts/audit_d3_skeleton_gen_m1.py
+scripts/smoke_d3_langgraph_resume.py

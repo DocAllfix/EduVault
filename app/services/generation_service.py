@@ -407,8 +407,15 @@ async def _run_pipeline_inner(
     # (BP §05.3) and our initial_state already matches the 8-field shape.
     from langchain_core.runnables import RunnableConfig
 
+    # D3: the LangGraph checkpoint thread_id must be STABLE across the research
+    # and content phases (they are two separate generation_jobs but ONE course
+    # pipeline). Keying on course_id lets the content phase aget_state/
+    # aupdate_state the checkpoint that the research phase produced. The legacy
+    # single-invoke path is unaffected (one job, one course, same value either
+    # way).
+    thread_id = course_id
     pipeline_config = cast(
-        RunnableConfig, {"configurable": {"thread_id": job_id}}
+        RunnableConfig, {"configurable": {"thread_id": thread_id}}
     )
     skeleton_on = bool(settings.v2_features.get("skeleton_validation"))
 
