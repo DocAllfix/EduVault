@@ -440,10 +440,31 @@ class ModuleContent(BaseModel):
 
 
 class CourseContext(BaseModel):
-    """Full context produced by the Research Agent for the Content Agent."""
+    """Full context produced by the Research Agent for the Content Agent.
+
+    H8 (2026-05-31): aggiunto ``chunks_by_voice`` per supportare il vincolo
+    voce-to-slide nel content_agent. Il content_agent itera voce per voce
+    dello skeleton e genera cluster di slide ancorati al subtopic, eliminando
+    il drift voce-to-slide (sample-read M0 post-V1.5: 1.2% on-topic core).
+
+    ``chunks_by_module`` resta come campo (NON @property derivata) per
+    retro-compat con tutti i callsite legacy che lo leggono ai fini telemetria,
+    audit e fallback nei path non-skeleton. ``_resume_content_from_skeleton``
+    lo popola sempre come union dedup dei pool delle voci.
+
+    Quando ``v2_skeleton_validation`` flag e' OFF (path legacy by-title):
+    ``chunks_by_voice`` resta dict vuoto ``{}``, content_agent cade su
+    ``chunks_by_module`` come prima (retro-compat strutturale).
+    """
 
     chunks: list[NormativeChunk]
     chunks_by_module: dict[int, list[NormativeChunk]]
+    # H8: voce-to-slide cluster source-of-truth. dict[module_idx][voice_idx (1-based ordinal)] -> chunks
+    chunks_by_voice: dict[int, dict[int, list[NormativeChunk]]] = Field(default_factory=dict)
+    # H8: skeleton per modulo (subset di ModuleSkeleton: solo i campi che il content_agent legge)
+    # Necessario perche` content_agent itera voce per voce e ha bisogno di item.sub_topic + item.retrieval_query
+    # Forma serializzata: dict[int, list[dict]] dove ogni dict ha keys {ordinal, sub_topic, retrieval_query}
+    module_skeletons: dict[int, list[dict[str, object]]] = Field(default_factory=dict)
     pacing_plan: PacingPlan
     style_patterns: list[StylePattern]
     regulation_ids: list[str]

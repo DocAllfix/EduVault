@@ -294,20 +294,35 @@ async def _resume_content_from_skeleton(
     reg_ids = await repo.resolve_slugs_to_ids([str(s) for s in reg_slugs])
     region = row["region"] or "NAZIONALE"
 
-    # Materialize chunks per module via by-sub-topic retrieval.
+    # H8 (2026-05-31): materialize_module_from_skeleton ora ritorna
+    # (chunks_by_voice, chunks_module_dedup). Popola chunks_by_voice nuovo
+    # campo CourseContext + chunks_by_module legacy retro-compat.
+    # Inoltre popola module_skeletons (subset serializzato dei ModuleSkeleton)
+    # per il content_agent che itera voce per voce.
     chunks_by_module: dict[int, list[Any]] = {}
+    chunks_by_voice: dict[int, dict[int, list[Any]]] = {}
+    module_skeletons: dict[int, list[dict[str, object]]] = {}
     all_chunks: list[Any] = []
     seen_global: set[str] = set()
     for sk in skeletons:
-        module_chunks = await materialize_module_from_skeleton(
+        module_chunks_by_voice, module_chunks_dedup = await materialize_module_from_skeleton(
             skeleton=sk,
             regulation_ids=reg_ids,
             region=region,
             repo=repo,
             course_id=course_id,
         )
-        chunks_by_module[sk.module_index] = module_chunks
-        for c in module_chunks:
+        chunks_by_module[sk.module_index] = module_chunks_dedup
+        chunks_by_voice[sk.module_index] = module_chunks_by_voice
+        module_skeletons[sk.module_index] = [
+            {
+                "ordinal": item.ordinal,
+                "sub_topic": item.sub_topic,
+                "retrieval_query": item.retrieval_query,
+            }
+            for item in sk.items
+        ]
+        for c in module_chunks_dedup:
             if c.chunk_id not in seen_global:
                 seen_global.add(c.chunk_id)
                 all_chunks.append(c)
@@ -318,14 +333,19 @@ async def _resume_content_from_skeleton(
         snapshot = await pipeline.aget_state(pipeline_config)
         cc_raw = snapshot.values.get("course_context")
         # Rebuild CourseContext keeping pacing_plan + style_patterns, swapping in
-        # the by-sub-topic chunks.
+        # the by-sub-topic chunks. H8: aggiunto chunks_by_voice.
         cc = (
             CourseContext.model_validate(cc_raw)
             if not isinstance(cc_raw, CourseContext)
             else cc_raw
         )
         new_cc = cc.model_copy(
-            update={"chunks": all_chunks, "chunks_by_module": chunks_by_module}
+            update={
+                "chunks": all_chunks,
+                "chunks_by_module": chunks_by_module,
+                "chunks_by_voice": chunks_by_voice,
+                "module_skeletons": module_skeletons,
+            }
         )
         await pipeline.aupdate_state(
             pipeline_config,

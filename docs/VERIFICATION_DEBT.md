@@ -712,6 +712,56 @@ Razionale: V1 originale (nx_normative_ref regulation_slug filter) curava patolog
 - **Timezone semantics**: `effective_until DATE` (non TIMESTAMPTZ). PostgreSQL `now()::date` vs `effective_until DATE` confronto è date-only, ignora time-of-day e timezone. Pattern accettato per il caso d'uso (cessazione di applicabilità normativa = granularità giornaliera, non oraria). Limite: il giorno della cessazione, il filtro decide "abrogato dalle 00:00 UTC" — accettabile per safety formativa, dove la differenza di poche ore non genera errori sostanziali. Documentato a verbale come decisione esplicita.
 - **Doppia fonte istituzionale per date legalmente vincolanti** (lezione D-170 estesa): per ogni data che entra nel sistema come `effective_until`, conferma con almeno 2 fonti (1 primaria GU/Normattiva + 1 secondaria istituzionale tecnica). Esempio applicato per accordo_2011: GU n. 119/2025 + Artser conferma 12 mesi transitorio → 2026-05-24. Principio operativo da REI per work-item futuri.
 
+### H9 SAMPLE-READ M0 POST-V1.5 — FALLITO (analista 2026-05-31)
+
+**Verdict netto**: H9 sostanziale FALLITO per la terza volta nella sessione, con aggravio.
+
+**On-topic core M0 post-V1.5**: **0-1 / 84 slide = 1.2%** (vs post-B4 5/83 = 6%, vs post-B3 stima 6-10%). **La pulizia B-cycle non ha mai toccato il drift voce-to-slide**: ha rifinito il retrieval (B2, B3, B4, D-177, D-178 V1.5) ma il content_agent continua a generare 84 slide free-form sul `chunks_by_module` union, indipendentemente dallo skeleton 9-voci che dichiarava Principi puri (definizione, comburente/combustibile, classificazione, fasi, prodotti combustione, effetti, sostanze estinguenti, ruolo addetto).
+
+**Risultato cumulativo perverso**: pulizia retrieval cresce, qualità modulo-coerenza scende. Cross-corso regex 25.4% → 22.9% → 20.0% → 16.1% (sembra migliorare), ma on-topic core ~10% → 6% → 1.2% (peggiora). Pattern *metric ottimizzata, contenuto peggiorato* confermato tre volte.
+
+**Patologie reali rilevate sample-read M0 post-V1.5**:
+- Skeleton 9 voci impeccabile (Principi puri), zero slide riconoscibilmente sui Principi.
+- 83/84 slide su temi di altri moduli (DM 03/09/2021 applicazione, esclusione cantieri, compartimentazione M2, manutenzione M2, formazione addetti M1, obblighi datore M1).
+- **Ridondanza semantica visibile**: slide 11/16, 12/17, 13/18 coppie quasi identiche. Il LLM duplica contenuto adjacente perche` `chunks_by_module` per voci principio-tecnico e` povero.
+- **Slide 42 D.Lgs 139/2006 Tipo 3 hallucination** (vedi D-181-quinquies sotto): V1.5 NON cattura.
+- **4-5 falsi positivi V1.5 strutturali as-object** (vedi D-181-ter sotto): slide 10, 107, 110, 230, 324 citano correttamente decreti abrogati come OGGETTO della slide (slide normativa di transizione/comparazione), non come fonte primaria.
+
+**Conclusione**: H8 NON e` piu` "raccomandato post-pulizia" — e` **strutturalmente necessario, ora**. Lo skeleton M0 corrente e` ground truth perfetto per misurare H8.
+
+### D-181-ter — As-object vs as-source hallucination guardrail (2026-05-31, backlog post-H8)
+
+**Pattern**: V1.5 marca tutti i match `regulation_slug ∉ course.regulation_ids` nei text_fields della slide, NON discrimina:
+- **as-object** (legittimo): la slide parla DELL'abrogazione/comparazione del decreto come oggetto pedagogico. Esempio slide 10 PPTX `9249d700` "Abrogazione del D.M. 10 marzo 1998" — bullet "DM 03/09/2021 sostituisce DM 10/03/1998" e` enunciazione storica corretta. V1.5 marca, e` falso positivo.
+- **as-source** (patologico): la slide cita il decreto come fonte attuale di un'affermazione. Esempio slide 264 "Misure di compartimentazione antincendio" bullet "Secondo DM 03/08/2015..." — fonte abrogata presentata come attuale. V1.5 marca correttamente.
+
+**Precisione V1.5 corrente**: ~6/11 = 55% (su sample-read M0 post-V1.5).
+
+**Cura proposta (HARD da definire post-H8)**: se lo slug compare nel titolo della slide → likely as-object, warning soft (visibile ma non blocking); se compare solo nei bullets → likely as-source, warning hard (presente nel report critico).
+
+**Stima**: 1-2 ore. Decisione post-H8 perche` H8 potrebbe eliminare il pattern as-source a monte (LLM iterando voce-per-voce con prompt restructure non avra` motivo di citare decreti out-of-scope nelle voci tecnico-principio).
+
+**Trigger**: post-H8 sample-read M0 mostra V1.5 warning persistenti con pattern as-object dominante → implementa discriminazione. Se warning calano a 0-2 totali → irrilevante, lascia D-181-ter chiuso senza fix.
+
+### D-181-quinquies — Tipo 3 hallucination: contenuto attribuito a decreto reale fuori scope (2026-05-31, esplorativo)
+
+**Pattern conclamato slide 42 PPTX `9249d700`**: la slide ha `normative_ref="DM 03/09/2021 art. 16"` (corretto al rendering), ma titolo "D.Lgs 8 marzo 2006, n. 139" e body parlano di "Norma di riferimento per prevenzione incendi / impianti protezione attiva / sprinkler". Il D.Lgs 139/2006 esiste come decreto reale ma e` "Riassetto del Corpo nazionale VVF" (riforma istituzionale), non norma tecnica antincendio. Il LLM **attribuisce contenuto sbagliato a un decreto reale**.
+
+**Pericolosita`**: massima per credibilita`. Un RSPP che apre la slide 42 e va a verificare il D.Lgs 139/2006 trova VVF reform invece di impianti antincendio → da quel momento ogni slide diventa sospetta. Le speaker_notes amplificano l'errore (il discente sente "Il D.Lgs 139/2006 e` norma fondamentale per impianti sprinkler").
+
+**Perche` V1.5 non cattura**:
+- D.Lgs 139/2006 e` morfologicamente legittimo (decreto reale italiano).
+- Lo slug normalizzato `dlgs_139_06` NON e` in `course.regulation_ids` ANT L1 (= `[dlgs_81_08, dm_02_09_2021, dm_03_09_2021, dm_01_09_2021]`).
+- **Bug**: V1.5 catturerebbe se applicato a titolo + bullets, ma `_check_bullet_citations` scansiona `bullets + speaker_notes + quiz_options`, NON title. Verifica `production_builder.py:_check_bullet_citations` — possibile fix immediato includere `s.title` nei `text_fields`.
+
+**Cura V1.5b (NON immediata, da discutere post-H8)**:
+- Estendi `_check_bullet_citations` per scansionare anche `s.title`. Costo 5 min + 1 test.
+- Slide 42 verrebbe catturata: regex matcha "D.Lgs 8 marzo 2006, n. 139" nel titolo → slug `dlgs_139_06` → not in course.regulation_ids → warning.
+
+**Cura V2 (semantico, esplorativo)**: verifier LLM auxiliary che valuta coerenza titolo↔body↔normative_ref. Costo 1-2g. Da fare solo se V1.5b + H8 lasciano residuo Tipo 3 significativo.
+
+**Decisione**: V1.5b (title scan) e` quick win da considerare seriamente — 5 min di codice cattura una classe Tipo 3 che oggi sfugge. Trigger: post-H8 se slide come 42 persistono.
+
 ### D-176 — H9 numerico vs sostanziale divergenza post-B4 (2026-05-30, pending post-H8)
 
 **Segnaposto.** Sample-read M0 post-B4 ha rivelato divergenza fra H9 numerico (cross-corso regex strict 20.0% PASS) e H9 sostanziale (5/83 on-topic core = 6% FAIL). Pattern *metric ottimizzata, contenuto peggiorato* (memoria `review17-metric-vs-render-lesson`). Risolvibile solo con H8 (vincolo voce-to-slide-cluster nel content_agent), non con calibrazione retrieval-stage. **Pending post-H8, non risolto in ciclo B**. Registrato qui per non perderlo durante il ciclo pulizia D-161/D-175/D-177/D-178.

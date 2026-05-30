@@ -23,11 +23,16 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+from typing import TYPE_CHECKING
 
 import structlog
 
 from app.agents.pipeline import NexusPipelineState
 from app.models.core import LAYOUT_CONSTRAINTS, SlideType
+
+if TYPE_CHECKING:
+    from app.models.knowledge import NormativeChunk, StylePattern
+    from app.models.core import TargetType
 
 
 def _auto_complete_invalid_slide(
@@ -317,6 +322,240 @@ def _build_module_bookends(
     return open_slide, close_slide
 
 
+async def _generate_module_h8(
+    *,
+    module: object,
+    voci_skeleton: list[dict[str, object]],
+    chunks_by_voce: dict[int, list["NormativeChunk"]],
+    style_patterns: list["StylePattern"],
+    previous_summary: str,
+    target: "TargetType",
+    system_prompt: str,
+) -> dict[str, object]:
+    """H8 (2026-05-31): genera cluster di slide PER VOCE dello skeleton.
+
+    Patologia che cura: drift voce-to-slide (sample-read M0 post-V1.5: 1.2%
+    on-topic core su 84 slide free-form generate dal pool union).
+
+    Strategia:
+      1. Per ogni voce dello skeleton, calcola slide_count_for_voice
+         proporzionale a pool_size_per_voce (voce con pool 30 -> ~9-10 slide;
+         voce con pool 5 -> ~2-3 slide). Normalizza per modulo target slide_count.
+      2. Per ogni voce, chiama generate_module_structured con prompt voce-aware
+         (build_voice_prompt): "Genera N slide SOLO sul sub_topic Y, usando
+         SOLO questi chunks".
+      3. Concatena tutti i cluster slide del modulo in ordine voci.
+      4. Aggiunge MODULE_OPEN + MODULE_CLOSE bookends (programmatici, zero LLM).
+      5. Re-index slide.index globale per contiguita`.
+
+    Return: dict serializzato di ModuleContent identico al path legacy
+    (per non rompere _generate_one_module downstream).
+
+    Raise: Exception se qualsiasi step fallisce (chiamante fa fallback legacy).
+    """
+    from math import ceil
+
+    from app.models.pipeline import ModuleContent
+    from app.services.ingestion_service import generate_module_structured
+
+    mod_idx = module.module_index  # type: ignore[attr-defined]
+    mod_title = module.title  # type: ignore[attr-defined]
+    mod_slide_count_target = int(getattr(module, "slide_count", 0) or 0)
+    mod_slide_distribution = getattr(module, "slide_distribution", {})
+
+    n_voci = len(voci_skeleton)
+    if n_voci == 0:
+        raise RuntimeError(f"H8: skeleton vuoto per modulo {mod_idx}")
+
+    # ── Sizing proporzionale a pool_size per voce ──
+    # Voce con pool grande riceve piu` slide (piu` materiale per copertura semantica);
+    # voce con pool piccolo (corpus thin) riceve meno (evita over-generation a vuoto).
+    def _ord(voce: dict[str, object]) -> int:
+        ord_raw = voce["ordinal"]
+        return int(ord_raw) if isinstance(ord_raw, (int, str, float)) else 0
+
+    pool_sizes = {
+        _ord(v): len(chunks_by_voce.get(_ord(v), []))
+        for v in voci_skeleton
+    }
+    total_pool = sum(pool_sizes.values())
+    if total_pool == 0:
+        raise RuntimeError(f"H8: tutti i pool vuoti per modulo {mod_idx}")
+
+    # Sottraggo le 2 slide bookends dal target prima di distribuire fra voci.
+    content_slide_target = max(2, mod_slide_count_target - 2)
+
+    # Slide per voce: floor(content_target * pool_voce / total_pool), poi correggo
+    # arrotondamenti per arrivare esattamente a content_slide_target.
+    slide_per_voce: dict[int, int] = {}
+    for v in voci_skeleton:
+        ord_v = _ord(v)
+        share = pool_sizes[ord_v] / total_pool if total_pool > 0 else 1.0 / n_voci
+        slide_per_voce[ord_v] = max(1, int(ceil(content_slide_target * share)))
+
+    # Correzione: aggiusta verso target esatto (preferendo voci con piu` pool)
+    while sum(slide_per_voce.values()) > content_slide_target:
+        # Rimuovi 1 dalla voce con piu` slide
+        max_ord = max(slide_per_voce, key=lambda k: slide_per_voce[k])
+        if slide_per_voce[max_ord] > 1:
+            slide_per_voce[max_ord] -= 1
+        else:
+            break
+    while sum(slide_per_voce.values()) < content_slide_target:
+        # Aggiungi 1 alla voce con piu` pool (proporzionalmente sotto-allocata)
+        # Ordina per pool_size desc
+        sorted_voci = sorted(slide_per_voce.keys(), key=lambda k: -pool_sizes[k])
+        slide_per_voce[sorted_voci[0]] += 1
+
+    logger.info(
+        "h8_sizing_per_voce",
+        module_index=mod_idx,
+        n_voci=n_voci,
+        pool_sizes=pool_sizes,
+        slide_per_voce=slide_per_voce,
+        content_slide_target=content_slide_target,
+    )
+
+    # ── Distribuzione tipi slide: ripartisco mod_slide_distribution fra voci ──
+    # Strategia semplice: prima voce riceve QUIZ se presente, ultima voce CASE_STUDY se
+    # presente, distribuzione CONTENT_TEXT/CONTENT_IMAGE proporzionale a slide_per_voce.
+    def _split_distribution(total_dist: dict[str, int], voce_count: int, voce_idx: int) -> dict[str, int]:
+        out: dict[str, int] = {}
+        # CONTENT_TEXT + CONTENT_IMAGE distribuiti proporzionalmente
+        text_total = int(total_dist.get("CONTENT_TEXT", 0) or 0)
+        img_total = int(total_dist.get("CONTENT_IMAGE", 0) or 0)
+        quiz_total = int(total_dist.get("QUIZ", 0) or 0)
+        case_total = int(total_dist.get("CASE_STUDY", 0) or 0)
+
+        share = voce_count / content_slide_target if content_slide_target > 0 else 1.0 / n_voci
+        out["CONTENT_TEXT"] = max(0, int(round(text_total * share)))
+        out["CONTENT_IMAGE"] = max(0, int(round(img_total * share)))
+        # QUIZ alla prima voce, CASE_STUDY all'ultima
+        if voce_idx == 0 and quiz_total > 0:
+            out["QUIZ"] = quiz_total
+        if voce_idx == n_voci - 1 and case_total > 0:
+            out["CASE_STUDY"] = case_total
+        return out
+
+    # ── Loop voce-per-voce ──
+    from app.agents.prompts import build_voice_prompt
+
+    all_content_slides = []
+    previous_voci_titles: list[str] = []  # per "voci precedenti summary"
+    for voce_idx, voce in enumerate(voci_skeleton):
+        ord_v = _ord(voce)
+        sub_topic = str(voce["sub_topic"])
+        retrieval_query = str(voce["retrieval_query"])
+        voce_chunks = chunks_by_voce.get(ord_v, [])
+        if not voce_chunks:
+            logger.warning(
+                "h8_voce_pool_empty_skip",
+                module_index=mod_idx,
+                voce_ordinal=ord_v,
+                sub_topic=sub_topic[:60],
+            )
+            continue
+
+        n_slide_voce = slide_per_voce.get(ord_v, 2)
+        dist_voce = _split_distribution(mod_slide_distribution, n_slide_voce, voce_idx)
+
+        # Summary voci precedenti (compatto: solo titoli sub_topic gia` trattati)
+        prev_voci_summary = (
+            "Voci gia` generate in questo modulo:\n"
+            + "\n".join(f"- v{i + 1}: {t}" for i, t in enumerate(previous_voci_titles))
+        ) if previous_voci_titles else "Prima voce del modulo (nessun contesto precedente)."
+
+        voce_prompt = build_voice_prompt(
+            module_index=mod_idx,
+            module_title=mod_title,
+            voice_ordinal=ord_v,
+            voice_sub_topic=sub_topic,
+            voice_retrieval_query=retrieval_query,
+            voice_chunks=voce_chunks,
+            slide_count_for_voice=n_slide_voce,
+            slide_distribution_for_voice=dist_voce,
+            style_patterns=style_patterns,
+            previous_voices_summary=prev_voci_summary,
+            target=target,
+        )
+
+        chunks_text_voce = "\n\n".join(
+            f"[ID: {c.chunk_id}] Art. {c.article or '?'}: {c.body}"
+            for c in voce_chunks[:30]
+        )
+
+        try:
+            voce_module_obj, voce_telemetry = await generate_module_structured(
+                system=system_prompt,
+                user_prompt=voce_prompt,
+                module_index=mod_idx,
+                module_title=f"{mod_title} - voce {ord_v}: {sub_topic[:40]}",
+                expected_slides=n_slide_voce,
+                chunks_text=chunks_text_voce,
+                slide_distribution=dist_voce,
+            )
+            logger.info(
+                "h8_voce_generated",
+                module_index=mod_idx,
+                voce_ordinal=ord_v,
+                sub_topic=sub_topic[:60],
+                expected=n_slide_voce,
+                generated=len(voce_module_obj.slides),
+                provider=voce_telemetry.get("provider_used"),
+            )
+            all_content_slides.extend(list(voce_module_obj.slides))
+            previous_voci_titles.append(sub_topic)
+        except Exception as exc:
+            logger.warning(
+                "h8_voce_failed_skipped",
+                module_index=mod_idx,
+                voce_ordinal=ord_v,
+                sub_topic=sub_topic[:60],
+                error_class=type(exc).__name__,
+                error=str(exc)[:200],
+            )
+            # Continue with next voce: parziale OK, non far cadere tutto il modulo.
+
+    if not all_content_slides:
+        raise RuntimeError(f"H8: tutte le voci fallite per modulo {mod_idx}, ZERO slide generate")
+
+    # ── Bookends MODULE_OPEN + MODULE_CLOSE ──
+    try:
+        bookend_open, bookend_close = _build_module_bookends(
+            module_index=mod_idx,
+            module_title=mod_title,
+            content_slides=all_content_slides,
+        )
+        all_slides = [bookend_open] + all_content_slides + [bookend_close]
+    except Exception as exc:
+        logger.error(
+            "h8_bookends_failed_kept_content",
+            module_index=mod_idx,
+            content_slides=len(all_content_slides),
+            error=str(exc)[:200],
+        )
+        all_slides = list(all_content_slides)
+
+    # ── Re-index global ──
+    for i, s in enumerate(all_slides):
+        s.index = i
+        s.module_index = mod_idx
+
+    logger.info(
+        "h8_module_completed",
+        module_index=mod_idx,
+        n_voci_processed=len(previous_voci_titles),
+        n_voci_skipped=n_voci - len(previous_voci_titles),
+        total_slides=len(all_slides),
+    )
+
+    return ModuleContent(
+        module_index=mod_idx,
+        title=mod_title,
+        slides=all_slides,
+    ).model_dump()
+
+
 def parse_slides_json(raw: str) -> list[dict[str, object]] | None:
     """Robust JSON parsing con multi-shape support (BP §05.5 + FASE 0b vast-hopping).
 
@@ -455,7 +694,48 @@ async def content_agent(state: NexusPipelineState) -> dict[str, object]:
         Garantisce profondità per-slide (max_retries) + cardinalità per-modulo (fill-loop)
         con budget separati. Il legacy auto-fix sotto è floor di ultima istanza per
         compatibilità (se instructor crasha o un provider è giù, ripieghiamo).
+
+        H8 (2026-05-31): branch voce-to-slide cluster. Se `chunks_by_voice` e
+        `module_skeletons` sono disponibili per il modulo (skeleton-validation ON
+        + skeleton già materializzato), generiamo cluster di slide PER VOCE
+        invece di N slide free-form sull'union dei chunks. Cura il drift
+        voce-to-slide (sample-read M0 post-V1.5: on-topic core 1.2% su 84 slide
+        free-form da pool union).
         """
+        from app.config import settings as _settings
+
+        mod_idx_h8 = module.module_index  # type: ignore[attr-defined]
+        # H8 gate: cluster voce-per-voce attivo solo se TUTTI i prerequisiti soddisfatti.
+        # Path legacy invariato come fallback safe.
+        h8_voci = context.chunks_by_voice.get(mod_idx_h8, {}) if hasattr(context, "chunks_by_voice") else {}
+        h8_skel = context.module_skeletons.get(mod_idx_h8, []) if hasattr(context, "module_skeletons") else []
+        if (
+            _settings.v2_skeleton_validation
+            and h8_voci
+            and h8_skel
+            and len(h8_skel) >= 2  # almeno 2 voci, altrimenti monovoce = path legacy stesso esito
+        ):
+            try:
+                return await _generate_module_h8(
+                    module=module,
+                    voci_skeleton=h8_skel,
+                    chunks_by_voce=h8_voci,
+                    style_patterns=context.style_patterns,
+                    previous_summary=previous_summary,
+                    target=request.target,
+                    system_prompt=system_prompt,
+                )
+            except Exception as exc:
+                # H8 ha fallito: log + fallback al path legacy (safety net).
+                logger.warning(
+                    "h8_voci_failed_fallback_legacy",
+                    module_index=mod_idx_h8,
+                    n_voci=len(h8_skel),
+                    error_class=type(exc).__name__,
+                    error=str(exc)[:200],
+                )
+                # Cade al path legacy sotto.
+
         module_chunks = context.chunks_by_module.get(module.module_index, [])  # type: ignore[attr-defined]
         user_prompt = build_module_prompt(
             module=module,

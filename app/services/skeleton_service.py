@@ -176,8 +176,22 @@ async def materialize_module_from_skeleton(
     region: str,
     repo: KnowledgeRepository,
     course_id: str | None = None,
-) -> list[NormativeChunk]:
-    """Per-sub-topic retrieval → one deduplicated chunk list for the module.
+) -> tuple[dict[int, list[NormativeChunk]], list[NormativeChunk]]:
+    """Per-sub-topic retrieval → (per-voce dict, modulo-deduped list).
+
+    H8 (2026-05-31): return cambiato da ``list[NormativeChunk]`` a tuple
+    ``(dict_per_voce, list_deduped)`` per supportare il vincolo voce-to-slide
+    nel content_agent. Sample-read M0 post-V1.5 ha confermato per la terza
+    volta che il drift voce-to-slide e' patologia strutturale: 1.2% on-topic
+    core su 84 slide. Cura: ogni voce dello skeleton diventa cluster di slide.
+
+    Return structure:
+      - ``chunks_by_voice: dict[int, list[NormativeChunk]]``: key = item.ordinal
+        (1-based), value = chunks per quella voce nel pool ranked. H8 content_agent
+        itera questo dict per generare cluster di slide per voce.
+      - ``chunks_module_dedup: list[NormativeChunk]``: union dedup di tutti i pool
+        (legacy format, preservato per popolare ``CourseContext.chunks_by_module``
+        ai fini telemetria/audit e per fallback path non-H8).
 
     For each ``SkeletonItem`` we call ``retrieval_v2.retrieve_for_subtopic``
     passing ``item.retrieval_query`` directly: that query is *already* a
@@ -195,11 +209,9 @@ async def materialize_module_from_skeleton(
       Cohere downgrade a topical-affinity telemetry.
 
     Results are concatenated preserving rank order, first-wins on duplicate
-    ``chunk_id``. ``relevance_score`` is set from the score so downstream
-    audit/quality checks read the same field as the legacy path.
-
-    Returns ``list[NormativeChunk]`` for ONE module (the caller assembles the
-    ``dict[int, list[NormativeChunk]]`` across modules).
+    ``chunk_id`` per il modulo-dedup. Il dict per-voce mantiene chunks
+    completi (non dedup cross-voce: i duplicati cross-voce sono semanticamente
+    legittimi e il content_agent li gestisce a livello cluster).
     """
     from app.config import settings
 
@@ -235,6 +247,7 @@ async def materialize_module_from_skeleton(
 
     seen: set[str] = set()
     out: list[NormativeChunk] = []
+    chunks_by_voice: dict[int, list[NormativeChunk]] = {}
 
     with timed(
         PipelinePhase.SKELETON_GENERATE,
@@ -267,12 +280,20 @@ async def materialize_module_from_skeleton(
                 course_id=course_id,
                 module_idx=skeleton.module_index,
             )
+            # H8: cattura chunks per voce (NON dedup cross-voce: contesto cluster
+            # per content_agent). relevance_score impostato su tutti per audit
+            # downstream coerente col path legacy.
+            voce_chunks: list[NormativeChunk] = []
             for sc in scored:
-                if sc.chunk.chunk_id in seen:
-                    continue
-                seen.add(sc.chunk.chunk_id)
                 sc.chunk.relevance_score = sc.score
-                out.append(sc.chunk)
+                voce_chunks.append(sc.chunk)
+                # Dedup module-level (first-wins su chunk_id) per il list legacy
+                if sc.chunk.chunk_id not in seen:
+                    seen.add(sc.chunk.chunk_id)
+                    out.append(sc.chunk)
+            chunks_by_voice[item.ordinal] = voce_chunks
         ev["subtopics"] = len(skeleton.items)
         ev["chunks_materialized"] = len(out)
-    return out
+        ev["chunks_by_voice_voices"] = len(chunks_by_voice)
+        ev["chunks_by_voice_total"] = sum(len(v) for v in chunks_by_voice.values())
+    return chunks_by_voice, out

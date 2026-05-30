@@ -253,6 +253,93 @@ def build_constraints_block(slide_distribution: dict[str, int]) -> str:
     return "\n".join(lines)
 
 
+def build_voice_prompt(
+    *,
+    module_index: int,
+    module_title: str,
+    voice_ordinal: int,
+    voice_sub_topic: str,
+    voice_retrieval_query: str,
+    voice_chunks: list[NormativeChunk],
+    slide_count_for_voice: int,
+    slide_distribution_for_voice: dict[str, int],
+    style_patterns: list[StylePattern],
+    previous_voices_summary: str,
+    target: TargetType,
+) -> str:
+    """H8 (2026-05-31): build prompt PER VOCE dello skeleton.
+
+    Diversamente da ``build_module_prompt`` (genera N slide free-form sull'union
+    dei chunks del modulo), questo prompt VINCOLA il LLM a generare
+    ``slide_count_for_voice`` slide ANCORATE al subtopic ``voice_sub_topic``,
+    usando SOLO i ``voice_chunks`` forniti.
+
+    Pattern di patologia che cura: sample-read M0 post-V1.5 ha mostrato
+    on-topic core 1.2% perche` il content_agent generava 84 slide free-form
+    sul chunks_by_module union e il LLM andava dove voleva, ignorando lo
+    skeleton 9-voci.
+
+    Vincolo prompt-level (rinforzo del filtro architettonico per-voce):
+      - "Genera N slide SOLO sul sotto-tema ``voice_sub_topic``"
+      - "Usa ESCLUSIVAMENTE i chunks forniti, NON inventare riferimenti"
+      - "Coerenza interna alla voce: tutti i bullets devono riferirsi al
+         sotto-tema dichiarato, NON sconfinare in altri argomenti del modulo"
+    """
+    chunks_text = ""
+    for i, chunk in enumerate(voice_chunks):
+        chunks_text += (
+            f"---\n[Chunk {i + 1}] {chunk.hierarchy_path}:\n"
+            f'"{chunk.body}"\n'
+            f"ID: {chunk.chunk_id} | Tipo: {chunk.chunk_type} | Tags: {chunk.tags}\n"
+        )
+
+    style_text = ""
+    if style_patterns:
+        sp = style_patterns[0]
+        style_text = (
+            f"PATTERN STILISTICI (metadati dai corsi approvati — NON usare come fonte normativa):\n"
+            f"- Tono: {sp.tone_register}\n"
+            f"- Media parole per slide: {sp.avg_words_per_slide}\n"
+        )
+
+    constraints_text = build_constraints_block(slide_distribution_for_voice)
+
+    base_prompt = (
+        f"MODULO {module_index}: {module_title}\n"
+        f"VOCE {voice_ordinal} (sotto-tema dello skeleton): {voice_sub_topic}\n"
+        f"Query di retrieval per la voce: {voice_retrieval_query}\n\n"
+        f"Slide da generare per QUESTA VOCE: {slide_count_for_voice} "
+        f"(distribuzione: {slide_distribution_for_voice})\n\n"
+        f"CHUNK NORMATIVI SELEZIONATI PER QUESTA VOCE:\n{chunks_text}---\n\n"
+        f"{constraints_text}\n\n"
+        f"{style_text}\n"
+        f"VOCI PRECEDENTI DEL MODULO (per coerenza narrativa, NON ripetere contenuti):\n"
+        f"{previous_voices_summary}\n\n"
+        f"VINCOLO H8 — coerenza voce:\n"
+        f"- Genera ESCLUSIVAMENTE {slide_count_for_voice} slide sul sotto-tema "
+        f"\"{voice_sub_topic}\".\n"
+        f"- Usa SOLO i chunks normativi forniti sopra; NON inventare riferimenti "
+        f"a decreti, articoli o normative non presenti nei chunks.\n"
+        f"- Ogni slide (titolo + bullets + speaker_notes) deve riferirsi al "
+        f"sotto-tema dichiarato; NON sconfinare in altri argomenti del modulo "
+        f"(es. M0 voce 'triangolo del fuoco' NON parla di formazione addetti o "
+        f"manutenzione impianti — quelli sono altre voci/moduli).\n\n"
+        f"Output: oggetto JSON con key 'slides' contenente {slide_count_for_voice} "
+        f"elementi SlideContent."
+    )
+
+    if target == TargetType.FORMATORE:
+        base_prompt += """
+
+ISTRUZIONI AGGIUNTIVE PER FORMATORE:
+- Almeno 1 slide CASE_STUDY se la voce ne prevede (vedi distribuzione)
+- speaker_notes devono contenere note metodologiche (come presentare il sotto-tema, tempi suggeriti)
+- Le citazioni normative devono essere complete (articolo + comma + decreto + data di emanazione)
+"""
+
+    return base_prompt
+
+
 def build_module_prompt(
     module: ModuleSpec,
     chunks: list[NormativeChunk],
