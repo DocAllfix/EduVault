@@ -129,6 +129,7 @@ class Settings(BaseSettings):
     v2_image_library_enabled: bool = False   # D4: image library prima di Pexels web
     v2_audio_provider_azure: bool = False    # D6: Azure Speech SDK con SSML (default edge-tts)
     v2_quality_badges_enabled: bool = False  # D9: badge UI slide problematiche
+    v2_b2_cosine_selector_enabled: bool = False  # F2.12 B2: top-K cosine_voyage selector (sostituisce Cohere ranking)
 
     @property
     def v2_features(self) -> dict[str, bool]:
@@ -149,6 +150,7 @@ class Settings(BaseSettings):
             "image_library_enabled": self.v2_image_library_enabled,
             "audio_provider_azure": self.v2_audio_provider_azure,
             "quality_badges_enabled": self.v2_quality_badges_enabled,
+            "b2_cosine_selector_enabled": self.v2_b2_cosine_selector_enabled,
         }
 
     # === Branding ===

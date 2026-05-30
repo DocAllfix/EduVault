@@ -187,15 +187,27 @@ async def materialize_module_from_skeleton(
     second LLM is double LLM, no informational gain, stochasticity injected
     into a path that should be deterministic).
 
-    Results are concatenated preserving rerank order, first-wins on duplicate
-    ``chunk_id``. ``relevance_score`` is set from the rerank score so
-    downstream audit/quality checks read the same field as the legacy path.
+    F2.12 B2 path (flag v2_b2_cosine_selector_enabled):
+      Quando il flag e' on, sostituisce Cohere rerank con cosine_voyage diretto
+      come selettore di pool top-K. Post-D-171-bis closure (analista
+      2026-05-30): cosine_voyage e' selettore di pool affidabile (ratio
+      A1_useful/B_useful >= 2.3x sui 5 moduli classify ciecamente disciplinati),
+      Cohere downgrade a topical-affinity telemetry.
+
+    Results are concatenated preserving rank order, first-wins on duplicate
+    ``chunk_id``. ``relevance_score`` is set from the score so downstream
+    audit/quality checks read the same field as the legacy path.
 
     Returns ``list[NormativeChunk]`` for ONE module (the caller assembles the
     ``dict[int, list[NormativeChunk]]`` across modules).
     """
-    # Lazy import to avoid a heavy import at module load when the flag is off.
-    from app.services.retrieval_v2 import retrieve_for_subtopic
+    from app.config import settings
+
+    # Branch su flag B2. Lazy import per non aumentare il footprint quando OFF.
+    if settings.v2_b2_cosine_selector_enabled:
+        from app.services.retrieval_v2 import retrieve_for_subtopic_b2 as _retriever
+    else:
+        from app.services.retrieval_v2 import retrieve_for_subtopic as _retriever  # type: ignore[assignment]
 
     seen: set[str] = set()
     out: list[NormativeChunk] = []
@@ -205,10 +217,14 @@ async def materialize_module_from_skeleton(
         course_id=course_id,
         module_idx=skeleton.module_index,
         module_title=skeleton.title,
-        source="materialize_by_subtopic",
+        source=(
+            "materialize_by_subtopic_b2"
+            if settings.v2_b2_cosine_selector_enabled
+            else "materialize_by_subtopic"
+        ),
     ) as ev:
         for item in skeleton.items:
-            scored = await retrieve_for_subtopic(
+            scored = await _retriever(
                 retrieval_query=item.retrieval_query,
                 regulation_ids=regulation_ids,
                 region=region,
