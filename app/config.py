@@ -130,6 +130,10 @@ class Settings(BaseSettings):
     v2_audio_provider_azure: bool = False    # D6: Azure Speech SDK con SSML (default edge-tts)
     v2_quality_badges_enabled: bool = False  # D9: badge UI slide problematiche
     v2_b2_cosine_selector_enabled: bool = False  # F2.12 B2: top-K cosine_voyage selector (sostituisce Cohere ranking)
+    v2_b3_cross_title_decay_enabled: bool = False  # F2.13 B3: cross-Titolo decay sul pool B2 (D-166 chiusura via top_section column)
+    b3_decay_factor: float = 0.4   # F2.13 B3: peso decay per chunk cross-titolo (analista sign-off 2026-05-30)
+    b3_threshold_ratio: float = 0.30  # F2.13 B3: soglia scarto = max_pool * ratio (auto-adattiva, sign-off analista)
+    b3_min_observations: int = 4   # F2.13 B3: numero minimo chunks per regulation per applicare decay. Se n_obs(rid) < soglia, dominante e' rumore statistico (3 obs split 2:1 = singola differenza) -> skip B3 sui chunks di quella regulation (do no harm sotto incertezza). Sign-off analista 2026-05-30 post-osservazione GEN M1 Art. 236 false-discard.
 
     @property
     def v2_features(self) -> dict[str, bool]:
@@ -151,6 +155,7 @@ class Settings(BaseSettings):
             "audio_provider_azure": self.v2_audio_provider_azure,
             "quality_badges_enabled": self.v2_quality_badges_enabled,
             "b2_cosine_selector_enabled": self.v2_b2_cosine_selector_enabled,
+            "b3_cross_title_decay_enabled": self.v2_b3_cross_title_decay_enabled,
         }
 
     # === Branding ===

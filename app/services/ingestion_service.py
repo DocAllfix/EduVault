@@ -1219,6 +1219,11 @@ async def index_chunks(chunks: list[dict[str, object]], pool: object) -> None:
     # + sessione 2026-05-28 (la migrazione 004 aveva aggiunto la colonna ma
     # nessuno la popolava a ingest-time, solo lo script backfill).
     regulation_titles: dict[str, str] = {}
+    # Cache regulation_slug per regulation_id (F2.13 D-166 chiusura strada A,
+    # 2026-05-30). Serve a popolare `top_section` in INSERT iniziale via
+    # `regulation_metadata.top_section_of(slug, article)`. Eliminata necessita'
+    # di backfill futuro per le nuove ingestioni.
+    regulation_slugs: dict[str, str] = {}
 
     async def _short_title(regulation_id: str) -> str:
         if regulation_id not in regulation_titles:
@@ -1227,6 +1232,14 @@ async def index_chunks(chunks: list[dict[str, object]], pool: object) -> None:
             )
             regulation_titles[regulation_id] = short_title_from_regulation(row or "")
         return regulation_titles[regulation_id]
+
+    async def _reg_slug(regulation_id: str) -> str:
+        if regulation_id not in regulation_slugs:
+            row = await pool.fetchval(  # type: ignore[attr-defined]
+                "SELECT slug FROM regulations WHERE id = $1", regulation_id,
+            )
+            regulation_slugs[regulation_id] = str(row) if row else ""
+        return regulation_slugs[regulation_id]
 
     batch_size = 500
     for i in range(0, len(chunks), batch_size):
@@ -1276,17 +1289,25 @@ async def index_chunks(chunks: list[dict[str, object]], pool: object) -> None:
                 short, art_trunc, par_trunc, hpath_trunc,
             )
 
+            # top_section per B3 cross-Titolo decay (F2.13 D-166 chiusura
+            # strada A, 2026-05-30). Popolato a ingest-time tramite TOC
+            # verificata (regulation_metadata.top_section_of), evita
+            # backfill futuro per nuove ingestioni.
+            from app.services.regulation_metadata import top_section_of
+            reg_slug = await _reg_slug(str(chunk["regulation_id"]))
+            top_section = top_section_of(reg_slug, art_trunc)
+
             try:
                 await pool.execute(  # type: ignore[attr-defined]
                     "INSERT INTO regulation_chunks "
                     "(regulation_id, article, paragraph, hierarchy_path, body, "
-                    "chunk_type, tags, embedding, content_hash, citation_label) "
-                    "VALUES ($1,$2,$3,$4,$5,$6,$7,$8::vector,$9,$10)",
+                    "chunk_type, tags, embedding, content_hash, citation_label, top_section) "
+                    "VALUES ($1,$2,$3,$4,$5,$6,$7,$8::vector,$9,$10,$11)",
                     chunk["regulation_id"], art_trunc, par_trunc,
                     hpath_trunc, chunk["body"],
                     classification["type"],
                     classification["tags"],
-                    embedding_literal, content_hash, citation_label,
+                    embedding_literal, content_hash, citation_label, top_section,
                 )
             except Exception as exc:
                 # Skip THIS chunk only — don't abort the whole batch (REI: un

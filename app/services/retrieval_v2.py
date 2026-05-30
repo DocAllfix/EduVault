@@ -878,5 +878,299 @@ async def retrieve_for_subtopic_b2(
     ]
 
 
+# ---------------------------------------------------------------------------
+# 7) F2.13 B3 — cross-Titolo decay sul pool B2 (D-166 chiusura strutturale)
+# ---------------------------------------------------------------------------
+
+
+async def apply_b3_cross_title_decay(
+    *,
+    pool_b2: list[ScoredChunk],
+    repo: KnowledgeRepository,
+    course_id: str | None = None,
+    module_idx: int | None = None,
+) -> list[ScoredChunk]:
+    """Applica B3 cross-Titolo decay sul pool selezionato da B2.
+
+    Architettura (analista sign-off 2026-05-30, strada A):
+      1. Per ogni chunk del pool B2, carica top_section dal DB
+         (regulation_chunks.top_section, popolato da migration 008 +
+         backfill_top_section.py).
+      2. Per ogni regulation_id presente nel pool, calcola Titolo dominante
+         = top_section con majority count (tie-break: primo in ordine
+         lessicale). Esclude "Sconosciuto" e NULL dal majority vote per non
+         contaminare la dominante (ma li lascia nel pool finale).
+      3. Per ogni chunk: se top_section != Titolo dominante per la sua
+         regulation, decay del peso (* B3_DECAY_FACTOR).
+      4. Soglia di scarto: se peso post-decay < (max_pool * B3_THRESHOLD_RATIO),
+         scarta. Soglia relativa, auto-adattiva cross-regime (analista
+         sign-off 2026-05-30).
+      5. Re-ordina per peso post-decay discendente; ritorna pool finale.
+
+    Log strutturato 8 campi per ogni chunk:
+      chunk_id, top_section, top_section_dominante, cosine_originale,
+      weight_post_decay, soglia_calcolata, decisione, regulation_id.
+
+    Flag b3_noop_reason emesso al livello pool quando:
+      - monosection: tutti i chunks della stessa regulation hanno stesso
+        top_section -> nessun decay possibile (atteso su single-section
+        regulations e su pool molto coerenti).
+      - low_confidence_dominante: dominante per regulation calcolata su
+        meno di 3 chunks (statistica debole). Pattern atteso su REGIME 3
+        corpus-thin per concetto (analista 2026-05-30).
+      - trivial_single_section_regulation: regulation in
+        SINGLE_SECTION_REGULATIONS (DM, Reg CE) -> tutti chunks same
+        top_section per costruzione.
+
+    Args:
+      pool_b2: output di retrieve_for_subtopic_b2 (top-K cosine_voyage).
+      repo: KnowledgeRepository per accesso pool.fetch.
+
+    Returns:
+      Pool post-B3 ordinato per peso decay-applicato discendente.
+    """
+    if not pool_b2:
+        emit(
+            PipelinePhase.GRAPH_TRAVERSAL,
+            course_id=course_id,
+            module_idx=module_idx,
+            source="b3_cross_title_decay",
+            extra_b3_noop_reason="empty_pool",
+        )
+        return []
+
+    # Step 1: carica top_section + regulation_id per ogni chunk del pool.
+    chunk_ids = [sc.chunk.chunk_id for sc in pool_b2]
+    pool = repo.pool
+    rows = await pool.fetch(
+        "SELECT id::text AS chunk_id, regulation_id::text AS rid, "
+        "top_section FROM regulation_chunks WHERE id = ANY($1::uuid[])",
+        chunk_ids,
+    )
+    # Mappa chunk_id -> (regulation_id, top_section).
+    meta_by_chunk: dict[str, tuple[str, str | None]] = {}
+    for r in rows:
+        meta_by_chunk[r["chunk_id"]] = (r["rid"], r["top_section"])
+
+    # Step 2: calcola Titolo dominante per regulation (esclude "Sconosciuto" e NULL).
+    # Per ogni regulation_id, conta majority dei top_section "buoni".
+    dominante_per_reg: dict[str, str | None] = {}
+    counts_per_reg: dict[str, dict[str, int]] = {}
+    for sc in pool_b2:
+        cid = sc.chunk.chunk_id
+        meta = meta_by_chunk.get(cid)
+        if meta is None:
+            continue
+        rid, ts = meta
+        if ts is None or ts == "Sconosciuto":
+            continue  # esclude da majority vote, ma chunks restano nel pool
+        counts_per_reg.setdefault(rid, {})[ts] = counts_per_reg.setdefault(rid, {}).get(ts, 0) + 1
+
+    # Per ogni regulation, scegli dominante (max count, tie-break lessicografico)
+    noop_reasons: list[str] = []
+    for rid, ts_counts in counts_per_reg.items():
+        if not ts_counts:
+            dominante_per_reg[rid] = None
+            continue
+        # Tie-break: ordina per (-count, top_section) per determinismo
+        sorted_ts = sorted(ts_counts.items(), key=lambda kv: (-kv[1], kv[0]))
+        winner = sorted_ts[0][0]
+        winner_count = sorted_ts[0][1]
+        dominante_per_reg[rid] = winner
+        # Flag low_confidence_dominante se dominante calcolata su < 3 chunks
+        if winner_count < 3:
+            noop_reasons.append(f"low_confidence_dominante:{rid}")
+        # Flag monosection se TUTTI chunks della regulation hanno stesso top_section
+        if len(ts_counts) == 1:
+            noop_reasons.append(f"monosection:{rid}")
+
+    # Trivial single-section regulations: rilevate dal mapping interno
+    from app.services.regulation_metadata import SINGLE_SECTION_REGULATIONS
+    # Risolvi slug per ogni regulation_id presente
+    reg_slug_rows = await pool.fetch(
+        "SELECT id::text AS rid, slug FROM regulations WHERE id = ANY($1::uuid[])",
+        list(set(meta[0] for meta in meta_by_chunk.values())),
+    )
+    slug_by_rid: dict[str, str] = {r["rid"]: r["slug"] for r in reg_slug_rows}
+    trivial_regs = {
+        rid for rid, slug in slug_by_rid.items()
+        if slug in SINGLE_SECTION_REGULATIONS
+    }
+    for rid in trivial_regs:
+        if rid in counts_per_reg:
+            noop_reasons.append(f"trivial_single_section_regulation:{rid}")
+
+    # Skip B3 per regulations con n_obs < B3_MIN_OBSERVATIONS (analista
+    # 2026-05-30 post-osservazione GEN M1 Art. 236 false-discard).
+    # Razionale: con < 4 osservazioni la dominante e' rumore statistico
+    # (3 obs split 2:1 e' determinata da un singolo chunk di differenza).
+    # Skip B3 in caso di bassa confidenza e' "do no harm" sotto incertezza:
+    # i chunks della regulation passano al ranking finale con peso originale
+    # (stesso comportamento di B2 solo, mai peggio del baseline pre-B3).
+    skip_low_obs_regs: set[str] = set()
+    min_obs = settings.b3_min_observations
+    for rid, ts_counts in counts_per_reg.items():
+        n_obs = sum(ts_counts.values())
+        if n_obs < min_obs:
+            skip_low_obs_regs.add(rid)
+            noop_reasons.append(
+                f"b3_skipped_insufficient_obs:{rid}:n_obs={n_obs}<{min_obs}"
+            )
+
+    # Step 3 + 4: applica decay e soglia scarto.
+    max_pool_score = max(sc.score for sc in pool_b2)
+    soglia_scarto = max_pool_score * settings.b3_threshold_ratio
+    decay_factor = settings.b3_decay_factor
+
+    survivors: list[ScoredChunk] = []
+    decay_log: list[dict[str, object]] = []
+    for sc in pool_b2:
+        cid = sc.chunk.chunk_id
+        meta = meta_by_chunk.get(cid)
+        cosine_orig = sc.score
+        if meta is None:
+            # Chunk senza meta nel DB: lascialo passare con peso originale
+            survivors.append(sc)
+            decay_log.append({
+                "chunk_id": cid,
+                "top_section": None,
+                "top_section_dominante": None,
+                "cosine_originale": round(cosine_orig, 4),
+                "weight_post_decay": round(cosine_orig, 4),
+                "soglia_calcolata": round(soglia_scarto, 4),
+                "decisione": "passthrough_no_meta",
+                "regulation_id": None,
+            })
+            continue
+
+        rid, ts = meta
+        dominante: str | None = dominante_per_reg.get(rid)
+
+        # Caso A: top_section coincide con dominante (o entrambi mancanti) -> nessun decay
+        if ts is not None and dominante is not None and ts == dominante:
+            survivors.append(sc)
+            decisione = "keep_same_titolo"
+            weight_post = cosine_orig
+        # Caso B: top_section "Sconosciuto" o NULL -> nessun decay (escluso da majority)
+        elif ts is None or ts == "Sconosciuto":
+            survivors.append(sc)
+            decisione = "keep_unclassified"
+            weight_post = cosine_orig
+        # Caso C: dominante non determinabile (regulation senza majority) -> nessun decay
+        elif dominante is None:
+            survivors.append(sc)
+            decisione = "keep_no_dominante"
+            weight_post = cosine_orig
+        # Caso D: regulation con insufficient observations -> skip B3 (do no harm)
+        elif rid in skip_low_obs_regs:
+            survivors.append(sc)
+            decisione = "keep_skipped_insufficient_obs"
+            weight_post = cosine_orig
+        else:
+            # Cross-titolo: applica decay
+            weight_post = cosine_orig * decay_factor
+            if weight_post < soglia_scarto:
+                decisione = "discard_below_threshold"
+                # NON aggiungo a survivors
+            else:
+                decisione = "decay_kept"
+                # Riassegno il peso al ScoredChunk per ordinamento finale
+                survivors.append(
+                    ScoredChunk(chunk=sc.chunk, score=weight_post, source="b3_decayed")
+                )
+
+        decay_log.append({
+            "chunk_id": cid,
+            "top_section": ts,
+            "top_section_dominante": dominante,
+            "cosine_originale": round(cosine_orig, 4),
+            "weight_post_decay": round(weight_post, 4),
+            "soglia_calcolata": round(soglia_scarto, 4),
+            "decisione": decisione,
+            "regulation_id": rid,
+        })
+
+    # Re-ordina per peso (post-decay) discendente
+    survivors.sort(key=lambda sc: -sc.score)
+
+    # Telemetria pool-level
+    # Conta decisioni per stampa diagnostica nel summary
+    decision_counts: dict[str, int] = {}
+    for entry in decay_log:
+        d = str(entry.get("decisione", "unknown"))
+        decision_counts[d] = decision_counts.get(d, 0) + 1
+
+    # Dominante per regulation (per diagnostica)
+    dominante_summary = {
+        rid: dom for rid, dom in dominante_per_reg.items() if dom is not None
+    }
+
+    emit(
+        PipelinePhase.GRAPH_TRAVERSAL,
+        course_id=course_id,
+        module_idx=module_idx,
+        source="b3_cross_title_decay",
+        extra_pool_in_size=len(pool_b2),
+        extra_pool_out_size=len(survivors),
+        extra_max_pool_score=round(max_pool_score, 4),
+        extra_soglia_scarto=round(soglia_scarto, 4),
+        extra_b3_noop_reason=";".join(noop_reasons) if noop_reasons else "active",
+        extra_decay_factor=decay_factor,
+        extra_threshold_ratio=settings.b3_threshold_ratio,
+        extra_decision_counts=decision_counts,
+        extra_dominante_per_regulation=dominante_summary,
+    )
+
+    # Log per-chunk (livello debug, alto volume): emesso via logger.info per
+    # cattura dai test strumentati. Su prod (livello WARNING/INFO) viene
+    # filtrato; lo script di run strumentato configura level=DEBUG per
+    # ricevere questi eventi.
+    logger.info(
+        "b3_per_chunk_log",
+        phase="b3_cross_title_decay_per_chunk",
+        course_id=course_id,
+        module_idx=module_idx,
+        decay_log=decay_log,
+    )
+
+    return survivors
+
+
+async def retrieve_for_subtopic_b2_b3(
+    *,
+    retrieval_query: str,
+    regulation_ids: list[str],
+    region: str,
+    repo: KnowledgeRepository,
+    course_id: str | None = None,
+    module_idx: int | None = None,
+    top_k: int = B2_TOP_K_DEFAULT,
+) -> list[ScoredChunk]:
+    """B2 + B3 in serie (analista sign-off 2026-05-30 H7).
+
+    1. B2 selettore di pool: top-K cosine_voyage dal pool RRF top-100.
+    2. B3 cross-Titolo decay: decay×0.4 + soglia scarto auto-adattiva.
+
+    Solo questo wrapper deve essere chiamato in production. retrieve_for_subtopic_b2
+    e apply_b3_cross_title_decay restano esposte separatamente solo per testing
+    isolato delle singole fasi.
+    """
+    pool_b2 = await retrieve_for_subtopic_b2(
+        retrieval_query=retrieval_query,
+        regulation_ids=regulation_ids,
+        region=region,
+        repo=repo,
+        course_id=course_id,
+        module_idx=module_idx,
+        top_k=top_k,
+    )
+    return await apply_b3_cross_title_decay(
+        pool_b2=pool_b2,
+        repo=repo,
+        course_id=course_id,
+        module_idx=module_idx,
+    )
+
+
 # math import only used here so far; keep at end so isort/ruff don't move it.
 _ = math  # silence unused-import in case future refactor removes it

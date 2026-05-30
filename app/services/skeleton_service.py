@@ -203,9 +203,14 @@ async def materialize_module_from_skeleton(
     """
     from app.config import settings
 
-    # Branch su flag B2. Lazy import per non aumentare il footprint quando OFF.
-    if settings.v2_b2_cosine_selector_enabled:
-        from app.services.retrieval_v2 import retrieve_for_subtopic_b2 as _retriever
+    # Branch su flag B2/B3. Lazy import per non aumentare il footprint quando OFF.
+    # Ordine architetturale (analista H7 2026-05-30): B2 selettore + B3 decay
+    # SEMPRE in serie, mai B3 da solo. Quando flag B3 ON ma B2 OFF, comportamento
+    # invariato (B3 richiede pool B2 in input).
+    if settings.v2_b3_cross_title_decay_enabled and settings.v2_b2_cosine_selector_enabled:
+        from app.services.retrieval_v2 import retrieve_for_subtopic_b2_b3 as _retriever
+    elif settings.v2_b2_cosine_selector_enabled:
+        from app.services.retrieval_v2 import retrieve_for_subtopic_b2 as _retriever  # type: ignore[assignment]
     else:
         from app.services.retrieval_v2 import retrieve_for_subtopic as _retriever  # type: ignore[assignment]
 

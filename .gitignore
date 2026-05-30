@@ -104,3 +104,10 @@ scripts/check_d_corpus_vs_d_rerank.py
 scripts/check_articles_in_recall_pool.py
 scripts/extract_groundtruth_cprime.py
 scripts/analyze_groundtruth_spearman.py
+scripts/e2e_ant_l1_b2.py
+scripts/_get_brand_preset_id.py
+scripts/_check_toc_titolo_atteso.py
+scripts/apply_migration_008.py
+scripts/backfill_top_section.py
+scripts/run_b3_strumentato.py
+scripts/_check_top5_titoli.py

@@ -376,6 +376,18 @@ Lezione D-160 estesa: regex misura pattern noto del giorno; pattern emergente è
 
 **Applicazione operativa**: da H9 in avanti, ogni E2E del refactor passa per sample-read PPTX modulo per modulo come gate primario (analista). Regex resta come proxy veloce.
 
+### D-170 — Per baked-in data del DB, fonte istituzionale primaria + secondaria solo come reading aid (analista 2026-05-30 lezione catalogabile)
+
+**D-170 — "Bosetti out-of-date di ~2 anni in alcuni punti è esattamente il tipo di errore che sopravvive in silenzio"** (analista 2026-05-30 post verifica TOC D.Lgs 81/08).
+
+Per qualunque baked-in data del DB (campi persistenti che vivranno per anni), la regola è:
+1. **Fonte istituzionale primaria**: Normattiva (testo coordinato vigente, SLA istituzionale sull'aggiornamento, cattura correttivi recenti).
+2. **Fonte professionale secondaria come reading aid**: Bosetti, sezioni ministeriali, ecc. Mai oracolo finale per fatti baked-in.
+
+**Caso concreto registrato**: Bosetti dichiarava "Allegato I-bis NON ESISTE" (testo 2008 originale). Normattiva confermava esistenza Allegato I-bis introdotto da D.L. 19/2024 (patente a punti) citato Art. 27 c.6. Bosetti out-of-date di ~2 anni. Se avessi compilato `regulation_metadata.py` solo su Bosetti, top_section dei chunks Allegato I-bis sarebbe stato classificato "Sconosciuto" per anni senza alcun sensore che lo segnalasse — pattern silent-error che la disciplina deve prevenire alla fonte.
+
+**Pattern generale**: nessun sensore B3 ti dice mai "top_section di questi 200 chunks è stato calcolato su TOC vecchia di due anni". L'errore non emerge come failure, emerge come slow drift. La cura è strutturale (fonte istituzionale primaria) non operativa (review riga-per-riga post-compilazione).
+
 ### B3 SIGN-OFF analista 2026-05-30 con 3 raffinamenti
 
 (a) **Decay×0.4 + soglia scarto, NON hard-scarto cross-titolo**. Ragione: hard-scarto non recuperabile da cosine_voyage alto. Se chunk Titolo IV Cantieri ha *altissimo* cosine_voyage al subtopic (perché parla anche di prevenzione incendi in cantieri), hard-scarto lo elimina senza chance. Decay×0.4 + soglia lo lascia in gioco se cosine compensa. Architetturalmente più robusto.
