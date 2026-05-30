@@ -203,12 +203,31 @@ async def materialize_module_from_skeleton(
     """
     from app.config import settings
 
-    # Branch su flag B2/B3. Lazy import per non aumentare il footprint quando OFF.
-    # Ordine architetturale (analista H7 2026-05-30): B2 selettore + B3 decay
-    # SEMPRE in serie, mai B3 da solo. Quando flag B3 ON ma B2 OFF, comportamento
-    # invariato (B3 richiede pool B2 in input).
-    if settings.v2_b3_cross_title_decay_enabled and settings.v2_b2_cosine_selector_enabled:
-        from app.services.retrieval_v2 import retrieve_for_subtopic_b2_b3 as _retriever
+    # Branch su flag B2/B3/B4. Lazy import per non aumentare il footprint quando OFF.
+    # Ordine architetturale (analista H7 2026-05-30): B2 selettore + B3 decay +
+    # B4 corpus-thin SEMPRE in serie, mai stadi successivi da soli (richiedono
+    # output dello stadio precedente).
+    # F2.14 B4 (analista 2026-05-30 (c) Caso 1): wrapper b2_b3_b4 ritorna tuple
+    # (chunks, b4_decisions); per uniformare la firma del retriever con i path
+    # legacy, qui usiamo un closure adapter che scarta il secondo elemento.
+    from typing import Awaitable, Callable
+    from app.services.retrieval_v2 import ScoredChunk as _ScoredChunk
+
+    _Retriever = Callable[..., Awaitable[list[_ScoredChunk]]]
+
+    if (
+        settings.v2_b4_corpus_thin_enabled
+        and settings.v2_b3_cross_title_decay_enabled
+        and settings.v2_b2_cosine_selector_enabled
+    ):
+        from app.services.retrieval_v2 import retrieve_for_subtopic_b2_b3_b4 as _retriever_b4
+
+        async def _retriever(**kwargs: object) -> list[_ScoredChunk]:
+            # Estrae voice_idx dai kwargs per propagarlo a B4
+            survivors, _b4_decisions = await _retriever_b4(**kwargs)  # type: ignore[arg-type]
+            return survivors
+    elif settings.v2_b3_cross_title_decay_enabled and settings.v2_b2_cosine_selector_enabled:
+        from app.services.retrieval_v2 import retrieve_for_subtopic_b2_b3 as _retriever  # type: ignore[assignment]
     elif settings.v2_b2_cosine_selector_enabled:
         from app.services.retrieval_v2 import retrieve_for_subtopic_b2 as _retriever  # type: ignore[assignment]
     else:
@@ -229,7 +248,18 @@ async def materialize_module_from_skeleton(
         ),
     ) as ev:
         for item in skeleton.items:
+            # F2.14 B4: passa voice_idx per log strutturato per voce.
+            # I retriever B2/B3 ignorano voice_idx (kwargs extra), il
+            # wrapper b2_b3_b4 lo usa per la telemetria B4.
             scored = await _retriever(
+                retrieval_query=item.retrieval_query,
+                regulation_ids=regulation_ids,
+                region=region,
+                repo=repo,
+                course_id=course_id,
+                module_idx=skeleton.module_index,
+                voice_idx=item.ordinal,
+            ) if settings.v2_b4_corpus_thin_enabled and settings.v2_b3_cross_title_decay_enabled and settings.v2_b2_cosine_selector_enabled else await _retriever(
                 retrieval_query=item.retrieval_query,
                 regulation_ids=regulation_ids,
                 region=region,

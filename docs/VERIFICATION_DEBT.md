@@ -388,6 +388,145 @@ Per qualunque baked-in data del DB (campi persistenti che vivranno per anni), la
 
 **Pattern generale**: nessun sensore B3 ti dice mai "top_section di questi 200 chunks è stato calcolato su TOC vecchia di due anni". L'errore non emerge come failure, emerge come slow drift. La cura è strutturale (fonte istituzionale primaria) non operativa (review riga-per-riga post-compilazione).
 
+### F2.13 B3 H9 PASS (analista sample-read M0 PPTX ANT L1 post-B3, 2026-05-30)
+
+**Verdict definitivo B3** (analista 2026-05-30 sample-read PPTX `ANT_L1_36c9cf96.pptx` slide per slide + lettura log strutturati JSON):
+
+- **Sample-read M0 84 slide**: ~11 slide problematiche / 84 = **13% residuo strutturale**.
+- **Baseline pre-B3** (sample-read 2026-05-30): 42% problematico.
+- **Riduzione 29 punti percentuali**, sotto target ricalibrato 15-20%.
+
+**B3 ha intercettato i cross-Titolo strutturali veri** (log evidence):
+- Art. 121/132 (Titolo IV Cantieri) decadenti su v3/v4/v6/v8 — 4 voci diverse
+- Art. 89 (esplosivi Cantieri) decadente
+- Art. 223/224/225 (Titolo IX agenti chimici) decadenti su v3/v8
+- Allegato L/XLIX (ATEX) decadenti su v4/v6
+- Allegato IV (Titolo II Luoghi di lavoro) decadente su v4/v6/v8
+- Art. 288 (ATEX) decadente
+- M0 v6 "Prodotti combustione" più contaminata: pool 30→22 con 8 hard-discard
+
+**`b3_skipped_insufficient_obs` funziona attivamente** (NON solo nel principio):
+- DM 01/09/2021 (n_obs=1-3) skip su tutte e 8 le voci M0 → corpus thin protetto
+- DM 02/09/2021 skip su alcune voci
+
+**Residuo 13% scomposto** (sample-read analista 84 slide):
+- 2 slide cross-scope contenuto (slide 40 meta-formazione tipo C, slide 72 sostanze chimiche)
+- 7 slide (73-79) cracking normative_ref: contenuto on-topic ma ref Allegato XLI Titolo IX
+- 1 slide normativamente datata (slide 44, D.M. 3 agosto 2015 abrogato da DM 03/09/2021)
+- ~1 altro
+
+**Decisioni aggregate sulle 32 voci × 30 chunks = 960 decisi**:
+- keep_same_titolo: 784 (81.7%)
+- decay_kept: 106 (11.0%)
+- discard_below_threshold: 46 (4.8%)
+- keep_unclassified: 24 (2.5%)
+- Soglia 0.30 confermata: NON troppo aggressiva ma neanche dorme (152 chunks cross-titolo = 15.8% del totale)
+
+**noop_reason distribution** (su 32 voci):
+- monosection 94 + trivial_single_section 91 + b3_skipped_insufficient_obs 33 + low_confidence_dominante 23
+
+### Osservazione architetturale H8 triangolata (3 casi consolidati, post sample-read M0)
+
+Lo skeleton M0 ha 8 voci tematiche su Principi dell'incendio, MA il PPTX M0 ha solo ~15-20 slide / 84 tematicamente coerenti con queste 8 voci. Le altre 60-65 slide trattano Strategia antincendio luoghi lavoro (1-16), GSA e manutenzione (17-30, 51-70), definizioni luogo di lavoro + obblighi datore (41-50, 71), prevenzione sostanze infiammabili (72-80). Tutti argomenti legittimi per Antincendio L1 ma appartenenti ad altri moduli del corso (M1/M2/M3).
+
+**Diagnosi (analista 2026-05-30)**: content_agent riceve chunks_by_module (union+dedup di 8 pool delle voci M0) e LLM genera 84 slide libere sul pool aggregato. Le 8 voci dello skeleton funzionano da **driver di retrieval**, ma NON da **vincolo organizzativo della generazione**. Una voce v6 "Prodotti combustione" può attirare chunks su "controllo fumi e calore" o "manutenzione impianti antincendio" (cosine alto su parole chiave "fumi", "impianti"), e LLM li usa per generare slide su "Controllo fumi" — tematicamente legittimo per Antincendio L1 ma appartiene a M2 Protezione, non M0 Principi.
+
+**H8 triangolato consolidato** (3 casi distinti):
+1. PRE M3 voce 1 (near-miss non definito in D.Lgs)
+2. GEN M1 voce 1 (Definizione rischio non centrale in D.Lgs)
+3. ANT M0 sample-read (skeleton-as-driver-not-vincolo, 60-65 slide / 84 tematicamente di M1/M2/M3)
+
+Cura H8: scheletro doppio livello con vincolo slide-to-voce. NON B3 (B3 fa il suo lavoro su cross-Titolo strutturali), NON B4 (B4 farà signaling corpus-thin). H8 strutturalmente curativo sul retrieval.
+
+### Slide 73-79 cracking ref - diagnosi precisa post-log
+
+B3 ha decadere chunks Art. 223-225 (Titolo IX) su voci v3 e v8 ma con `decay_kept` (sopravvissuti sopra soglia 0.13). Cosine pre-decay 0.34-0.39, weight post-decay 0.13-0.16, soglia 0.13 (max_pool × 0.30). **Al pelo sopra soglia.** LLM su voci come "Conseguenze incendio" o "Comburenti" li ha attinti come 2° o 3° best quando il primo era chunk DM con cosine appena più alto. Risultato: contenuto sostanze infiammabili viene riformulato dal LLM in chiave antincendio (corretto tematicamente — sostanze infiammabili È in scope antincendio), ma cita normativa Titolo IX (sbagliato semanticamente — Allegato XLI è metodiche misurazione UNI EN 689 agenti chimici, non antincendio).
+
+**Cura corretta (analista 2026-05-30, ordine di preferenza):**
+
+1. **D-161 light sul corpus** (mezz'ora): query SQL sui chunks Allegato XLI specifici, leggi 5 body interi. Decisione: stanno nel corpus o vanno marcati `parsing_ambiguous_for_antincendio_context`?
+2. **B4 D9 vincolante con segnale ref-mismatch** (sensore: pool finale voce con chunks decay_kept top_section "lontana semanticamente" dal course_type → flag `ref_quality_warning` sulle slide generate). NON blocca, marca per review. F2.15 estesa.
+3. **H8 scheletro doppio livello** con voci più strette → query M0 v6 più specifica e Allegato XLI ha cosine inferiore al cutoff B2 a monte. Curato strutturalmente sul retrieval.
+
+NON abbassare soglia generale a 0.40 (diventerebbe troppo aggressivo sui regimi 2-3).
+
+### B4 SIGN-OFF FINALE (c) Caso 1 solo (analista 2026-05-30, post D-161 light)
+
+**D-161 light eseguito**: query SQL sui 23 chunks Allegato XLI catturati ILIKE (di cui 3 veri Allegato XLI, restanti XLII/altri). Body[:800] sui 3 veri:
+- Chunk 1 (22 KB): "metodiche appropriate", "valori limite esposizione professionale", "rimuove cause superamento" — agenti chimici puro
+- Chunk 2 (8 KB): "agenti cancerogeni, mutageni, sostanze tossiche per la riproduzione" — cancerogeni Titolo IX puro
+- Chunk 3 (2.8 KB): "UNI EN 481:1994 frazioni granulometriche", "UNI EN 482:1998 procedimenti misurazione agenti chimici" — UNI metodiche agenti chimici puro
+
+**Verdict D-161**: Allegato XLI è 100% Titolo IX puro (corpus onesto, NON parsing-ambiguous). Cura non è marcare il corpus, è B4 + H8 a valle.
+
+**Pattern emerso (D-173 nuovo work-item registrato)**: cosine_voyage vede convergenza terminologica generica (sostanze pericolose è linguaggio condiviso fra antincendio e chimico) NON divergenza di scope strutturale. Non risolvibile con B2/B3/B4 — limite del modello embedding stesso. Esplorativo lunga gittata: re-ranker semantico stretto o prompt-side filtering. Backlog.
+
+**Accountability bilaterale (analista 2026-05-30)**: il Caso 2 ("pool dominato regulation cross-scope") e Caso 3 ("decay_kept top_section lontana semanticamente dal course_type") che l'analista aveva proposto al turno precedente richiedono entrambi sapere "cosa è in scope per `antincendio_livello_1`" — esattamente **Tabella 2 course_type → expected_titoli** che era stata esclusa da B3 per ragioni di scaling/cliente-specificità. Riproporli per B4 sarebbe Tabella 2 mascherata da ref_quality_warning. Riconosciuto e ritirato dall'analista. Coerenza disciplinare: regola "no Tabella 2 hardcoded" vale per B3 come per B4.
+
+**Distinzione importante registrata**: Tabella 2 hardcoded dall'operatore non-esperto è curatela errore-prone. Tabella 2 come campo `expected_top_sections` del catalog DB popolato dal cliente esperto al setup corso è dichiarazione esperta — legittima. Ma è F2.13 D8 (catalog DB) work-item separato, NON F2.14 B4.
+
+**B4 SCOPE FINALE (c)**: solo Caso 1 corpus thin per regulation. Caso 2 + 3 vanno a F2.13 D8 catalog DB (futuro) + H8 (futuro).
+
+### B4 ARCHITETTURA DEFINITIVA (analista sign-off 2026-05-30)
+
+**Caso 1 Corpus thin per regulation**:
+- Condizione: per voce dello skeleton, per ogni regulation con chunks nel pool finale post-B3, conta `n_chunks_per_regulation_per_voce`.
+- Se `n_chunks < B4_MIN_CHUNKS_PER_VOICE` (default 3, env-override) → la regulation X è corpus thin per la voce Y.
+- Behaviour configurabile via `B4_CORPUS_THIN_BEHAVIOR`:
+  - **`block`** (DEFAULT, scelta sicura): blocca generazione voce + emit warning visibile in `generation_jobs.status` ("voice_X_corpus_insufficient:regulation_Y_n_chunks=N") → UI mostra all'operatore prima del replay, opportunità di ampliare ingestion o riformulare skeleton.
+  - **`mark_only`**: scappatoia per chi sa cosa sta facendo. Genera comunque + scrive metadata `low_corpus_confidence` sulle slide per analytics/dashboard. Non protegge cliente.
+- Metadata `low_corpus_confidence` SEMPRE attiva indipendentemente dal behavior (dato disponibile sempre per analytics/dashboard future).
+
+**Log strutturato B4 minimo (analista sign-off 2026-05-30)**:
+```
+{
+  voce_idx, regulation_id, n_chunks, soglia,
+  decisione: block | mark_only | passthrough,
+  behavior_config
+}
+```
+
+Inoltre `n_chunks_per_regulation_per_voce` come campo per voce sempre nel log (anche quando NON scatta) → permette analisi distribuzione reale per calibrazione soglia su evidenza, NON a priori.
+
+**Soglia default 3**: analista start point. Dai dati log ANT M0 (DM 01/09 con n_obs=1-3 su 8 voci), soglia 3 morde quasi tutto, soglia 4 morderebbe tutto. Calibrazione dai prossimi E2E.
+
+### MAPPA WORK-ITEM RESIDUI POST B4(c) (analista 2026-05-30, registrata per chiusura)
+
+Scomposizione del residuo 13% sample-read M0:
+- **Slide 51-54** (corpus thin DM 01/09) → **B4(c) ora**, atteso block o mark in base a config
+- **Slide 40** DIAGRAM "formatori antincendio corso tipo C" (meta-formazione intra-Titolo I) → **H8** scheletro doppio livello con vincolo voce→slide
+- **Slide 72** valori limite agenti chimici Allegato XLI → **F2.13 D8 catalog DB** quando popolato + **H8** scheletro stretto su voci specifiche
+- **Slide 73-79** cracking ref Allegato XLI con contenuto on-topic sostanze infiammabili → **F2.13 D8 catalog** + considerazione policy editoriale separata (rewrite del normative_ref a "DM 03/09/2021 sostanze infiammabili" dove contenuto lo giustifica — scelta prodotto, da discutere col cliente)
+- **Slide 44** "Applicazione DM 03/08/2015" abrogato → **D-161 vero** sul corpus, marcatura o rimozione decreto abrogato
+- **Voce → slide drift architetturale** (60+ slide M0 oltre le 8 voci skeleton) → **H8** root cause strutturalmente più grosso ma meno bloccante (drift produce slide tematicamente ragionevoli per corso, solo non allineate alla tassonomia voce)
+
+### D-173 (analista 2026-05-30, backlog lunga gittata)
+
+**D-173 — "Limite cosine_voyage convergenza terminologica fra domini."** cosine_voyage vede convergenza terminologica generica (es. "sostanze pericolose" come linguaggio condiviso fra antincendio e chimico) NON divergenza di scope strutturale (incendio vs chimico sono domini distinti). Non risolvibile con B2/B3/B4 — è limite del modello embedding stesso (dense embedding su corpus normativo italiano con vocabolario sovrapposto).
+
+**Esplorativo lunga gittata**:
+- (a) Re-ranker semantico più stretto post-cosine_voyage (cross-encoder fine-tuned italiano-normativo). Coincide con D-172-old, F2.18 esplorativo.
+- (b) Prompt-side filtering sulla generazione (LLM filtra chunks pre-prompt sulla base di criteri scope-aware ricevuti via system prompt). Non urgente.
+
+Backlog lunga gittata, NON F2.14 scope.
+
+### F2.14 B4 SPECIFICHE estese dall'E2E (analista sign-off 2026-05-30)
+
+B4 D9 vincolante deve gestire 2 casi specifici emersi:
+
+**Caso 1: Corpus thin con generazione che procede comunque**
+- Esempio: DM 01/09/2021 n_obs=1-3 su tutte le 8 voci M0 → skip_insufficient_obs scatta MA generazione PPTX procede. Slide 51-54 "Manutentore qualificato" "Formazione manutentori" da DM 01/09, contenuto plausibile ma fonte sottile.
+- B4 deve: "voce con regulation a n_obs<N_SOGLIA → limita slide_count per quella voce" OPPURE "blocca generazione e segnala corpus_insufficiente".
+- **Soglia proposta**: `B4_MIN_CHUNKS_PER_REGULATION_PER_VOICE=4` (parallela a `B3_MIN_OBSERVATIONS=4`).
+
+**Caso 2: Pool dominato da regulation cross-scope**
+- Esempio futuro: corso antincendio dove una voce ha pool dominato (>50%) da chunks la cui top_section è strutturalmente cross-scope rispetto al course_type (es. Titolo IX agenti chimici dominante in corso Antincendio).
+- B4 deve: riconoscere la firma e bloccare/marcare. Sensore contaminazione esteso F2.14.
+
+### Metodo confermato (analista 2026-05-30)
+
+"La sequenza 'leggere log + sample-read PPTX insieme' è il gate giusto. Senza il log non sapevo che Allegato XLI fosse decay_kept e non hard-discarded; senza il render non avrei visto le slide 73-79 con normative_ref cracking. I numeri aggregati (15.8% decisioni cross-titolo, 4.8% scartate hard) sono utili come dashboard ma non sufficienti — il 'perché' sta nel sample, non nella media."
+
 ### B3 SIGN-OFF analista 2026-05-30 con 3 raffinamenti
 
 (a) **Decay×0.4 + soglia scarto, NON hard-scarto cross-titolo**. Ragione: hard-scarto non recuperabile da cosine_voyage alto. Se chunk Titolo IV Cantieri ha *altissimo* cosine_voyage al subtopic (perché parla anche di prevenzione incendi in cantieri), hard-scarto lo elimina senza chance. Decay×0.4 + soglia lo lascia in gioco se cosine compensa. Architetturalmente più robusto.

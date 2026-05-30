@@ -1172,5 +1172,177 @@ async def retrieve_for_subtopic_b2_b3(
     )
 
 
+# ---------------------------------------------------------------------------
+# 7) F2.14 B4 — D9 vincolante corpus-thin per voce (Caso 1 solo)
+# ---------------------------------------------------------------------------
+#
+# Architettura analista sign-off 2026-05-30 (post D-161 light + sample-read M0):
+#   - B4 agisce sul pool finale di UNA voce (post B2+B3), per regulation.
+#   - Per ogni regulation: se n_chunks(rid) < B4_MIN_CHUNKS_PER_VOICE -> corpus
+#     thin per quella voce su quella regulation.
+#   - Behavior configurabile:
+#     - "block" (default sicura): rimuove i chunks delle regulations corpus-thin
+#       dal pool finale. Emit warning. Se TUTTO il pool e' corpus thin -> voce
+#       bloccata interamente, materialize ritornera' lista vuota per la voce e
+#       generation_jobs.status logghera' voice_X_corpus_insufficient.
+#     - "mark_only": NON rimuove. Marca i chunks con metadata
+#       low_corpus_confidence per analytics/dashboard. Permette generazione.
+#   - Log strutturato per voce con n_chunks_per_regulation_per_voce sempre
+#     emesso (anche quando NON scatta) per calibrazione soglia su evidenza.
+#
+# Scope B4 (c) (analista sign-off): SOLO Caso 1 corpus thin per regulation.
+# Caso 2 (pool dominato regulation cross-scope) e Caso 3 (decay_kept top_section
+# lontana) richiederebbero Tabella 2 course_type -> expected_titoli, che e'
+# F2.13 D8 catalog DB + H8 work-item futuri, NON F2.14.
+
+
+async def apply_b4_corpus_thin_check(
+    *,
+    voice_pool: list[ScoredChunk],
+    voice_idx: int | None = None,
+    course_id: str | None = None,
+    module_idx: int | None = None,
+) -> tuple[list[ScoredChunk], list[dict[str, object]]]:
+    """B4 D9 corpus-thin check per voce (Caso 1).
+
+    Args:
+      voice_pool: chunks post-B2+B3 di una singola voce
+      voice_idx: ordinale della voce nello skeleton (per log)
+      course_id, module_idx: telemetria
+
+    Returns:
+      (survivors, decisions_log)
+      - survivors: lista filtrata (su behavior="block") o invariata (mark_only).
+        Su mark_only i chunks corpus-thin sono ancora presenti ma annotati nel
+        log come "marked_low_corpus_confidence" (la marcatura va propagata a
+        slide metadata downstream — vedi skeleton_service caller).
+      - decisions_log: lista per-regulation con campi
+        {voce_idx, regulation_id, n_chunks, soglia, decisione, behavior_config}
+    """
+    if not voice_pool:
+        return voice_pool, []
+
+    soglia = settings.b4_min_chunks_per_voice
+    behavior = settings.b4_corpus_thin_behavior
+
+    # Conta n_chunks per regulation_id nel pool della voce
+    chunks_by_reg: dict[str, list[ScoredChunk]] = {}
+    for sc in voice_pool:
+        rid = sc.chunk.regulation_id
+        chunks_by_reg.setdefault(rid, []).append(sc)
+
+    # Per ogni regulation determina decisione
+    decisions: list[dict[str, object]] = []
+    survivors: list[ScoredChunk] = []
+    blocked_chunks_ids: set[str] = set()
+
+    for rid, sc_list in chunks_by_reg.items():
+        n_chunks = len(sc_list)
+        corpus_thin = n_chunks < soglia
+
+        if not corpus_thin:
+            # Sufficiente -> tutti i chunks passano senza marca
+            for sc in sc_list:
+                survivors.append(sc)
+            decision = "passthrough_sufficient"
+        elif behavior == "block":
+            # Block: rimuovi i chunks della regulation dal pool
+            for sc in sc_list:
+                blocked_chunks_ids.add(sc.chunk.chunk_id)
+            decision = "block"
+        else:
+            # mark_only: lascia chunks nel pool, annota nel log per metadata
+            # downstream (skeleton_service caller propaga low_corpus_confidence
+            # a slide metadata)
+            for sc in sc_list:
+                survivors.append(sc)
+            decision = "mark_only"
+
+        decisions.append({
+            "voce_idx": voice_idx,
+            "regulation_id": rid,
+            "n_chunks": n_chunks,
+            "soglia": soglia,
+            "decisione": decision,
+            "behavior_config": behavior,
+            "chunk_ids": [sc.chunk.chunk_id for sc in sc_list] if corpus_thin else [],
+        })
+
+    # Telemetria pool-level
+    n_total_in = len(voice_pool)
+    n_total_out = len(survivors)
+    n_regulations_corpus_thin = sum(
+        1 for d in decisions if d["decisione"] in ("block", "mark_only")
+    )
+
+    emit(
+        PipelinePhase.GRAPH_TRAVERSAL,
+        course_id=course_id,
+        module_idx=module_idx,
+        source="b4_corpus_thin_check",
+        extra_voice_idx=voice_idx,
+        extra_pool_in_size=n_total_in,
+        extra_pool_out_size=n_total_out,
+        extra_n_regulations_corpus_thin=n_regulations_corpus_thin,
+        extra_soglia=soglia,
+        extra_behavior_config=behavior,
+        extra_n_chunks_per_regulation={
+            d["regulation_id"]: d["n_chunks"] for d in decisions
+        },
+        extra_decisions_summary={
+            d["regulation_id"]: d["decisione"] for d in decisions
+        },
+    )
+
+    # Log per-decisione (analytics/dashboard)
+    logger.info(
+        "b4_corpus_thin_per_voice_log",
+        phase="b4_corpus_thin_per_voice",
+        course_id=course_id,
+        module_idx=module_idx,
+        voice_idx=voice_idx,
+        decisions=decisions,
+    )
+
+    return survivors, decisions
+
+
+async def retrieve_for_subtopic_b2_b3_b4(
+    *,
+    retrieval_query: str,
+    regulation_ids: list[str],
+    region: str,
+    repo: KnowledgeRepository,
+    course_id: str | None = None,
+    module_idx: int | None = None,
+    voice_idx: int | None = None,
+    top_k: int = B2_TOP_K_DEFAULT,
+) -> tuple[list[ScoredChunk], list[dict[str, object]]]:
+    """B2 + B3 + B4 in serie (analista sign-off 2026-05-30 H7 + F2.14).
+
+    1. B2 selettore di pool top-K cosine_voyage.
+    2. B3 cross-Titolo decay.
+    3. B4 corpus-thin check per voce (Caso 1, behavior block o mark_only).
+
+    Returns (survivors_post_b4, b4_decisions_log) per propagare metadata
+    low_corpus_confidence downstream se behavior=mark_only.
+    """
+    pool_post_b3 = await retrieve_for_subtopic_b2_b3(
+        retrieval_query=retrieval_query,
+        regulation_ids=regulation_ids,
+        region=region,
+        repo=repo,
+        course_id=course_id,
+        module_idx=module_idx,
+        top_k=top_k,
+    )
+    return await apply_b4_corpus_thin_check(
+        voice_pool=pool_post_b3,
+        voice_idx=voice_idx,
+        course_id=course_id,
+        module_idx=module_idx,
+    )
+
+
 # math import only used here so far; keep at end so isort/ruff don't move it.
 _ = math  # silence unused-import in case future refactor removes it
