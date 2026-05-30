@@ -250,6 +250,272 @@ Architettonicamente più pulito, elimina dipendenza esterna runtime, ma non urge
 
 ---
 
+## H6 — cosine_voyage diretto è SELETTORE DI POOL, non ranker fine (closure post-classify 5 moduli)
+
+**Ipotesi originale (messaggio 10, 2026-05-30 pre-classify):**
+> "B2 cosine_voyage diretto sul pool RRF top-100 ricostruisce ranking title-aligned
+> dove Cohere mis-rank o esclude on-topic veri. Target Spearman >= 0.7 sui 5 moduli
+> come sanity check del ranker title-aligned affidabile."
+
+**Verifica empirica (2026-05-30, classify cieca disciplinata 5 moduli, 296 chunks
+classificati con motivazione_breve disconfermativa):**
+
+Spearman (classify vs cosine_voyage):
+
+| Modulo | Sp intera | Sp top-30 | Sp tail |
+|--------|-----------|-----------|---------|
+| GEN_M3 (REGIME 1 concept rich) | 0.381 | 0.300 | -0.037 |
+| HACCP_M3 (REGIME 1 concept rich LCU) | 0.316 | 0.144 | 0.268 |
+| ANT_M0 (REGIME 2 context rich) | **0.689** | 0.323 | 0.532 |
+| PRE_M3 (REGIME 3 corpus-thin per concetto) | 0.333 | 0.468 | -0.077 |
+| GEN_M1 (REGIME 3 corpus-thin per concetto) | 0.208 | **-0.089** | 0.232 |
+
+Ratio A1_utile / B_utile (on-topic + adjacent per zona):
+
+| Modulo | A1 utile | B utile | Ratio |
+|--------|----------|---------|-------|
+| GEN_M3 | 57% | 25% | 2.3x |
+| HACCP_M3 | 57% | 25% | 2.3x |
+| ANT_M0 | 74% | 0% | infinito |
+| PRE_M3 | 23% | 10% | 2.3x |
+| GEN_M1 | 23% | 0% | infinito |
+
+Bottom-20 falsi negativi (chunks on-topic ai rank bassi):
+
+| Modulo | bottom-20 on-topic | Verdetto |
+|--------|-------------------|----------|
+| Tutti i 5 moduli | 0 | OK perfetto |
+
+**Conclusione (analista sign-off 2026-05-30 post-classify):**
+
+1. **Spearman target 0.7 era target sbagliato** perché basato sull'assunzione "cosine_voyage
+   è ranker title-aligned forte". I dati falsificano l'assunzione: solo ANT_M0 raggiunge
+   Sp 0.689; gli altri 4 moduli stanno a 0.21-0.38 intera, top-30 a 0.144-0.468, GEN_M1
+   addirittura **Sp top-30 negativo -0.089** (regime corpus-thin).
+
+2. **Correzione metodologica registrata (analista 2026-05-30)**: la metrica corretta
+   per validare cosine_voyage come *selettore di pool* è il **ratio A1_utile / B_utile**
+   (il salto della separazione poli), NON la Spearman interna. Tutti i 5 moduli hanno
+   ratio >= 2.3x (3 dei 5 hanno B_utile=0, ratio infinito). **cosine_voyage funziona
+   come selettore di pool su TUTTI i 5 regimi**, e questo è l'80% del valore del refactor.
+
+3. **Natura della metrica scoperta**: dense embeddings su corpus normativo italiano
+   (D.Lgs, Allegati, Accordi SR, DM) discriminano BENE sui poli (cosine alto = quasi
+   sempre utile, cosine basso = quasi sempre off-topic), ma NON ordinano informativamente
+   nella fascia intermedia dove i chunks hanno cosine simili. Coerente con letteratura:
+   parole semanticamente vicine ("rischio formazione", "rischio prevenzione",
+   "macrocategorie rischio") producono cosine vicini anche se referente concettuale
+   diverso.
+
+**Implicazione architetturale per B2 (analista 2026-05-30):**
+
+B2 NON è ri-ranking fine via cosine_voyage. È:
+- **Selettore di pool top-K percentile** su cosine_voyage dal pool RRF top-100.
+- L'ordinamento *dentro* il pool top-K viene da B3 (cleanup cross-titolo) + ordine
+  cosine_voyage come tie-breaker secondario degradato.
+- Default K=30 fissa; variante K adattiva basata sul salto di pendenza
+  (cosine_n - cosine_n+1) — testare durante implementazione.
+
+**D-172 riformulato (2026-05-30, era "Cohere offline-only"):** cross-encoder italiano-
+normativo fine-tuned è work-item futuro **post-V2** se il ranking fine del pool si
+dimostra critico per qualità slide. Oneroso (mesi), esplorabile solo se evidenza
+empirica al render mostra che B3+ordering originale non basta per content_agent.
+Per ora cosine_voyage come selettore + B3 cleanup ordinamento copre l'80% del valore.
+
+---
+
+## H6 — cosine_voyage diretto sul subtopic ricostruisce ranking title-aligned dove Cohere fallisce (D-171-bis closure)
+
+**Ipotesi formulata (messaggio analista 10, 2026-05-30) e calibrata empiricamente (classify GEN_M3 12, 2026-05-30):**
+> "B2 cosine_voyage diretto sul pool RRF top-100 (NOT sul top-30 Cohere) ricostruisce
+> ranking title-aligned title-aligned dove Cohere mis-rank o esclude on-topic veri.
+> Il ground-truth oracolo umano deve essere classify cieca disconfermativa."
+
+**Verifica empirica (2026-05-30, classify cieca disciplinata GEN_M3 60 chunks):**
+
+Conteggio classificazione oracolo umano (zone A1/B/C):
+
+| Zona | n | on-topic | adjacent | off-topic |
+|------|---|----------|----------|-----------|
+| A1 (top-30 cosine_voyage) | 30 | **11 (37%)** | 6 (20%) | 13 (43%) |
+| B (bottom-20 cosine_voyage) | 20 | 0 (0%) | 5 (25%) | 15 (75%) |
+| C (top-Cohere esclusi top-30 cosine) | 10 | 2 (20%) | 1 (10%) | 7 (70%) |
+
+**Salto quantitativo cosine_voyage vs Cohere ai top-30 (a parità di subtopic GEN M3 v1):**
+
+| Metric | Cohere top-30 (vecchio) | cosine_voyage top-30 (oggi) | Salto |
+|--------|--------------------------|----------------------------|-------|
+| on-topic puri | 4/30 (13%) | 11/30 (37%) | **+175%** |
+| on-topic + adjacent (chunks "validi") | 7/30 (23%) | 17/30 (57%) | **+143%** |
+
+**Articoli del cuore organizzativo D.Lgs:**
+- Cohere top-30 (settimana scorsa): 3/9 presenti (Art. 30, Art. 15, Art. 34)
+- cosine_voyage top-30 (oggi): 6/9 presenti (Art. 31, Art. 32, Art. 33, Art. 36, Art. 8 SINP) + Art. 30 (×4 chunks distinti), Art. 15 — i 6 articoli che Cohere escludeva sono TUTTI nei top-30 cosine_voyage.
+
+**Conferme empiriche forti:**
+
+1. **D-171-bis closed**: cosine_voyage diretto recupera i chunk on-topic veri che Cohere
+   escludeva dal top-30. Il refactor architetturale "Cohere da ranker primario a
+   telemetria + recall accelerator" è giustificato quantitativamente: salto da 13% a
+   37% on-topic non è marginal improvement, è cambio di regime.
+2. **Bottom-20 cosine_voyage senza falsi negativi strutturali**: 0 on-topic veri persi,
+   5 adjacent ma tutti frammenti marginali ("consapevolezza azioni responsabilità ruolo"
+   testi ricorrenti). cosine_voyage non penalizza articoli centrali — penalizza chunk
+   specifici marginali al subtopic.
+3. **Granularità intra-articolare**: zona C ha 2/10 on-topic (Art. 30 chunks C3 e C9
+   esclusi da cosine_voyage in favore di altri chunk Art. 30 più centrali A9/A16/A22/A26).
+   cosine_voyage discrimina tra chunk dello stesso articolo per centralità al subtopic —
+   livello di granularità che Cohere chiaramente non ha. È il segnale che B2 può fare
+   lavoro fine, non solo grossolano.
+
+---
+
+## H7 — B2 + B3 sono in COMPLEMENTO necessario, non in ridondanza (architettura del filtro composto)
+
+**Ipotesi formulata (analista 13, 2026-05-30 in risposta al gate intermedio):**
+> "B2 cosine_voyage da sola NON basta: 43% off-topic in A1 sono dominati da cross-titolo.
+> B3 (KG sibling cross-Titolo decay) NECESSARIO in COMPLEMENTO a B2."
+
+**Verifica empirica (classify GEN_M3 zona A1 + zona C, 2026-05-30):**
+
+Distribuzione off-topic in A1 cosine_voyage (13 chunks):
+
+| Pattern | Count | Esempi |
+|---------|-------|--------|
+| cross_titolo | ~9 | Art. 203 Titolo VIII fisici, Art. 251 amianto, Art. 225/224 chimici, Art. 46 antincendio, Art. 118/95 Cantieri, Art. 18 Titolo X-bis ferite ospedaliere |
+| menzione_normativa_generica | ~2 | Allegato I esonero classi laurea, Allegato 3 formato modulistica |
+| formazione_durata_schema | ~1 | Allegato IV "4 ore Formazione Generale" |
+| altro | ~1 | Art. 331 c.p.p. |
+
+Distribuzione pattern_misrank zona C (10 chunks):
+
+| Pattern | Count |
+|---------|-------|
+| cross_titolo | 5/10 (50%) |
+| menzione_normativa_generica | 3/10 (30%) |
+| formazione_durata_schema | 1/10 (10%) |
+| altro | 1/10 (10%) |
+| meta_normativo | 0/10 |
+| sanzionatorio | 0/10 |
+
+**Conclusione (analista sign-off 2026-05-30)**: cross-titolo è il falso positivo dominante
+di cosine_voyage perché chunk di altri Titoli del D.Lgs (Titolo VIII fisici, IX chimici,
+IV Cantieri, X-bis ferite) contengono parole "prevenzione/protezione/misure" con
+embedding semantico vicino al subtopic "Organizzazione della prevenzione". cosine_voyage
+NON distingue cross-titolo strutturalmente perché non vede la struttura normativa, solo
+la semantica testuale. B3 è il complemento strutturale necessario.
+
+**Regola architetturale del filtro composto (analista 2026-05-30):**
+
+1. **Ordine in SERIE, NON in parallelo**: prima B2 (filtro semantico title-aligned),
+   poi B3 (cleanup cross-titolo sul subset filtrato da B2). Mai l'inverso.
+
+2. **Razionale dell'ordine B2-poi-B3** (analista 2026-05-30):
+   - Se applichi B3 prima sul pool RRF top-100, perdi chunk legittimi reintegrati da
+     cosine_voyage alto. Esempio: chunk Allegato XIV con cosine_voyage altissimo al
+     subtopic (perché parla *anche* di organizzazione, non solo Cantieri) — B3 lo
+     scarterebbe per cross-titolo prima che B2 lo validi semanticamente.
+   - B3 applicato DOPO B2 vede materiale già validato come on-topic semanticamente,
+     quindi la decisione "scartare per cross-titolo" è fatta su candidati legittimi —
+     più sicura, meno falsi negativi.
+   - **Invertire l'ordine in qualche refactor futuro è il classico drift architetturale
+     che H7 vuole prevenire.**
+
+3. **Soglia B2 percentile largo + B3 cleanup cross-titolo dentro la zona ammessa**:
+   - B2 percentile-based (es. top-20 o top-25, NOT top-15 stretto), per lasciare
+     spazio a B3 di pulire i cross-titolo dentro la zona ammessa.
+   - La transizione "core → grigio" osservata in GEN_M3 A1 cade rank 11-17 (primi 11
+     prevalentemente on-topic puri, tra 12 e 30 mix di adjacent + off-topic cross-titolo
+     non monotono). Soglia B2 stretta a top-15 perderebbe gli adjacent legittimi della
+     fascia 12-17. Soglia larga + B3 elimina solo i cross-titolo della fascia.
+   - Valore esatto percentile B2 lo calibri sui 5 moduli post-classify. Possibile che
+     HACCP_M3 LCU richieda percentile diverso, ma se la formula è relativa al pool
+     dovrebbe normalizzarsi.
+
+**Salto quantitativo atteso V2 → V2-D3-B2-B3 (analista 2026-05-30):**
+- Baseline V2 (Cohere top-30): ~13% on-topic puri ai rank del taglio
+- Post-B2 (cosine_voyage top-30): 37% on-topic puri (+175%)
+- Post-B2 + post-B3 (atteso): 80-90% on-topic + adjacent (cleanup cross-titolo che è
+  ~70% degli off-topic A1)
+- **Salto totale V2 → V2-D3-B2-B3: 13% → 80-90% = ratio ~6x al valore informativo del
+  taglio.**
+
+**Difesa contro drift H7**: se in 6 mesi qualcuno proporrà "ottimizziamo eliminando B3
+perché B2 fa già il grosso del lavoro", H7 mostra che B2 solo lascia 43% off-topic
+cross-titolo non discriminabili semanticamente. B3 NON è "raffinamento marginale", è
+"complemento strutturale necessario". Se in 6 mesi qualcuno proporrà "applichiamo B3
+prima di B2 per efficienza" — H7 mostra che l'ordine è strutturale, non operativo.
+
+---
+
+## H8 — REGIME 3 "corpus-thin per concetto" è caso d'uso per SCHELETRO A DOPPIO LIVELLO (work-item esplorativo post-V2)
+
+**Ipotesi formulata (analista messaggio 14, 2026-05-30 post-classify):**
+> "Su REGIME 3 il problema non è 'calibrare B2/B3/B4 più aggressivi' — è 'lo scheletro
+> stesso ha proposto una voce a cui il corpus non sa rispondere'. La voce 'Definizione
+> di rischio' su GEN M1 chiede al sistema di recuperare materiale che il D.Lgs non
+> produce nella forma richiesta. Possibile soluzione: scheletro a doppio livello, voce
+> tassonomica + voce operativa per retrieval."
+
+**Verifica empirica (classify 5 moduli, 2026-05-30):**
+
+REGIME 3 emerso empiricamente su 2 dei 5 moduli ground-truth:
+- **PRE_M3 voce 1 "Definizione di incidente, infortunio, infortunio mancato"**: D.Lgs
+  81/08 NON ha definizione esplicita di "near miss" (concetto gestionale recepito da
+  ANSI Z16.2 / BS OHSAS 18001 / ISO 45001, NON normativa italiana). A1 utile 23% (2
+  on-topic / 5 adjacent / 23 off-topic). Pool dominato da Art. 37 formazione (60%
+  degli off-topic).
+- **GEN_M1 voce 1 "Definizione di rischio e sue caratteristiche principali"**: Art. 2
+  D.Lgs 81/08 lett.s definisce "rischio" in modo stringato; le caratteristiche sono
+  trattate funzionalmente in Art. 28 oggetto VDR + Allegato IV macrocategorie ATECO,
+  NON come articolo definitorio centrale. A1 utile 23%, Sp top-30 **negativo -0.089**
+  (cosine_voyage piazza Art. 37 formazione più vicino al subtopic che Allegato IV
+  macrocategorie).
+
+**Conclusione (analista 2026-05-30)**:
+- Tassonomicamente "Definizione di rischio" è voce corretta (esperto firmerebbe).
+- Operativamente, dato il corpus, è voce che produce A1 al 23% utile dominato da
+  formazione_durata_schema.
+- Nessuna metrica può inventare materiale definitorio che la normativa non produce.
+
+**Ipotesi soluzione (work-item esplorativo, NON implementare ora)**:
+
+Scheletro D3 a **doppio livello**:
+- **Livello tassonomico** (visibile in UI di revisione utente, gate D3 approve):
+  "Definizione di rischio e sue caratteristiche principali" (la voce attuale).
+- **Livello operativo** (usato dal retrieval, generato come parte della SkeletonItem):
+  "Art. 2 D.Lgs 81/08 lett.s definizione di rischio + Allegato IV macrocategorie
+  ATECO + Art. 28 oggetto VDR elementi" (query operativa specifica, citando
+  riferimenti normativi precisi).
+
+Senza livello operativo, il retrieval cerca di matchare letteralmente la voce tassonomica
+sul corpus, e il corpus risponde con Art. 37 (più vicino topicalmente a "definizione +
+formazione + rischio") invece che con Art. 2/Allegato IV/Art. 28 (chunks semantically
+più diluiti ma operativamente corretti).
+
+**Pre-requisiti per implementazione (work-item esplorativo)**:
+- B2 + B3 + B4 calibrati e in produzione (verifica empirica che REGIME 3 è davvero il
+  bottleneck rimanente, non altre patologie).
+- B4 vincolante con sensore A1_utile<30% deve aver segnalato REGIME 3 al render almeno
+  su 5+ casi reali generati (per validare che il pattern empirico ricorre, non era
+  un artefatto dei 5 moduli ground-truth).
+- Confronto V2-D3-B2-B3-B4 vs V2-D3-B2-B3-B4-Scheletro_doppio_livello sul ground-truth
+  pre-implementazione, per quantificare il salto di qualità atteso.
+
+**Decisione tra le due alternative su REGIME 3 segnalato da B4**:
+- (a) UI propone all'utente la riformulazione operativa della voce (con esempio
+  precompilato dal sistema).
+- (b) UI suggerisce ingestione di materiale integrativo (es. linee guida INAIL su near
+  miss per PRE_M3, manuale formatori HACCP per HACCP voci specifiche).
+
+**Difesa contro drift**: se in 6 mesi qualcuno proporrà "rimettiamo retrieval by-title
+sui regimi che B4 segnala", H8 mostra che il problema su REGIME 3 NON è la formula di
+retrieval (cosine_voyage ratio A1/B funziona) ma la voce stessa dello scheletro che è
+operativamente irrisolvibile sul corpus. La cura non è "ranking più aggressivo", è
+"riformulazione operativa della voce + signaling".
+
+---
+
 ## Schema di registrazione per ipotesi future
 
 Ogni nuova H si registra con:

@@ -284,6 +284,73 @@ Conseguenze concrete:
 
 **Tendenza**: (B) o (C). (A) è già la calibrazione del modello pre-D-171-bis, inutile dopo questa scoperta.
 
+### GROUND-TRUTH C' COMPLETATO + ANALISTA SIGN-OFF B2/B3/B4 (2026-05-30)
+
+**Volume ground-truth (analista 2026-05-30 sign-off C' raffinato)**: 5 moduli × 60 chunks
+= 296 chunks (HACCP_M3 e ANT_M0 hanno avuto 8 chunks in zona C anziché 10) classificati
+con motivazione_breve disciplinata + colonna pattern_misrank su zona C.
+
+**File ground-truth:**
+- `storage/ab_test_results/GROUNDTRUTH_CPRIME_BLIND_{GEN_M1,GEN_M3,PRE_M3,ANT_M0,HACCP_M3}.md`
+- `storage/ab_test_results/GROUNDTRUTH_CPRIME_CLASSIFY_{...}.md` (con motivazione_breve compilata)
+- `storage/ab_test_results/GROUNDTRUTH_CPRIME_SCORES.json` (cosine_voyage + cohere score)
+- `storage/ab_test_results/GROUNDTRUTH_CPRIME_SPEARMAN.md` (analisi correlazione)
+
+**Conteggi per zona (oracolo umano Lorenzo, classify cieca disciplinata):**
+
+| Modulo | A1 on | A1 adj | A1 off | A1 utile | B on | B adj | C on | Regime osservato |
+|--------|-------|--------|--------|----------|------|-------|------|-------------------|
+| GEN_M3 | 11 | 6 | 13 | 57% | 0 | 5 | 2 | REGIME 1 (concept rich) |
+| HACCP_M3 | 8 | 9 | 13 | 57% | 0 | 5 | 1 | REGIME 1 (concept rich LCU) |
+| ANT_M0 | 5 | 17 | 8 | 74% | 0 | 0 | 1 | REGIME 2 (context rich) |
+| PRE_M3 | 2 | 5 | 23 | 23% | 0 | 2 | 0 | REGIME 3 (corpus-thin per concetto) |
+| GEN_M1 | 3 | 4 | 23 | 23% | 0 | 0 | 2 | REGIME 3 (corpus-thin per concetto) |
+
+**Spearman correlation classify vs cosine_voyage:**
+
+| Modulo | Sp intera | Sp top-30 | Sp tail | Bottom-20 falsi neg |
+|--------|-----------|-----------|---------|---------------------|
+| GEN_M3 | 0.381 | 0.300 | -0.037 | 0 |
+| HACCP_M3 | 0.316 | 0.144 | 0.268 | 0 |
+| ANT_M0 | **0.689** | 0.323 | 0.532 | 0 |
+| PRE_M3 | 0.333 | 0.468 | -0.077 | 0 |
+| GEN_M1 | 0.208 | **-0.089** | 0.232 | 0 |
+
+**ANALISTA SIGN-OFF 2026-05-30 (4 risposte):**
+
+(a) **cosine_voyage = filtro a soglia OK + ranker fine mediocre** confermato:
+- Spearman target 0.7 era target sbagliato (basato su assunzione "ranker title-aligned forte").
+- Correzione metodologica: la metrica corretta è ratio A1_utile/B_utile, NON Spearman.
+- Tutti i 5 moduli hanno ratio >= 2.3x → cosine_voyage funziona come selettore di pool su TUTTI i regimi.
+- D-172 riformulato: cross-encoder italiano-normativo fine-tuned post-V2 se necessario.
+
+(b) **B2 = top-K cosine_voyage selettore di pool sul pool RRF top-100**:
+- Default K=30 fissa.
+- Variante K adattiva (salto pendenza cosine_n - cosine_n+1) da testare durante implementazione.
+- L'ordinamento interno al pool top-K passa a B3 + ordine cosine_voyage tie-breaker.
+
+(c) **B4 D9 vincolante**:
+- Sensore primario: A1_utile < 30% (PRE_M3 e GEN_M1 = 23%, ANT_M0=74%, GEN/HACCP=57%).
+- Sensore secondario diagnostico: Sp top-30 voyage < 0.2 (GEN_M1=-0.089, HACCP_M3=0.144 — NON discriminante netta per REGIME 3, è diagnostico).
+- Comportamento: alert + warning UI quando A1_utile<30% (NO blocco hard ancora), opzione utente revisione voce scheletro.
+
+(d) **Sequenza implementazione INCREMENTALE**:
+- STEP 1: B2 K=30 fissa deploy + E2E completo su un corso + delta vs baseline V2 (validazione isolata B2).
+- STEP 2: B3 cross-Titolo decay deploy + E2E + delta marginale.
+- STEP 3: B4 D9 vincolante deploy.
+- STEP 4: Calibrazione finale B2 con K adattiva sul pool post-B3.
+
+**Pattern_misrank universali (watchlist diagnostica):**
+- `83295489` "Allegato I esonero classi laurea": GEN_M3 zonaC, PRE_M3 zonaC, GEN_M1 zonaA1 rank 28 (3/5 moduli)
+- `a3358e4c` "Allegato IV 4 ore Formazione Generale": GEN_M3 A1 rank 20, PRE_M3 C1, GEN_M1 C4
+- `fa54c4c9` "Allegato XIV Cantieri": GEN_M3 C1, PRE_M3 C5, GEN_M1 C1 (3/5 moduli)
+- Art. 37 vari chunks formazione_durata_schema: dominante su REGIME 3 (PRE_M3 e GEN_M1)
+
+**H6 + H7 + H8 registrati in REFACTOR_HYPOTHESES_CONFIRMED**:
+- H6: cosine_voyage selettore di pool, non ranker fine.
+- H7: B2+B3 in COMPLEMENTO necessario, ordine B2-poi-B3 in serie (drift protection).
+- H8: REGIME 3 corpus-thin per concetto → work-item esplorativo scheletro doppio livello (post-V2).
+
 ### ANALISTA SIGN-OFF STEP 3 (2026-05-30) — BIVIO A confermato + raffinamento metodologico
 
 **Decisione**: A. HACCP M3 entra nel ground-truth com'è, marchiato `LOW-CONFIDENCE-UNIFORMLY, corpus_parziale (D.Lgs 193/2007 non ingerito)`. NON ingerire 193/2007 prima del ground-truth.

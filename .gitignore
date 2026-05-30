@@ -100,3 +100,7 @@ scripts/audit_d3_stress_test.py
 scripts/verify_d168_haccp_m3.py
 scripts/extract_groundtruth_5moduli.py
 scripts/verify_d170_determinacy.py
+scripts/check_d_corpus_vs_d_rerank.py
+scripts/check_articles_in_recall_pool.py
+scripts/extract_groundtruth_cprime.py
+scripts/analyze_groundtruth_spearman.py
