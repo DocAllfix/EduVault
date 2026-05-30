@@ -292,7 +292,6 @@ async def _resume_content_from_skeleton(
     reg_slugs = reg_slugs_raw if isinstance(reg_slugs_raw, list) else ["dlgs_81_08"]
     repo = KnowledgeRepository(db)
     reg_ids = await repo.resolve_slugs_to_ids([str(s) for s in reg_slugs])
-    normative_slug = str(reg_slugs[0]) if reg_slugs else "dlgs_81_08"
     region = row["region"] or "NAZIONALE"
 
     # Materialize chunks per module via by-sub-topic retrieval.
@@ -302,8 +301,6 @@ async def _resume_content_from_skeleton(
     for sk in skeletons:
         module_chunks = await materialize_module_from_skeleton(
             skeleton=sk,
-            course_target=initial_state["course_request"].get("target", "discente"),
-            normative_slug=normative_slug,
             regulation_ids=reg_ids,
             region=region,
             repo=repo,

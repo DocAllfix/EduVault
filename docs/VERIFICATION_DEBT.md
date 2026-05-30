@@ -64,6 +64,173 @@
 - **Nessun filtro su `language` esistente né impostabile** — schema senza colonna language. Il rischio era teorico.
 - **D-169-bis CHIUSO**: nessun D-170/171/172 emerso. Procedere col ground-truth.
 
+### D-168 VERIFICA POST-FIX HACCP M3 voce 1 (2026-05-30, via TCP proxy zephyr:11820)
+
+**Setup**: course HACCP E2E (`309ea418`), M3 "Autocontrollo e documentazione", voce 1 `Fondamenti normativi dell'autocontrollo HACCP` (retrieval_query: "normativa italiana e comunitaria che disciplina l'obbligo di autocontrollo secondo HACCP e i riferimenti del D.Lgs 81/08"), region=LOMBARDIA.
+
+**Risultato tecnico — fix funziona, retrieval bilanciato:**
+- `cosine_size`: **0 → 147** ✅ (Reg CE 852/2004 region=EUROPEA ora entra nel cosine search)
+- `bm25_size`: 105
+- `fused_size`: 147 (RRF k=60)
+- Tempo recall: 31 ms
+
+**Risultato qualitativo — top_score NON è risalito:**
+- `top_score rerank Cohere`: 0.367 pre-fix → **0.339 post-fix** (delta -0.028, dentro jitter Cohere ±0.05)
+- Distribuzione top-30 post-fix: max=0.339, min=0.037, **media=0.084** (regime piatto basso)
+- `under_alert_threshold (0.45)`: **still true**
+- Atteso `>0.6` (era la mia ipotesi prima del test): **NO**
+
+**Diagnosi: il fix D-168 era doveroso ma NON è la causa del top_score basso HACCP.**
+
+Il D-168 ha riparato un fallimento silenzioso (cosine completamente azzerato per regulations EUROPEA → recall degradato a BM25-only invisibile). Quel fix era strutturale e va tenuto.
+
+Ma la diagnosi più approfondita ora mostra che il top_score basso su HACCP M3 voce 1 ha **due cause distinte sovrapposte:**
+
+1. **DLGS_193_2007 NON è in DB**: il slug `dlgs_193_2007` non risolve (`Regulations risolte: 1` invece di 2 — solo `reg_ce_852_2004`). Il D.Lgs 193/2007 è proprio il decreto italiano che recepisce e dà attuazione al Reg CE 852/2004 sull'igiene alimentare. È **probabilmente il chunk più rilevante** per "normativa italiana che disciplina l'obbligo di autocontrollo HACCP" e manca dall'ingestione. **Annotato come #R14** [risorsa esterna mancante: ingestire D.Lgs 193/2007]. NON bloccante per la calibrazione B2 perché il regime "low-confidence-uniformly" che vediamo qui *è esso stesso* un regime valido di calibrazione (forse il più stringente).
+
+2. **Cohere rerank sul corpus Reg CE 852 da solo è genuinamente low-confidence** per la query specifica: il top-30 mostra `Allegato I del trattato`, `Art. 251 Direttiva modificata 1882/2003`, `Art. 5 principi HACCP`, `Art. 18 igiene operativa` — tutti pezzi del Reg CE 852 *generali*, non specificamente sulla *normativa* dell'autocontrollo (perché quel concetto vive in 852 implicito + nel 193/2007 esplicito, che manca).
+
+**Implicazioni per B2 calibrazione (5 moduli):**
+- GEN M1: regime denso (top 0.99, media 0.75)
+- GEN M2: regime cross-titolo intra-corpus (da misurare)
+- PRE M3: regime sparso, corpus moderato (top 0.64, media 0.10)
+- ANT M0: regime sparso post-ingestione (top 0.81, media 0.11)
+- **HACCP M2/M3: regime LOW-CONFIDENCE-UNIFORMLY (top 0.34, media 0.08)** — nuovo regime emerso, è esso stesso utile per calibrazione perché copre il caso "corpus limitato + topic specialistico + Cohere senza confidenza alta su nulla".
+
+La soglia RELATIVA su HACCP M3 (`< max - delta`) avrà comportamento interessante: max basso (0.339) + media bassa (0.084) → `delta` piccolo (es. 0.1) lascerebbe passare i primi ~6-8 chunk. Se ground-truth manuale dice che SONO on-topic (Art. 5 principi HACCP, Art. 18 igiene operativa, Allegato II requisiti), la soglia funziona; se NO, è regime che richiede `delta` percentile-based invece di assoluto.
+
+**#R14** [risorsa esterna mancante, 2026-05-30]: ingestire D.Lgs 193/2007 (decreto italiano di attuazione Reg CE 852/2004). Senza, ogni corso HACCP italiano avrà retrieval normativo-italiano incompleto. Non bloccante per D3 (lo skeleton è clean, le slide finali citano Reg CE 852 correttamente), non bloccante per B2 (il regime HACCP è utile come tale per calibrazione). Bloccante per QUALITÀ HACCP finale al cliente — il 193/2007 è citato in ogni manuale HACCP italiano serio.
+
+**Conclusione STEP 3 (D-168 verifica)**: fix tecnico chiuso (cosine_size=147 ≠ 0). Top_score basso non è artefatto del bug, è regime reale del corpus. Procedere col ground-truth a 5 moduli; l'ordine di priorità non cambia.
+
+### STEP 4 ESTRAZIONE (2026-05-30) — 2 scoperte che cambiano il regime di calibrazione
+
+Eseguito `scripts/extract_groundtruth_5moduli.py` (TCP proxy zephyr:11820). Risultati:
+
+| Modulo | top_score | media | n | Note |
+|--------|-----------|-------|---|------|
+| GEN M1 v1 (già) | 0.994 | 0.747 | 30 | denso saturo |
+| **GEN M2 v1 (estratto oggi)** | **0.988** | **0.468** | 30 | **NON cross-titolo-sparso come ipotizzato — è DENSO** |
+| PRE M3 v1 (già stress) | 0.642 | 0.099 | 30 | sparso, on-topic in fondo |
+| ANT M0 v1 (già stress) | 0.814 | 0.114 | 30 | sparso post-DM 03/09 |
+| **HACCP M2 v1 (diagnostico)** | **0.462** | **0.019** | 30 | sopra alert ma media bassissima |
+| **HACCP M3 v1 (ri-misurato via autogen)** | **0.642** | 0.065 | 30 | **NON 0.339 come STEP 3 — vedi sotto** |
+
+**SCOPERTA 1 (regime emergente) — GEN M2 è regime denso, non sparso.**
+Ipotesi analista pre-estrazione: "GEN M2 = cross-Titolo intra-corpus, regime diverso da PRE M3". **Empiricamente FALSO** per la voce 1 generata: top=0.988, media=0.468, distribuzione monotona decrescente bella. La preoccupazione cross-Titolo era V2-specifica (drop-list + expansions hardcoded che inquinavano); con (a) pura + by-subtopic via autogen LLM, GEN M2 si comporta come GEN M1. **Il quinto regime ipotizzato NON esiste empiricamente. I regimi reali sui 5 moduli sono 3, non 5**:
+- DENSO: GEN M1, GEN M2 (top>0.95)
+- SPARSO: PRE M3, ANT M0 (top 0.6-0.8, media <0.15)
+- LOW-CONFIDENCE-UNIFORMLY: HACCP M3 alla "retrieval_query letterale" (top 0.339, media 0.084) → vedi SCOPERTA 2
+
+**SCOPERTA 2 (autogen vs retrieval_query letterale) — IMPORTANTE, da risolvere con analista.**
+HACCP M3 voce 1 misurato due volte:
+- STEP 3 (`verify_d168_haccp_m3.py`): chiamato `recall_hybrid(query=retrieval_query_letterale)` + `rerank_chunks(query=retrieval_query_letterale)`. Query: "normativa italiana e comunitaria che disciplina l'obbligo di autocontrollo secondo HACCP e i riferimenti del D.Lgs 81/08". → **top_score=0.339** (regime LOW-CONFIDENCE-UNIFORMLY).
+- STEP 4 (`extract_groundtruth_5moduli.py`): chiamato `retrieve_for_module(module_title=retrieval_query_letterale)` che **internamente fa autogen LLM** prima del recall. Autogen riformula in: "normativa italiana comunitaria obbligo autocontrollo HACCP requisiti Regolamento CE 852 2004 disposizioni D Lgs 81 08 sicurezza sul lavoro gestione rischi alimentari". → **top_score=0.642** (sopra alert, NON LOW-CONFIDENCE-UNIFORMLY).
+
+**Verificato in codice** (`app/services/skeleton_service.py:206-211`): `materialize_module_from_skeleton` chiama `retrieve_for_module(module_title=item.retrieval_query, ...)` → entra in `retrieve_for_module` → `autogen_module_query` riformula la query prima del recall.
+
+**Quindi il path di produzione è**: `skeleton.retrieval_query` (instructor LLM) → **autogen** (LLM riformula in più keyword-heavy) → cosine+BM25 → rerank Cohere. **L'autogen rifrasa la retrieval_query salvata, NON la usa letteralmente.**
+
+**Implicazione**: il regime LOW-CONFIDENCE-UNIFORMLY HACCP M3 che avevo descritto all'analista era misurato sulla query "sbagliata" rispetto al path prod. In produzione HACCP M3 voce 1 ha top=0.642 (sopra alert), non 0.339 (sotto alert). **Il "nuovo regime" del Bivio A potrebbe NON esistere in produzione.**
+
+**Però c'è un dato a contraddizione**: il log E2E HACCP 29-maggio del passaggio reale prod loggava `top_score=0.367 under_alert_threshold=true` su HACCP M3 (lo stesso modulo, lo stesso course_id, lo stesso path materialize_by_subtopic). Quel 0.367 sembra coerente con la "retrieval_query letterale" (0.339 oggi) e non con l'autogen (0.642 oggi). Possibili spiegazioni:
+- (a) autogen LLM non-deterministico: stessa query in input, prompt instructor stochastic → output query diverso fra le 2 esecuzioni → top_score diverso. Plausibile: stochastic LLM con temperature default → varianza output.
+- (b) la run E2E del 29 ha avuto un autogen "sfortunato" (riformula peggiore della letterale), oggi ha avuto un autogen "fortunato" (riformula migliore). Plausibile se temperature > 0.
+- (c) c'è un branch che bypassa autogen quando già c'è retrieval_query (NON ho trovato evidenza nel codice — `retrieve_for_module` chiama sempre autogen).
+
+**Annotato come D-170** [autogen LLM stochastic introduce varianza di retrieval su stessa voce skeleton]: la pipeline può produrre regimi diversi (LOW-CONFIDENCE vs sparso) per la stessa voce skeleton in run successive a causa della variabilità autogen. Questo è un'aggravante per la calibrazione B2: la soglia relativa ha senso solo se la distribuzione è ripetibile, ma se autogen cambia la distribuzione, la soglia oscilla.
+
+**Annotato come #R15** [need analyst decision]: dove parte la calibrazione B2 — sulla retrieval_query letterale dello skeleton (deterministica, stato logico stabile) o sull'output autogen (production-real ma stochastic)? Sono due dataset di calibrazione **strutturalmente diversi**.
+
+**ESEGUITO ESTRAZIONE STEP 4.a (GEN M2) + STEP 4.b (HACCP M2 diag) + STEP 4.b-bis (HACCP M3 ri-misurato via path prod)**. Report: `storage/ab_test_results/GROUNDTRUTH_5MODULI_RAW.md`. First-pass classify NON ancora compilata: prima briefing analista su SCOPERTA 1 (no quinto regime) + SCOPERTA 2 (autogen stochastic).
+
+### D-170 — RISOLTO 2026-05-30 (sign-off analista C + verifica two-run)
+
+**D-170 — "Stocasticità inattesa in path 'deterministico per design'."** Autogen LLM era invocato nel path `materialize_module_from_skeleton` (D3) anche quando la `retrieval_query` in input era già semantica (scritta da instructor structured nello skeleton-generator). Effetto: stessa query in input produceva distribuzioni recall diverse run-by-run (top_score osservato da 0.339 a 0.642 su HACCP M3 voce 1). Risolto separando il path D3 (`retrieve_for_subtopic`, deterministico, niente autogen) dal path legacy by-title (`retrieve_for_module`, autogen necessario perché `module_title` è generico). **Pattern generale**: in ogni componente di pipeline, prima di chiamare un LLM, chiediti se l'input è già nella forma che ti serve. Riformulare via LLM un testo già LLM-generato è raddoppio di entropia senza valore informativo. È la sorella di D-160 ("metrica regex secondaria, sample-read manuale primaria") applicata alla composizione di LLM call: la composizione cieca di LLM produce stocasticità composta, e il rimedio è sempre architetturale (non chiamare il secondo LLM) prima che operativo (mediare le run).
+
+**Implementazione (commit prossimo):**
+- `app/services/retrieval_v2.py`: split in `retrieve_for_module` (path V2 legacy, fa autogen) + `retrieve_for_subtopic` (path D3, NO autogen) + helper privato `_retrieve_pipeline` (core recall→rerank→KG condiviso). Nomi affermativi al modello concettuale (analista, no flag `skip_autogen` al negativo).
+- `app/services/skeleton_service.py:materialize_module_from_skeleton`: caller aggiornato a `retrieve_for_subtopic(retrieval_query=item.retrieval_query, …)`. Rimossi parametri morti `course_target`, `normative_slug` (non più usati dopo lo skip autogen).
+- `app/services/generation_service.py`: caller di `materialize_module_from_skeleton` aggiornato + rimossa variabile morta `normative_slug`.
+- `tests/unit/test_retrieval_v2_subtopic.py`: 2 test verdi.
+  - `test_retrieve_for_subtopic_does_not_call_autogen`: assert `autogen_module_query.assert_not_awaited()` + verifica che recall+rerank ricevono la query LETTERALE in input.
+  - `test_retrieve_for_module_still_calls_autogen`: regression per non rompere il path V2 by-title.
+
+**Verifica determinacy (`scripts/verify_d170_determinacy.py`, 2026-05-30 11:10, TCP proxy zephyr:11820):**
+- Two-run sulla stessa retrieval_query HACCP M3 voce 1.
+- Δ top_score = **0.0000** (≤ ε jitter Cohere 0.05).
+- top-10 chunk_id list **identica fra le run**.
+- `bm25_size=105`, `cosine_size=147`, `fused_size=147` identici.
+- **[PASS]** retrieve_for_subtopic deterministico al 100% (ZERO stocasticità residua, anche sotto il jitter Cohere atteso).
+
+**Difesa empirica contro drift architetturale (analista directive):**
+Conserviamo i numeri pre-fix come ground-truth della varianza eliminata.
+
+| Misurazione | top_score | Path | Note |
+|-------------|-----------|------|------|
+| HACCP M3 v1 STEP 3 (via recall_hybrid+rerank diretti) | 0.339 | letterale | regime LCU |
+| HACCP M3 v1 STEP 4 (via retrieve_for_module → autogen) | 0.642 | autogen riformula | sopra alert |
+| HACCP M3 v1 E2E del 29-maggio (log prod) | 0.367 | autogen riformula | sotto alert |
+| **HACCP M3 v1 RUN 1 post-refactor C** | **0.3388** | letterale (no autogen) | deterministico |
+| **HACCP M3 v1 RUN 2 post-refactor C** | **0.3388** | letterale (no autogen) | identico a RUN 1 |
+
+La forbice 0.339 ↔ 0.642 mostrava una varianza di 0.30 punti su stesso input. Post-refactor C: varianza 0.0000. Se in futuro qualcuno proporrà "rimettiamo autogen anche su D3, dai", questa tabella è la prova empirica del motivo per cui non si fa.
+
+### SCOPERTA 1 — GEN M2 denso, NOT cross-titolo sparso (registrata fuori da D-numbers — è confirmation, non bug)
+
+GEN M2 voce 1 (Organizzazione della prevenzione): top=0.988, media=0.468, distribuzione monotona-decrescente. Il regime ipotizzato pre-estrazione ("cross-titolo intra-corpus difficile come PRE M3") **non esiste empiricamente** dopo (a) pura + retrieval by-subtopic deterministico.
+
+**Pattern confermato (analista):** la patologia cross-titolo intra-corpus di V2 era artefatto del retrieval V2 (drop-list `_DROP_PATTERN_*` + 38 query expansions `MODULE_QUERY_EXPANSIONS` hardcoded), NON proprietà strutturale del corpus 81/08. Il refactor sta togliendo cerotti che mascheravano nulla — non sta nascondendo un problema reale dietro una nuova architettura, sta rivelando che il problema apparente era il cerotto.
+
+**Conseguenza per calibrazione B2**: i 5 moduli del ground-truth coprono **3 regimi reali**, non 5:
+- DENSO: GEN M1, GEN M2 (top >0.95, media >0.45) — controllo negativo, B2 non deve mai escludere il cuore qui
+- SPARSO: PRE M3, ANT M0 (top 0.6-0.8, media <0.15) — caso di calibrazione primario
+- LOW-CONFIDENCE-UNIFORMLY: HACCP M3 (top 0.34, media 0.08) — caso stress di calibrazione, B2↔B4 dipendenza
+
+Peso decisionale asimmetrico ma ground-truth oracolo umano resta sui 5 moduli per completezza.
+
+### ANALISTA SIGN-OFF STEP 3 (2026-05-30) — BIVIO A confermato + raffinamento metodologico
+
+**Decisione**: A. HACCP M3 entra nel ground-truth com'è, marchiato `LOW-CONFIDENCE-UNIFORMLY, corpus_parziale (D.Lgs 193/2007 non ingerito)`. NON ingerire 193/2007 prima del ground-truth.
+
+**Razionale dell'analista (concetto da fissare):**
+- "Ground-truth pulito" ≠ "ground-truth su corpus completo". Significa classificazione manuale rigorosa di chunks reali estratti dal sistema reale. Il sistema reale avrà SEMPRE corpus parziale su parte del catalogo cliente (30 corsi denso, 15 moderato, 5-10 sottile). Calibrare B2 solo sui regimi denso+moderato e scoprire al corso 47 che non gestisce il terzo = **esatta ripetizione errore review 17** sui regimi corpus-thin.
+- Regime LOW-CONFIDENCE-UNIFORMLY è **genuino e ricorrente**, NON artefatto. Cohere max=0.339 non è "rotto", è "onestamente niente fortemente affine sul corpus disponibile". È informazione.
+- B2 su questo regime ha senso solo se accoppiato a B4 (sensore corpus-thin vincolante). Su GEN M1/PRE M3/ANT M0 B2 taglia rumore tenendo cuore; su HACCP M3 piatto, B2 da solo non basta: serve B4 in collegamento. Il ground-truth con HACCP M3 dimostra esattamente questo accoppiamento architetturale B2↔B4.
+
+**Disciplina calibrazione raffinata (analista 2026-05-30):**
+- Quando calibri B2, REGISTRI DUE NUMERI:
+  - `soglia_denso_sparso`: formula che funziona escludendo HACCP M3
+  - `soglia_universale`: formula che funziona includendo HACCP M3
+- Se vicine → formula relativa è robusta.
+- Se divergono → quel regime richiede l'accoppiamento con B4 (registrato come **dipendenza B2↔B4**, non come problema).
+
+**#R14 timing**: ingerire 193/2007 DOPO ground-truth, in tempi sereni, stessa famiglia di "completezza corpus per famiglia normativa" (DM antincendio 02/09 da riparsare). Pre-ingestione: verifica vigenza 2007 → oggi (è ancora vigente? modifiche?). Post-ingestione: ri-misura HACCP M3 voce 1 + tieni numero pre/post in tabella. **NON ricalibrare B2** automaticamente se la soglia originale regge — sample-check chunk in comune. Se cambia molto, capire perché. Se no, niente da fare (è il senso di "relativa").
+
+### STEP 4 raffinato (sign-off analista) — disciplina classify ground-truth
+
+**5 moduli ground-truth** (confermato):
+1. GEN M1 voce 1 (regime denso) — già fatto AUDIT 1, da rifinire con motivazione
+2. **GEN M2 voce 1** (regime cross-titolo intra-corpus) — DA ESTRARRE
+3. PRE M3 voce 1 (regime sparso, on-topic in fondo) — già stress-test, da rifinire
+4. ANT M0 voce 1 (regime sparso post-ingest DM 03/09) — già stress-test, da rifinire
+5. **HACCP M3 voce 1** (regime LOW-CONFIDENCE-UNIFORMLY, corpus_parziale) — già misurato
+
+**HACCP M2 voce 1**: estrarre come **CONFRONTO DIAGNOSTICO** (NON quinto modulo). Scopo: distinguere se HACCP-tutto è LOW-CONFIDENCE-UNIFORMLY (corpus che manca) oppure solo HACCP M3 lo è (formulazione query specifica). Se M2 ugualmente piatto → corpus. Se M2 meno piatto → query.
+
+**Colonna `motivazione_breve` OBBLIGATORIA in tabella classify:**
+- `on-topic`: motivazione 1 riga sul perché È sul sotto-tema specifico.
+- `off-topic chiaro`: motivazione 1 riga sul perché NON è sulla voce specifica (NON sul modulo generico). Esempio HACCP M3 voce 1 "Fondamenti normativi": Art. 251 "Direttiva modificata Reg CE 1882/2003" → off-topic perché meta-clausola di modifica regolamentare, non principio dell'autocontrollo.
+- `adjacent legittimo`: motivazione PIÙ IMPORTANTE delle altre due. Zona grigia dove B2 farà la differenza. Esempio "Art. 5 del 852 principi HACCP generali → adjacent perché contesto legittimo ma non strettamente autocontrollo italiano".
+
+Senza motivazione la tabella è opinabile in modo opaco; con motivazione è dibattibile in modo trasparente.
+
+### LEZIONE D-160 RICONOSCIUTA dall'analista (2026-05-30)
+
+Analista esplicita la dinamica: "previsione `atteso >0.6` era proxy della verifica, non la verifica. Tu (Claude) l'hai messa alla prova al render e l'hai falsificata coi numeri. Pattern D-160 funziona come deve". Smontare le sue previsioni con i dati al render è applicare disciplina della sessione, non scortesia.
+
+Annotato a verbale per simmetria: l'analista chiede a me di smontare le sue previsioni con i dati come pretendo che io smonti le mie. Vale in entrambi i versi.
+
 **ANALISTA AUDIT D3 GEN M1 (2026-05-29) — SIGN-OFF su 3 domande + direttive calibrazione:**
 - **Scheletro FIRMABILE** ✓ procedi. 10 sotto-temi ancorati al perimetro "Prevenzione e protezione", zero cross-corso. Conferma empirica che il principio (a) [tassonomia precede corpus] regge.
 - **Residuo formazione/abilitazione nel top-30: LASCIARE a B2, NON aggiustare prompt/retrieval_query ora.** Il rumore di superficie È il ground-truth per calibrare B2. Aggiustare a monte = rompere la disciplina di calibrazione sequenziale + perdere l'oracolo umano (sample-read).

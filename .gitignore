@@ -97,3 +97,6 @@ scripts/ingest_dm_antincendio_2021.py
 scripts/audit_d3_skeleton_gen_m1.py
 scripts/smoke_d3_langgraph_resume.py
 scripts/audit_d3_stress_test.py
+scripts/verify_d168_haccp_m3.py
+scripts/extract_groundtruth_5moduli.py
+scripts/verify_d170_determinacy.py

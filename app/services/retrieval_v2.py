@@ -566,37 +566,25 @@ async def expand_via_kg_1hop(
 # ---------------------------------------------------------------------------
 
 
-async def retrieve_for_module(
+async def _retrieve_pipeline(
     *,
-    module_title: str,
-    course_target: str,
-    normative_slug: str,
+    query: str,
     regulation_ids: list[str],
     region: str,
     repo: KnowledgeRepository,
     course_id: str | None = None,
     module_idx: int | None = None,
 ) -> list[ScoredChunk]:
-    """End-to-end pipeline v2 per un singolo modulo.
+    """Core retrieval pipeline: recall_hybrid -> rerank -> optional KG 1-hop.
 
-    Step 1: autogen query (LLM)
-    Step 2: recall_hybrid (BM25+cosine RRF top_k=200)
-    Step 3: rerank Cohere top_n=30 (o fallback RRF se chiave non settata)
-    Step 4: (F2.8 opzionale) 1-hop KG traversal dei top reranked quando
-            `v2_kg_traversal_enabled=True` — aggiunge chunk collegati via edge
-            deterministici con weight decay 0.7.
+    Helper privato condiviso fra ``retrieve_for_module`` (path legacy by-title
+    che fa autogen LLM prima di chiamare qui) e ``retrieve_for_subtopic`` (path
+    D3 by-subtopic che SKIPPA l'autogen perché la query è già scritta da
+    instructor structured nel contesto del sotto-tema).
 
-    NaN / corpus vuoto / Cohere down sono tutti gestiti senza eccezioni:
-    si ottiene una lista (possibilmente vuota) e i sensori D9 ne segnalano la
-    natura nei log.
+    Tutta la stocasticità LLM (autogen) vive sopra a questo helper, mai dentro:
+    qui dentro tutto è deterministico modulo il jitter Cohere (ε~0.05).
     """
-    query = await autogen_module_query(
-        module_title=module_title,
-        course_target=course_target,
-        normative_slug=normative_slug,
-        course_id=course_id,
-        module_idx=module_idx,
-    )
     candidates = await recall_hybrid(
         query=query,
         regulation_ids=regulation_ids,
@@ -621,6 +609,94 @@ async def retrieve_for_module(
             module_idx=module_idx,
         )
     return reranked
+
+
+async def retrieve_for_module(
+    *,
+    module_title: str,
+    course_target: str,
+    normative_slug: str,
+    regulation_ids: list[str],
+    region: str,
+    repo: KnowledgeRepository,
+    course_id: str | None = None,
+    module_idx: int | None = None,
+) -> list[ScoredChunk]:
+    """LEGACY V2 path (by-title): autogen riformula module_title -> query.
+
+    Usato dal research_agent quando il flag ``skeleton_validation`` e' OFF
+    (D3 non attivo). Il ``module_title`` qui e' generico (es. "Prevenzione e
+    protezione") e ha bisogno di essere riformulato in una query semantica
+    richiamando il contesto normativo/dominio.
+
+    Step 1: autogen query (LLM, **stocastico**)
+    Step 2: recall_hybrid (BM25+cosine RRF top_k=200)
+    Step 3: rerank Cohere top_n=30 (o fallback RRF se chiave non settata)
+    Step 4: (F2.8 opzionale) 1-hop KG traversal quando flag attivo.
+
+    Per il path D3 (skeleton attivo), usare ``retrieve_for_subtopic``: la
+    ``SkeletonItem.retrieval_query`` e' gia' una query semantica scritta da
+    instructor structured, riformularla con autogen e' doppio LLM e introduce
+    stocasticita' inutile (D-170 lezione 2026-05-30).
+    """
+    query = await autogen_module_query(
+        module_title=module_title,
+        course_target=course_target,
+        normative_slug=normative_slug,
+        course_id=course_id,
+        module_idx=module_idx,
+    )
+    return await _retrieve_pipeline(
+        query=query,
+        regulation_ids=regulation_ids,
+        region=region,
+        repo=repo,
+        course_id=course_id,
+        module_idx=module_idx,
+    )
+
+
+async def retrieve_for_subtopic(
+    *,
+    retrieval_query: str,
+    regulation_ids: list[str],
+    region: str,
+    repo: KnowledgeRepository,
+    course_id: str | None = None,
+    module_idx: int | None = None,
+) -> list[ScoredChunk]:
+    """D3 path (by-subtopic): query gia' semantica, NO autogen.
+
+    Pensata per essere chiamata da ``materialize_module_from_skeleton`` con
+    ``SkeletonItem.retrieval_query`` direttamente in input. La retrieval_query
+    e' gia' una module-query autogen-style scritta da instructor structured
+    nel contesto del sotto-tema specifico (vincolo Pydantic: min 15 chars,
+    "frase di 15-30 parole in italiano che cattura il contenuto normativo/
+    tecnico di QUEL sotto-tema").
+
+    Differenza VS ``retrieve_for_module``:
+      - retrieve_for_module fa 1 LLM call (autogen) prima del recall.
+      - retrieve_for_subtopic NON fa LLM call: passa la retrieval_query
+        direttamente a recall_hybrid e rerank_chunks.
+
+    Vantaggi (D-170 fix 2026-05-30):
+      - **Deterministico modulo jitter Cohere (~0.05)**: due chiamate con
+        stessa retrieval_query producono lo stesso top_score entro epsilon.
+      - **-30s a corso** circa: una LLM call in meno per sotto-tema (-10s)
+        per ~3 moduli a corso 4h = -30s totali.
+      - **Calibrazione B2 stabile**: il dataset oracolo non oscilla tra run.
+      - **Allineamento concettuale**: la retrieval_query di SkeletonItem ha
+        proprio quel ruolo (la "module-query autogen-style" scritta dal
+        skeleton-generator).
+    """
+    return await _retrieve_pipeline(
+        query=retrieval_query,
+        regulation_ids=regulation_ids,
+        region=region,
+        repo=repo,
+        course_id=course_id,
+        module_idx=module_idx,
+    )
 
 
 # math import only used here so far; keep at end so isort/ruff don't move it.
