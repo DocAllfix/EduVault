@@ -12,7 +12,7 @@
 > disponibile. L'aggiornamento avviene PRIMA del corrispondente aggiornamento
 > Tracker (REI-12) — così il debt è sempre visibile e tracciato.
 >
-> **Ultimo aggiornamento:** 2026-05-30 — **E2E HACCP PASS + ANALISTA SIGN-OFF su (a) pura universale + 2 nuovi debt: D-169 (mancata migration 007 al momento di definire skeleton_pending = a mio carico), D-169-bis (audit filtri silenziosi in knowledge_repo richiesto prima del ground-truth). Ground-truth allargato a 5 moduli (HACCP M2 aggiunto post D-168 fix + GEN M2 confermato).**
+> **Ultimo aggiornamento:** 2026-05-30 — **PULIZIA POST-B4 COMPLETA pre-H8: D-161 + D-177 + D-178 V1.5 chiusi end-to-end (D-175 false positive, V1 saltato per disciplina anti-curatela). 163/163 test PASS, mypy/ruff clean, backfill prod applicato (accordo_2011 effective_until + 13 chunks external_reference). Patologia slide 67 ANT L1 ("Decreto ministeriale 3 agosto 2015") riconosciuta da V1.5 nei test logici. Tempi consuntivi totali: ~3 ore vs stima B2 originale 3-3.5 giorni. Razionale tempo: D-175 false positive (no fix), D-161/D-177/D-178 V1.5 hanno pattern stabilito da precedenti metodologici (D-168 filter al join, B3 metadata+backfill). D-180 registrato (chunk_id → DB lookup gate per diagnosi nx_normative_ref). D-181-bis backlog (display_citations field strutturato post-E2E controllo). Prossimo: E2E ANT L1 finale + sample-read insieme + semaforo H8.**
 
 **ANALISTA SIGN-OFF E2E HACCP (2026-05-30) — D3 universale, due osservazioni a verbale:**
 - **(a) pura DIMOSTRATA UNIVERSALE**: 4 audit + 1 E2E + verifica indipendente sul render (pattern più larghi: Coordinatore CSE/CSP, fascicolo opera, POS, antincendio, primo soccorso, edilizia/cantiere/amianto, DPI industriali) → tutti zero, 1 falso positivo verificato (slide 279 "preposto" = significato generico HACCP "responsabile di settore", non riferimento al corso Preposti). Cross-corso reale = zero su 336 slide. **D3 production-ready come fondazione, non era fortuna 81/08.**
@@ -522,6 +522,199 @@ B4 D9 vincolante deve gestire 2 casi specifici emersi:
 **Caso 2: Pool dominato da regulation cross-scope**
 - Esempio futuro: corso antincendio dove una voce ha pool dominato (>50%) da chunks la cui top_section è strutturalmente cross-scope rispetto al course_type (es. Titolo IX agenti chimici dominante in corso Antincendio).
 - B4 deve: riconoscere la firma e bloccare/marcare. Sensore contaminazione esteso F2.14.
+
+### POST-B4 SAMPLE-READ M0 ANT L1 — 4 work-item B2 pre-H8 (2026-05-30, sign-off analista B2)
+
+**Contesto.** E2E ANT L1 post-B4 (PPTX `ANT_L1_0dfe39ad.pptx`, 335 slide, log `E2E_B4_ANT_L1_LOG.json`) ha confermato che B4 ha morso esattamente dove doveva (22 block / 128 totali = 17%, 18/34 voci con almeno 1 block, slide manutentore DM 01/09 del PPTX precedente sparite). H9 numerico PASS (cross-corso regex strict 20.0% vs 22.9% post-B3, -3 pp). Ma H9 sostanziale FAIL al sample-read M0 dell'analista: **5/83 slide on-topic core** (definizione/triangolo/classificazione/fasi/cause/prodotti/propagazione/effetti — gli 8 subtopic dello skeleton). 78/83 slide sono cross-modulo intra-corso (strategia M1, esodo M2, GSA/procedure M3) o problematiche. Diagnosi: **voce-to-slide drift** triangolato 3 volte (PRE M3 + GEN M1 + ANT M0 ×2) → H8 (vincolo voce-to-slide-cluster nel content_agent) promosso da work-item post-V2 a blocker corrente. Prima però 4 errori normativi visibili nel sample-read vanno puliti perché **avvelenerebbero l'E2E diagnostico post-H8** (cracking normativi residui non distinguibili da drift residuo).
+
+**Verifica preliminare 3 SELECT COUNT su DB (2026-05-30, via TCP proxy zephyr:11820)** — **SORPRESA #3 a verbale**: 2 dei 4 errori target sono allucinazioni LLM, non cracking corpus:
+- DM 03/08/2015 (slide 61, 66): **NON nel corpus** (9 regulations ingested, nessuna con slug `dm_03_08_2015`). Il LLM lo allucina dal training data come "decreto attuale".
+- Art. 625 D.Lgs 81/08 (slide 67): **NON nel corpus** (1819 chunks D.Lgs, Art > 306 sono solo i 13 cross-codice CC/CP, 329/331/395/589/1418/1478/2083/2222). Il LLM allucina mescolando con Codice Penale Art. 625 (furto).
+- Slide 44/52 (ref cracking "D.Lgs 81/08 Allegato 2" + "DM 03/09/2021 Art. 17"): da verificare se cracking template o allucinazione (richiede apertura chunk_id slide).
+- `accordo_stato_regioni_2011` marcato `status='VIGENTE'` ma titolo dichiara "(storico)" → candidato vero D-161.
+- D.Lgs 81/08 chunks `top_section='Sconosciuto'`: **30 totali su 14 articoli distinti** (non 24 come ricordato). Suddivisione: 13 cross-codice (Art > 306) candidati `external_reference`, 17 parsing-noise (allegato/allegato\n) restano Sconosciuto.
+
+**Sign-off analista B2: scelta B2 con D-178 aggiunta (NON B1 anti-allucinazione che impacchetta cure di strati diversi)**. Sequenza: VERIFICATION_DEBT → D-161 → D-175 → D-177 → D-178 V1 → E2E controllo → sample-read insieme → semaforo H8.
+
+### D-161 — Vigenza regulations + filtro retrieval (2026-05-30, schema universale `effective_until`)
+
+**Evidenza concreta.** `regulations` table ha già colonna `status VARCHAR` (campione `'VIGENTE'` su 9/9 regulations), ma nessuna entry è marcata ABROGATA. Caso esistente: `accordo_stato_regioni_2011` ha title "Accordo Stato-Regioni 2011 — Formazione (storico)" — dichiarato storico nel titolo, marcato VIGENTE nello status. Discrepanza stato vs realtà. Storicamente l'Accordo 2011 è superseded dall'Accordo Stato-Regioni 2025 (`accordo_stato_regioni_2025`, 133 chunks, già ingested).
+
+**Diagnosi.** Lo schema `regulations.status` enum-like (VIGENTE/ABROGATA/MODIFICATA, vedi `knowledge_repo.py:41` `resolve_slugs_to_ids` filtra `WHERE status = 'VIGENTE'`) è troppo grossolano: (a) non cattura dimensione temporale (un'abrogazione ha una data, non è atemporale); (b) non cattura il "chi abroga chi" (catena di succession); (c) non supporta override pedagogico (un corso "evoluzione normativa 2011-2025" vorrebbe Accordo 2011 deliberatamente).
+
+**Cura proposta — schema universale.**
+1. Migration: `regulations` aggiungi `effective_until DATE NULL` + `abrogated_by_id UUID NULL REFERENCES regulations(id)`. Semantica: `effective_until IS NULL` = vigente indefinito, `effective_until > now()` = vigente fino a data programmata (utile per direttive UE con cessazione programmata futura), `effective_until <= now()` = abrogato/non più vigente.
+2. Course-level flag (data model): `courses.include_abrogated_for_pedagogy BOOL DEFAULT false`. Costo nullo ora, presente per quando il caso "corso evoluzione normativa" arriverà senza migration.
+3. Filtro retrieval: in `knowledge_repo.search_chunks` (e gemelle in `retrieval_v2.recall_hybrid` per BM25 corpus load + idratazione), aggiungi join SQL su `regulations` con clause `WHERE (r.effective_until IS NULL OR r.effective_until > now() OR :include_abrogated)`. **Filtro al join, NON in-Python post-fetch** (memoria D-168: filtri lato Python compensano silenziosamente i bug del filtro SQL e li nascondono).
+4. Backfill: `UPDATE regulations SET effective_until = '2025-04-17', abrogated_by_id = (SELECT id FROM regulations WHERE slug='accordo_stato_regioni_2025') WHERE slug='accordo_stato_regioni_2011'` (data esatta da confermare via Normattiva al momento del fix).
+5. Test: query SQL post-fix conferma chunks Accordo 2011 fuori da pool ANT L1 (course non opt-in per pedagogy).
+
+**Blocker/dipendenze.** Schema migration richiede coordinamento con `is_current` esistente in `regulation_chunks` (sono ortogonali: `is_current` = chunk vs chunk superseded da re-ingestione; `effective_until` = regulation vs regulation abrogata da normativa successiva). Documentare la distinzione in commit message.
+
+**Stima.** Mezza giornata (schema + backfill + retrieval filter + test).
+
+**Razionale `effective_until` vs `is_abrogated` BOOL.** `is_abrogated` cattura un bit, `effective_until` cattura bit + data + (via FK) chi abroga. `effective_until` è universale: gestisce "abrogato il", "cessa il", "vigente fino al" con la stessa primitiva. Una sola colonna invece di tre. Pattern simile a `users.deleted_at` vs `users.is_deleted`.
+
+### D-175 CLOSED — false positive (2026-05-30 post-verifica chunks DB)
+
+**D-175 closed**: diagnosi originale costruita su falsi ricordi sample-read analista, verifica DB chunk reali (6 chunk_id estratti da `slide_contents_json` del course `0dfe39ad`) ha falsificato i 3 casi target. Rendering ref-chunk deterministico (`citation_label` composta deterministicamente da `short_title + article + paragraph` in `citation_label.py:compose_citation_label`, aggregata in `content_agent.py:215` `s.normative_ref = "; ".join(unique[:3])`). **No fix necessario**. Mezza giornata risparmiata. Le patologie reali rilevate sample-read sono (a) D-178 V1.5 (LLM cita decreto abrogato nei bullets pescato da rinvio storico interno al body chunk vigente — slide 61/66/67 "DM 03/08/2015 decreto attuale"), (b) H8 voce-to-slide drift (slide 7/8/9 meta-formazione ref-correct ma fuori scope per la voce).
+
+### D-180 — Disciplina diagnostica nx_normative_ref (2026-05-30, metodologico)
+
+**Regola.** Diagnosi su `nx_normative_ref` delle slide richiede **chunk_id → DB lookup** prima di classificare come errore. Estrazione PPTX testuale è **osservazione**, non evidenza diagnostica sufficiente per affermazioni forti ("errore fattuale conclamato", "ref inesistente"). Gate per ogni futuro sample-read.
+
+**Why.** D-175 originale formulato su 3 memorie sample-read PPTX presentate come evidence: "slide 67 Art. 625 D.Lgs inesistente", "slide 44 D.Lgs 81/08 Allegato 2 incongruo", "slide 52 DM 03/09/2021 Art. 17 inesistente". Verifica chunks DB ha falsificato tutte e 3: slide 67 ref reale = "DM 03/09/2021 art. 62" (esiste, body coerente "Definizione luogo di lavoro"); slide 44 ref reale = "DM 02/09/2021 allegato I" (esiste, body coerente "addetto antincendio + piano di emergenza"); slide 52 ref reale = "DM 03/09/2021 art. 46" (esiste, body coerente "Prevenzione incendi"). Costo evitato: mezza giornata di lavoro su bug inesistente.
+
+**How to apply.** Per ogni slide sospettata di ref-error in futuro sample-read:
+1. Estrai `slide_contents_json[slide_idx]` → `source_chunk_ids` + `normative_ref` renderizzato dal DB courses row.
+2. Lookup `regulation_chunks WHERE id = ANY(source_chunk_ids)` → `article`, `paragraph`, `citation_label`, `body` (excerpt).
+3. Confronta: (a) ref renderizzato == citation_label aggregata? (b) body chunk coerente col contenuto slide?
+4. Solo se (a) o (b) FALSE → classifica come ref-error e procedi diagnosi.
+
+**Lezione stessa famiglia di REI-17 + review-17.** Verify-by-render funziona quando "render" è il file SQL/DB, non il PPTX testuale a memoria. La stessa disciplina si applica simmetricamente: analista smonta previsioni Claude con i dati; Claude smonta osservazioni analista con i dati. Bilaterale.
+
+### D-175 (ARCHIVIATO sotto, formulazione originale per traccia) — Ref consistency rendering chunk → nx_normative_ref (2026-05-30)
+
+**Evidenza concreta.**
+- **Slide 44 PPTX `0dfe39ad`**: ref `"D.Lgs 81/08 Allegato 2"` su contenuto formazione addetto antincendio. **Allegato II del D.Lgs 81/08 è "Casi datore RSPP"**, non antincendio. Ref incongruo col contenuto.
+- **Slide 52 PPTX `0dfe39ad`**: ref `"D.M. 3 settembre 2021 art. 17"`. **DM 03/09/2021 (minicodice) non ha Art. 17** — finisce ad articoli inferiori. Numerazione cracking.
+
+**Diagnosi attuale (IPOTESI, da CONFERMARE coi dati).** Lo slide rendering produce nx_normative_ref non corrispondente al chunk reale che ha fornito il contenuto. Possibili rami:
+- (a) Template Jinja2 `production_builder.py` legge `chunk.article` e `chunk.regulation_slug` correttamente ma applica trasformazione errata (es. prefix DM su numero D.Lgs).
+- (b) Mapping chunk→slide nel content_agent perde uno dei due campi (article OR regulation_slug) e il template recupera con guesswork.
+- (c) LLM nel content_agent inventa il ref nel campo testuale della slide indipendentemente dal chunk source — sarebbe variante del D-178 sotto, NON un bug di rendering.
+
+**Disciplina root-fix vs workaround (sign-off analista 2026-05-30).** Apri slide 44/52 dal `slide_contents_json`, recupera chunk_id (se esposto), leggi chunk reale da DB (`article`, `regulation_slug`, `body`), confronta con `nx_normative_ref` renderizzato. **Non assumere il bug — leggi i campi.** Se diagnosi vira verso "per il DM 03/09/2021 il template applica prefix DM al numero articolo di un chunk D.Lgs perché il regulation_slug del chunk era stato corretto al cross-render", fermati: quello sarebbe scivolata verso workaround. La root fix è "il template legge `chunk.article` e `chunk.regulation_slug` dal chunk stesso, mai da inferenze sul contesto di slide". Se invece la pipeline join chunk→slide perde uno dei due campi e il template recupera con guesswork, la root fix è sul join non sul template — **una giornata in più, non mezza**, decisione esplicita al momento della diagnosi.
+
+**Cura proposta.** Branch deciso dalla diagnosi:
+- Se ramo (a) template: fix template per leggere `chunk.article` + `chunk.regulation_slug` come single source of truth.
+- Se ramo (b) join chunk→slide: fix sul join nel content_agent o builder, non sul template (gestire downstream).
+- Se ramo (c) LLM invents: cade in D-178 anti-hallucination, non in D-175.
+
+**Test.** Regression su 5 slide random con ref normativo, conferma `nx_normative_ref == chunk.regulation_slug + chunk.article` (modulo formatting).
+
+**Blocker/dipendenze.** Richiede ispezione PPTX + DB query mirate. Indipendente da D-161/D-177.
+
+**Stima.** Mezza giornata se ramo (a), 1 giornata se ramo (b), → cade in D-178 se ramo (c).
+
+### D-177 — Policy `top_section='external_reference'` per chunks cross-codice (2026-05-30, range da metadata universale)
+
+**Evidenza concreta.** Verifica preliminare DB ha rivelato: D.Lgs 81/08 ha **30 chunks `top_section='Sconosciuto'`** (non 24 come ricordato). Suddivisione:
+- **13 chunks cross-codice (Art > 306)**: candidati ri-categorizzazione `external_reference`. Articoli: Art. 329 (×1), Art. 331 (×1), Art. 395 (×1), Art. 589 (×2), Art. 1418 (×2), Art. 1478 (×1), Art. 2083 (×1), Art. 2222 (×4). Sono Codice Penale (329/331/395/589) e Codice Civile (1418/1478/2083/2222) citati dentro chunk del D.Lgs.
+- **17 chunks parsing-noise vero**: `'allegato\n…'` (×8), `'Allegato 3'` (×4), `'allegato 3'` (×2), `'allegato 2'` (×1), `'allegato d'` (×1), `'allegato il'` (×1). Restano `Sconosciuto` (genuino: parser ha fallito su questi).
+
+**Diagnosi.** La policy attuale "chunks `Sconosciuto` sopravvivono se cosine al subtopic alto" (decisione B3 originale: "non sono ranker-utili ma sopravvivono se semanticamente validi") protegge correttamente i 17 parsing-noise (potrebbero contenere body utile) ma NON protegge dai 13 cross-codice: questi sono semanticamente validi (Art. 1418 nullità contratto è legittimamente rilevante per "responsabilità del datore") ma producono **errori di ref normativo** se diventano fonte primaria di slide (il content_agent li ranks come `D.Lgs 81/08 Art. 1418` ma quell'articolo non esiste nel D.Lgs).
+
+**Cura proposta — categoria semantica esplicita + range da metadata.**
+1. Estendi `regulation_metadata.py` per ogni regulation con un campo `article_range_valid: tuple[int, int] | None`. Per D.Lgs 81/08: `(1, 306)`. Per altre regulations (DM, Reg CE): `None` (no concept of "article range", structure different).
+2. Branch in `top_section_of(regulation_slug, article, ...)`: se `regulation_metadata[slug].article_range_valid is not None` AND article matcha pattern `^Art\.\s*(\d+)` AND numero estratto fuori range → return `"external_reference"`. **NESSUN if hardcoded `slug == 'dlgs_81_08'`** — la logica è universale, vive in metadata. Quando arriveranno HACCP/REACH/Antifrode, ognuno dichiarerà il proprio range valido in metadata senza tocco al codice.
+3. Script backfill `scripts/backfill_external_reference.py` (gitignored, password): `UPDATE regulation_chunks SET top_section='external_reference' WHERE regulation_id=:dlgs81 AND article ~ '^Art\.\s*[0-9]+' AND CAST(regexp_replace(article, '[^0-9]', '', 'g') AS INTEGER) > 306`. Atteso: 13 chunks aggiornati.
+4. Content_agent prompt: aggiungi vincolo `"If a chunk has top_section='external_reference', use it only as supporting evidence within slides whose primary source is internal to the regulation (i.e., top_section is a Titolo/Allegato of the regulation itself), never as the sole basis for a slide."`
+5. Test post-fix: sanity SQL `SELECT COUNT(*) FROM slides ... WHERE primary_chunk.top_section='external_reference'` → 0 atteso post-rigenerazione (variante: parse `slide_contents_json` per chunks usati come fonte primaria).
+
+**Razionale `external_reference` vs `hard_discard` vs `mark_for_review`.**
+- `hard_discard` perde 13 citazioni semanticamente legittime (Art. 589 CP omicidio colposo è rilevante per "responsabilità datore" su qualche corso).
+- `mark_for_review` delega all'operatore non-RSPP che non sa quando un Art. 1418 CC è in-scope. Pattern "sensore senza azione".
+- `external_reference` è dichiarazione positiva di natura: il chunk è citazione di codice esterno al D.Lgs. Azionabile downstream (content_agent sa "supporting evidence only, never primary"). Pattern simile a `b3_skipped_insufficient_obs`: segnale visibile in pipeline e azionabile.
+
+**Blocker/dipendenze.** Richiede estensione `regulation_metadata.py` campo `article_range_valid`. Backfill SQL deve essere applicato a corpus prod via TCP proxy.
+
+**Stima.** 1 giornata (metadata extension + branch top_section_of + backfill + content_agent prompt + test).
+
+### D-178 V1.5 CHIUSO end-to-end (2026-05-30 sign-off analista B)
+
+**Strategia finale (analista 2026-05-30): SALTATO V1 originale, andato direttamente V1.5.**
+
+Razionale: V1 originale (nx_normative_ref regulation_slug filter) curava patologia teorica non osservata. Le 6 slide cross-corso aperte in DB hanno tutte `nx_normative_ref` deterministico-corretto da chunk source. La patologia reale (slide 67 PPTX `ANT_L1_0dfe39ad` bullet "Decreto ministeriale 3 agosto 2015 - riferimento chiave") sta nei **bullets**, non nel ref renderizzato. V1.5 cura questa patologia direttamente. V1 saltato (disciplina anti-curatela: no cura per patologia ipotetica).
+
+**Patologia coperta**: LLM pesca dal body del chunk vigente (DM 03/09/2021 Allegato 1) un rinvio storico interno a decreto abrogato (DM 03/08/2015) e lo cita nei bullets come "decreto attuale". Verificato slide 67 ANT L1: bullet "Decreto ministeriale 3 agosto 2015 - riferimento chiave" + course.regulation_ids ANT L1 NON contiene `dm_03_08_2015`. Note: slide 61 e 66 del sample-read analista erano falsi positivi (61 quiz_options pulito, 66 cita D.Lgs. 81/08 legittimo).
+
+**Implementazione**:
+- `app/services/citation_normalizer.py` (NEW): regex multi-pattern per DM datato (lettere/slash), DM numerato, D.Lgs, Reg CE/UE, Accordo SR, D.P.R. + normalizzazione canonical slug + dedup. Pattern overlap fix: DM datato consuma porzione testo prima di DM numerato (altrimenti "03/09/2021" → "9/2021" falso positivo). Strategia (a) bullet→canonical slug, NON (c) display_citations field strutturato (backlog D-181-bis).
+- `app/builders/production_builder.py`: pre-PPTX-build, scansiona bullets + speaker_notes + quiz_options di ogni slide. Slide con citazioni fuori scope → `bullet_citation_warning` log strutturato + accumulo in `hallucination_report`. **Comportamento marca-only**: NESSUNA modifica slide, NESSUNA rigenerazione. Trasparenza visibile (telemetria + report), operatore review.
+- `tests/unit/test_citation_normalizer.py` (NEW): 25 test PASS. Dataset stabili: slide 67 patologica (1 slug hallucinated atteso), slide 66 e 3 vere positive (0 hallucinated atteso), HACCP scope isolation, multiple hallucinations dedup, speaker_notes inclusi nello scan.
+- Smoke test E2E logico (slide 67 + 66 reali estratte da DB course `0dfe39ad`): patologia riconosciuta, legittima passa. OK.
+
+**Test totali pulizia post-B4 (D-161 + D-177 + D-178 V1.5)**: 163/163 PASS. Mypy strict clean sui file toccati, ruff clean.
+
+**Tempi consuntivi**: V1.5 ~40 minuti vs stima 1 giornata. Pattern "stima ricalibrata su precedente metodologico" (D-180 estesa).
+
+### D-181-bis — `display_citations` field strutturato (backlog post-E2E controllo)
+
+**Dormiente.** Quando arrivera' il 2° corso reale con citazioni diverse (HACCP cita Reg CE 852/2004 in forma "Regolamento (CE) n. 852/2004 del Parlamento europeo e del Consiglio del 29 aprile 2004"), la strategia (a) bullet→canonical slug del citation_normalizer potrebbe rivelarsi fragile a varianti formattazione non previste nel regex.
+
+**Cura quando servira'**: aggiungi campo `regulations.display_citations text[]` popolato in ingestion con array di forme legittime ("D.M. 3 settembre 2021", "Minicodice", "DM 03/09/2021"). Check whitelist invece di normalizzazione. Sopravvive a varianti di formattazione future.
+
+**Trigger.** Falso negativo rilevato sample-read 2° corso (HACCP, RLS, altro) + regex normalizer non lo cattura.
+
+### D-178 — Anti-hallucination guardrail citazioni normative content_agent (2026-05-30, SPLIT V1 + V1.5 + V2, formulazione originale archiviata)
+
+**AGGIORNAMENTO 2026-05-30 post-D-175 diagnosi DB.** La formulazione originale V1+V2 va corretta:
+- V1 (NX_NORMATIVE_REF FILTER): protegge contro `regulation_slug` in `nx_normative_ref` renderizzato NON in `course.regulation_ids`. Cattura il caso "LLM scrive ref a regulation fuori scope".
+- **V1.5 (NUOVO, BODY BULLETS REGEX FILTER)**: protegge contro decreti citati **nei bullets/body slide** che NON sono in `course.regulation_ids`. Pattern di patologia diagnosticato 2026-05-30: il LLM pesca dal body di un chunk vigente (es. DM 03/09/2021 Art. 46) un rinvio storico interno a decreto abrogato (es. DM 03/08/2015) e lo cita nei bullets come "decreto attuale". Il chunk source è in scope, il `nx_normative_ref` rendered è corretto, ma i bullets contengono citazione hallucinated. V1 non lo cattura.
+- V2 (article-level verifier, post-V1.5): granularità fine, 3-5 giorni. Da considerare solo se V1+V1.5 lasciano residuo significativo.
+
+**Sequenza implementazione (analista sign-off 2026-05-30 ordine empirico):**
+1. **V1** (1 giornata): content_agent prompt rinforzato + post-render filter su `nx_normative_ref` rendered. Test pipeline + E2E intermedio singolo modulo ANT M0.
+2. **E2E intermedio singolo modulo M0** (1 ora): rilancio ridotto per discriminare V1 sufficiency. Possibile che prompt rinforzato V1 inneschi il LLM a smettere anche di citare nei bullets decreti non-in-scope (empirico, non a priori).
+3. **V1.5** (CONDIZIONATO, 0.5-1 giornata): solo se E2E intermedio mostra residuo "DM 03/08/2015 nei bullets" persistente. Regex extract citazioni decreti dai bullets/body slide + check vs course.regulation_ids → scarta slide o marca.
+4. **V2 article-level verifier**: deferred a post-E2E finale se V1+V1.5 lasciano residuo significativo.
+
+### D-178 — Anti-hallucination guardrail citazioni normative content_agent (2026-05-30, V1+V2 separati — formulazione originale archiviata)
+
+**Evidenza concreta — SORPRESA #3 (sign-off analista a verbale).** Sample-read M0 PPTX `0dfe39ad` ha rivelato 3 slide con citazioni normative **NON presenti nel corpus**:
+- Slide 61, 66: DM 03/08/2015 citato come "decreto attuale" / "riferimento chiave". **DM 03/08/2015 NON è nel corpus**: 9 regulations ingested, nessuna con slug `dm_03_08_2015`. Il LLM lo allucina dal training data.
+- Slide 67: "D.Lgs 81/08 Art. 625: Definizione di luogo di lavoro". **Art. 625 D.Lgs NON è nel corpus**: D.Lgs 81/08 ha 1819 chunks, Art > 306 sono solo i 13 cross-codice CC/CP. Il LLM allucina mescolando con Codice Penale Art. 625 (furto).
+
+**Diagnosi.** Una classe di errori precedentemente classificata come "corpus contaminato" (D-161, ipotesi DM 03/08/2015 ingested senza marcatura) o "chunk Sconosciuto sopravvissuto a B3" (Art. 625) è in realtà **LLM hallucination**. Due patologie diverse, due cure diverse, due strati diversi del sistema. La verifica empirica con 3 SELECT COUNT da Railway ha smentito una diagnosi precedente fatta solo via sample-read PPTX. Pattern "verifica i dati, non assumere la mappa" applicato.
+
+**Cura proposta — DUE FASI esplicite per non bluffare sui costi.**
+
+**V1 (granularità regulation_slug, 1 giornata).**
+1. Content_agent prompt rinforzato: vincolo esplicito `"Cite only regulations that are in the course's ingested corpus. The full list of allowed regulation slugs for this course is: {course.regulation_ids}. Do not invent decree numbers, dates, article numbers. If a topic seems to require a regulation not in this list, omit the citation or use a generic phrasing without a specific decree."`
+2. Post-render verifier in builder: per ogni slide generata, estrai `nx_normative_ref` (regex su pattern `D\.?(Lgs|M)\.?\s*\d+`, `Reg\.?\s*CE\.?\s*\d+`, `Accordo\s+Stato.Regioni\s+\d+`, ecc.) → normalizza a slug → verifica `slug ∈ course.regulation_ids`. Se non match → marca slide `ref_hallucination_warning` e (scelta analista) **scarta su V1, mark per review su V2 quando verifier sarà più sottile**.
+3. Test: regression sul PPTX post-fix, conta slide scartate. Atteso: ≥3 slide scartate (slide 61, 66, 67 del PPTX `0dfe39ad` se rigenerate identicamente).
+
+**V2 (granularità article-level, 3-5 giorni — work-item separato post-V1).**
+1. Verifier programmatico che estrae ogni `nx_normative_ref` e verifica che `(regulation_slug, article)` corrisponda a un chunk del pool della voce, OPPURE che almeno `regulation_slug ∈ course.regulation_ids`.
+2. Sotto-decisioni serie da risolvere PRIMA di scrivere V2 (annotate ma non risolte ora):
+   - Verifier gestisce ref multipli per slide (slide 56/66 PPTX `0dfe39ad` hanno doppia citazione "ref1; ref2"). Strategia parsing.
+   - Match su article: stringa esatta? Normalizzata (`Art. 46` matcha `art. 46 c. 1`)? Definisci canonical form.
+   - Match solo regulation_id (article inventato): hallucination o "LLM concentra ref legittimo a livello regulation senza article-precision"? Gestione differenziata.
+3. Calibrare granularità match in vacuum è esercizio sterile: scrivi V1 (filtro grossolano, cattura il 70% dei casi gravi inclusi i 3 sample-read post-B4), committa, raffina ad article-level in pass V2 dopo l'E2E controllo se i dati lo giustificano.
+
+**Blocker/dipendenze V1.** Modifiche a `content_agent.py` prompt + `production_builder.py` post-render check. Indipendente da D-161/D-175/D-177.
+
+**Stima V1.** 1 giornata. **Stima V2 (separata, NON in questo ciclo B).** 3-5 giorni.
+
+**Asimmetria di credibilità — razionale promozione D-178 a priorità alta.** Errori normativi falsificabili (Art. 625 inesistente, DM 03/08/2015 inventato) hanno asimmetria di credibilità: davanti a un RSPP cliente, "D.Lgs 81/08 Art. 625" non è 1/83 di errore, è un errore atomico che annulla la fiducia sul 100% del corso. D-178 cattura una classe intera di patologie future, non solo gli esempi sample-read post-B4.
+
+### D-179 — Propagazione `include_abrogated` ai caller esterni (dormiente, 2026-05-30)
+
+**Status.** Dormiente per disciplina YAGNI. Nessun corso oggi vuole `include_abrogated=true`. Default safe (False) protegge il caso reale (accordo_2011 escluso dal pool retrieval ANT L1, verificato via smoke test SQL post-backfill).
+
+**Mappa file da toccare quando arriverà il caso reale** (es. corso "Evoluzione normativa formazione 2011-2025"):
+1. `app/services/retrieval_v2.py:_retrieve_pipeline` (riga ~621) — aggiungi param `include_abrogated: bool = False` + propaga a `recall_hybrid`.
+2. `app/services/retrieval_v2.py:retrieve_for_module` (riga ~666) — aggiungi param + propaga a `_retrieve_pipeline`.
+3. `app/services/retrieval_v2.py:retrieve_for_subtopic*` (riga ~720+) — aggiungi param + propaga a `_retrieve_pipeline`.
+4. `app/services/skeleton_service.py:materialize_module_from_skeleton` — accetta `include_abrogated` da generation_service e passa a `retrieve_for_subtopic*`.
+5. `app/services/generation_service.py:277` SELECT — aggiungi colonna `include_abrogated_for_pedagogy` dal courses row.
+6. `app/services/generation_service.py:294` — passa il valore a `resolve_slugs_to_ids` E al materialize call.
+7. `app/agents/research_agent.py:1441,1486,664` — solo se anche v1 path serve pedagogy override (per ora skip, è path legacy by-title).
+
+**Stima quando arriverà.** 30-60 minuti di edit meccanico + 5-10 test regression unit + 1 E2E smoke. Costo prevedibile, niente sorprese.
+
+**Trigger.** Quando il primo `course` reale verrà creato con `include_abrogated_for_pedagogy=true` esplicito (manuale o via UI futura). Fino a quel momento il flag esiste in schema ma non viene mai letto dai caller — comportamento corretto safe-by-default.
+
+### D-161 RAFFINAMENTI MINORI (analista 2026-05-30 post-applicazione)
+
+- **Index su `effective_until`**: applicato come index parziale `WHERE effective_until IS NOT NULL` (vedi migration 009). Razionale: la maggior parte delle regulations ha effective_until NULL (vigenti indefinite); index parziale evita di indicizzare tutti i NULL e mantiene il query plan veloce.
+- **Timezone semantics**: `effective_until DATE` (non TIMESTAMPTZ). PostgreSQL `now()::date` vs `effective_until DATE` confronto è date-only, ignora time-of-day e timezone. Pattern accettato per il caso d'uso (cessazione di applicabilità normativa = granularità giornaliera, non oraria). Limite: il giorno della cessazione, il filtro decide "abrogato dalle 00:00 UTC" — accettabile per safety formativa, dove la differenza di poche ore non genera errori sostanziali. Documentato a verbale come decisione esplicita.
+- **Doppia fonte istituzionale per date legalmente vincolanti** (lezione D-170 estesa): per ogni data che entra nel sistema come `effective_until`, conferma con almeno 2 fonti (1 primaria GU/Normattiva + 1 secondaria istituzionale tecnica). Esempio applicato per accordo_2011: GU n. 119/2025 + Artser conferma 12 mesi transitorio → 2026-05-24. Principio operativo da REI per work-item futuri.
+
+### D-176 — H9 numerico vs sostanziale divergenza post-B4 (2026-05-30, pending post-H8)
+
+**Segnaposto.** Sample-read M0 post-B4 ha rivelato divergenza fra H9 numerico (cross-corso regex strict 20.0% PASS) e H9 sostanziale (5/83 on-topic core = 6% FAIL). Pattern *metric ottimizzata, contenuto peggiorato* (memoria `review17-metric-vs-render-lesson`). Risolvibile solo con H8 (vincolo voce-to-slide-cluster nel content_agent), non con calibrazione retrieval-stage. **Pending post-H8, non risolto in ciclo B**. Registrato qui per non perderlo durante il ciclo pulizia D-161/D-175/D-177/D-178.
 
 ### Metodo confermato (analista 2026-05-30)
 

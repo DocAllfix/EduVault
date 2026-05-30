@@ -59,6 +59,9 @@ scripts/check_audio_status.py
 scripts/rephrase_notes_safe.py
 scripts/upload_regulations_prod.py
 scripts/upload_desktop_artifacts.py
+scripts/apply_migration_009_via_proxy.py
+scripts/backfill_accordo_2011.py
+scripts/backfill_external_reference.py
 
 # === Claude Code runtime ===
 .claude/scheduled_tasks.lock
@@ -110,4 +113,6 @@ scripts/_check_toc_titolo_atteso.py
 scripts/apply_migration_008.py
 scripts/backfill_top_section.py
 scripts/run_b3_strumentato.py
+scripts/e2e_ant_l1_b3_strumentato.py
+scripts/_d161_check_allegato_xli.py
 scripts/_check_top5_titoli.py

@@ -269,6 +269,7 @@ async def recall_hybrid(
     top_k: int = RECALL_TOP_K,
     course_id: str | None = None,
     module_idx: int | None = None,
+    include_abrogated: bool = False,
 ) -> list[NormativeChunk]:
     """Recall ibrido BM25 + cosine fuso via RRF, top_k candidati.
 
@@ -278,6 +279,11 @@ async def recall_hybrid(
     on-the-fly. E' veloce (<200ms) e non richiede infrastruttura aggiuntiva.
 
     Per la parte cosine: embed Voyage della query + `search_chunks` (HNSW pgvector).
+
+    D-161 (2026-05-30): ``include_abrogated`` propaga a entrambi i rami
+    (cosine via search_chunks, BM25 corpus load). Lezione D-168: BM25 e cosine
+    devono essere sincronizzati sul filtro, altrimenti BM25 compensa
+    silenziosamente le esclusioni cosine e il degrado retrieval e' invisibile.
     """
     # ---- Cosine top_k: embed la query con Voyage (stesso modello dell'index)
     # e poi search_chunks su pgvector HNSW.
@@ -287,15 +293,20 @@ async def recall_hybrid(
         regulation_ids=regulation_ids,
         region=region,
         top_k=top_k,
+        include_abrogated=include_abrogated,
     )
     cosine_ids = [c.chunk_id for c in cosine_chunks]
 
     # ---- BM25 top_k: carico body dei chunk *delle stesse regulations*
+    #      D-161: filtro effective_until sincronizzato col cosine.
     pool = repo.pool  # asyncpg pool gia' aperto
     rows = await pool.fetch(
-        "SELECT id::text AS id, body FROM regulation_chunks "
-        "WHERE regulation_id = ANY($1::uuid[]) AND is_current = true",
+        "SELECT rc.id::text AS id, rc.body FROM regulation_chunks rc "
+        "JOIN regulations r ON rc.regulation_id = r.id "
+        "WHERE rc.regulation_id = ANY($1::uuid[]) AND rc.is_current = true "
+        "AND ($2::bool OR r.effective_until IS NULL OR r.effective_until > now())",
         regulation_ids,
+        include_abrogated,
     )
     corpus_ids = [r["id"] for r in rows]
     corpus_bodies = [r["body"] for r in rows]
@@ -826,11 +837,16 @@ async def retrieve_for_subtopic_b2(
     # Step 3: cosine_voyage diretto subtopic vs chunk.body_emb per ogni chunk
     # del pool. chunk.body_emb e' Voyage 1024-dim gia' in DB.
     # Carico le embedding dei chunks del pool dal DB.
+    # D-177 (2026-05-30): escludo chunks top_section='external_reference'
+    # (citazioni cross-codice Codice Penale/Civile incrociate dentro D.Lgs).
+    # Filtro upstream nel pool LLM (VAA-c safer than prompt-level).
     pool_ids = [c.chunk_id for c in pool_candidates]
     pool = repo.pool
     rows = await pool.fetch(
         "SELECT id::text AS id, embedding::text AS emb "
-        "FROM regulation_chunks WHERE id = ANY($1::uuid[])",
+        "FROM regulation_chunks "
+        "WHERE id = ANY($1::uuid[]) "
+        "AND (top_section IS NULL OR top_section != 'external_reference')",
         pool_ids,
     )
     emb_by_id: dict[str, list[float]] = {}
@@ -843,12 +859,16 @@ async def retrieve_for_subtopic_b2(
                 continue
 
     # Calcolo cosine_voyage per ogni chunk con embedding disponibile. I chunks
-    # senza embedding (edge case) finiscono in fondo con score 0.
+    # senza embedding (edge case OR D-177 external_reference filtrati upstream
+    # dalla query SELECT) vengono ESCLUSI dal pool finale, NON pushed-to-bottom
+    # con score 0. Differenza semantica: external_reference e' filtro intenzionale
+    # (non vogliamo che CC/CP entrino nel pool LLM), non rumore.
     scored: list[tuple[float, NormativeChunk]] = []
+    n_excluded_no_emb = 0
     for c in pool_candidates:
         emb = emb_by_id.get(c.chunk_id)
         if emb is None:
-            scored.append((0.0, c))
+            n_excluded_no_emb += 1
             continue
         score = _cosine_voyage(subtopic_emb, emb)
         scored.append((score, c))
@@ -870,6 +890,7 @@ async def retrieve_for_subtopic_b2(
             extra_top_k=top_k,
             extra_top_cosine_voyage=round(top_cosine, 4),
             extra_under_b4_top_cosine_alert=top_cosine < B4_TOP_COSINE_ALERT,
+            extra_n_excluded_external_reference=n_excluded_no_emb,
         )
 
     return [

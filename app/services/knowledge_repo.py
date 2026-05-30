@@ -32,14 +32,30 @@ class KnowledgeRepository:
     def __init__(self, pool: asyncpg.Pool) -> None:
         self.pool = pool
 
-    async def resolve_slugs_to_ids(self, slugs: list[str]) -> list[str]:
+    async def resolve_slugs_to_ids(
+        self,
+        slugs: list[str],
+        *,
+        include_abrogated: bool = False,
+    ) -> list[str]:
         """Resolve slugs -> UUIDs with VALIDATION: raise if a slug is missing.
 
         Without this validation a typo in COURSE_CATALOG would silently
         produce incomplete courses (BP §06.3).
+
+        D-161 (2026-05-30): filtra anche per ``effective_until`` (regulation
+        abrogata da normativa successiva). Default ``include_abrogated=False``:
+        accordo_stato_regioni_2011 (effective_until 2026-05-24, abrogato da
+        Accordo SR 2025 GU n. 119/2025) viene escluso dal pool retrieval.
+        Override esplicito per corsi "evoluzione normativa" che vogliono
+        l'abrogata come materiale didattico.
         """
-        sql = "SELECT id, slug FROM regulations WHERE slug = ANY($1::text[]) AND status = 'VIGENTE'"
-        rows = await self.pool.fetch(sql, slugs)
+        sql = (
+            "SELECT id, slug FROM regulations "
+            "WHERE slug = ANY($1::text[]) AND status = 'VIGENTE' "
+            "AND ($2::bool OR effective_until IS NULL OR effective_until > now())"
+        )
+        rows = await self.pool.fetch(sql, slugs, include_abrogated)
         found_slugs = {row["slug"] for row in rows}
         missing = set(slugs) - found_slugs
         if missing:
@@ -55,6 +71,8 @@ class KnowledgeRepository:
         regulation_ids: list[str],
         region: str,
         top_k: int = 30,
+        *,
+        include_abrogated: bool = False,
     ) -> list[NormativeChunk]:
         """Vector search filtered by regulation and region.
 
@@ -80,6 +98,15 @@ class KnowledgeRepository:
         + EUROPEA chunks. Hard validation of "regional course + non-regional
         region" lives in the research_agent (BP §05.4, FASE 3.3) which
         raises ValueError before reaching this method.
+
+        D-161 (2026-05-30): ``include_abrogated`` filtra regulations con
+        ``effective_until`` non-null e nel passato. Default False (default
+        sicuro: principio "mai mostrare abrogata se non esplicitato").
+        Override via ``courses.include_abrogated_for_pedagogy`` per corsi
+        evolutivi (es. confronto Accordo 2011 vs 2025). Lezione D-168:
+        filtro applicato al join SQL, NON in-Python post-fetch (i filtri
+        Python compensano silenziosamente i bug del filtro SQL e li
+        nascondono — vedi cosine_size=0 pre-D-168).
         """
         sql = """
             SELECT rc.id, rc.regulation_id, rc.article, rc.paragraph, rc.hierarchy_path,
@@ -91,11 +118,17 @@ class KnowledgeRepository:
               AND rc.is_current = true
               AND (r.region IN ('NAZIONALE', 'EUROPEA')
                    OR ($3::text IS NOT NULL AND r.region = $3::text))
+              AND ($5::bool OR r.effective_until IS NULL OR r.effective_until > now())
             ORDER BY rc.embedding <=> $1::vector
             LIMIT $4
         """
         rows = await self.pool.fetch(
-            sql, _to_pgvector(query_embedding), regulation_ids, region, top_k
+            sql,
+            _to_pgvector(query_embedding),
+            regulation_ids,
+            region,
+            top_k,
+            include_abrogated,
         )
         return [
             NormativeChunk(

@@ -172,9 +172,15 @@ def test_dlgs_81_08_allegati(article: str, expected: str) -> None:
         # Article null o vuoto
         (None, "Sconosciuto"),
         ("", "Sconosciuto"),
-        # Numero fuori range (rumore di parsing)
-        ("Art. 999", "Sconosciuto"),
-        ("Art. 0", "Sconosciuto"),
+        # Numero fuori range valido D.Lgs (Art > 306, era "Sconosciuto"
+        # pre-D-177 2026-05-30, ora external_reference: range valido 1..306,
+        # numeri oltre sono citazioni Codice Penale/Civile incrociate).
+        ("Art. 999", "external_reference"),
+        ("Art. 0", "Sconosciuto"),  # 0 below range: parsing-noise, NOT
+                                    # external_reference (Art. 0 non esiste
+                                    # in nessun codice). Discriminazione
+                                    # below-range vs above-range nel branch
+                                    # external_reference di _classify_dlgs.
         # Allegato non-classificato
         ("Allegato ZZZZ", "Sconosciuto"),
         # Forme tipografiche variant (parser dovrebbe normalizzare)
@@ -219,3 +225,73 @@ def test_single_section_regulations(slug: str, article: str) -> None:
 def test_regulation_sconosciuta_degrade_graceful() -> None:
     """Slug non riconosciuto: B3 lo tratta come single-section."""
     assert top_section_of("normativa_inventata_2030", "Art. 5") == "normativa_inventata_2030"
+
+
+# --------------------------------------------------------------------------
+# D-177 external_reference: chunks cross-codice (CP/CC) incrociati in D.Lgs
+# --------------------------------------------------------------------------
+# Verifica preliminare DB ha rivelato 13 chunks cross-codice in dlgs_81_08:
+# Art. 329, 331, 395 (CP) + Art. 589 (CP, ×2) + Art. 1418 (CC, ×2) +
+# Art. 1478, 2083 (CC) + Art. 2222 (CC, ×4). Sono semanticamente validi MA
+# usarli come fonte primaria di slide produce nx_normative_ref errati
+# ("D.Lgs 81/08 Art. 1418" non esiste, Art. 1418 e' Codice Civile).
+# Range valido D.Lgs 81/08: Art. 1..306 (testo coordinato vigente).
+
+
+@pytest.mark.parametrize(
+    "article",
+    [
+        "Art. 329",   # Codice Penale - omissione referto
+        "Art. 331",   # Codice Penale - omessa denuncia
+        "Art. 395",   # Codice Penale
+        "Art. 589",   # Codice Penale - omicidio colposo
+        "Art. 1418",  # Codice Civile - nullita' contratto
+        "Art. 1478",  # Codice Civile
+        "Art. 2083",  # Codice Civile - piccolo imprenditore
+        "Art. 2222",  # Codice Civile - lavoro autonomo
+        "Art. 307",   # boundary: appena fuori range valido
+        "Art. 500",   # numero arbitrario fuori range
+    ],
+)
+def test_dlgs_external_reference_above_range(article: str) -> None:
+    """Art. con numero > 306 in dlgs_81_08 -> external_reference."""
+    assert top_section_of("dlgs_81_08", article) == "external_reference"
+
+
+@pytest.mark.parametrize(
+    "article,expected",
+    [
+        ("Art. 1", "Titolo I"),      # boundary inferiore
+        ("Art. 306", "Titolo XIII"), # boundary superiore valido
+        ("Art. 286-bis", "Titolo X-bis"),
+    ],
+)
+def test_dlgs_at_boundary_remain_classified(article: str, expected: str) -> None:
+    """Boundary valido inferiore (Art. 1), superiore (Art. 306), suffisso
+    Titolo X-bis (Art. 286-bis): NON external_reference."""
+    assert top_section_of("dlgs_81_08", article) == expected
+
+
+def test_dlgs_allegati_not_external_reference() -> None:
+    """Allegati NON sono soggetti al filtro article_range (sono identificati
+    dal prefix Allegato e classificati via DLGS_81_08_ALLEGATI lookup).
+    Allegato V e' Titolo III, non external_reference."""
+    assert top_section_of("dlgs_81_08", "Allegato V") == "Titolo III"
+
+
+def test_dlgs_parsing_noise_remains_sconosciuto() -> None:
+    """Parsing-noise (Art. malformato, NULL) resta 'Sconosciuto', NON diventa
+    external_reference. Distinzione semantica: external_reference = sappiamo
+    cos'e' (cross-codice), Sconosciuto = parser non riconosce."""
+    assert top_section_of("dlgs_81_08", None) == "Sconosciuto"
+    assert top_section_of("dlgs_81_08", "garbage") == "Sconosciuto"
+    assert top_section_of("dlgs_81_08", "art. malformato senza numero") == "Sconosciuto"
+
+
+def test_single_section_regulations_no_external_reference() -> None:
+    """Regulations single-section (DM, Reg CE) non hanno range articoli
+    nominale -> Art. 999 di DM 03/09/2021 resta dm_03_09_2021, NON
+    external_reference. La logica external_reference vive solo dove
+    ARTICLE_RANGE_VALID_BY_SLUG[slug] e' definito."""
+    assert top_section_of("dm_03_09_2021", "Art. 999") == "dm_03_09_2021"
+    assert top_section_of("reg_ce_852_2004", "Art. 999") == "reg_ce_852_2004"

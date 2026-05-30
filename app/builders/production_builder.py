@@ -37,6 +37,7 @@ from app.builders.pdf_builder import PdfBuilder
 from app.builders.pptx_validator import PptxValidator
 from app.builders.slide_builder_v2 import SlideBuilderV2  # FASE 3: drop-in v2 (XML find/replace)
 from app.models.pipeline import GenerationReport, SlideContent
+from app.services.citation_normalizer import find_hallucinated_citations
 
 logger = structlog.get_logger()
 
@@ -134,6 +135,13 @@ class ProductionBuilder:
         check_memory_before_build(len(slides))
         check_disk_before_build()
 
+        # D-178 V1.5 (analista sign-off 2026-05-30): post-render check
+        # citazioni decreti nei bullets/notes/quiz_options vs course.regulation_ids.
+        # Marca-only (NON scarta, NON rigenera): log strutturato + report.
+        # Patologia coperta: slide 67 PPTX `ANT_L1_0dfe39ad` bullet
+        # "Decreto ministeriale 3 agosto 2015" non in ANT L1 regulation_ids.
+        hallucination_report = self._check_bullet_citations(slides, course)
+
         await ws_callback(job_id, 87, "Generazione PPTX...")
         pptx_path = await asyncio.to_thread(
             self.slide_builder.build, slides, course, image_map
@@ -149,7 +157,7 @@ class ProductionBuilder:
 
         await asyncio.to_thread(self._cleanup_tmp)
 
-        report = self._build_report(slides, validation)
+        report = self._build_report(slides, validation, hallucination_report)
         return pptx_path, pdf_path, report
 
     def _cleanup_tmp(self) -> None:
@@ -164,10 +172,86 @@ class ProductionBuilder:
                 except OSError:
                     pass
 
-    def _build_report(
-        self, slides: list[SlideContent], validation: dict[str, Any]
+    def _check_bullet_citations(
+        self,
+        slides: list[SlideContent],
+        course: dict[str, Any],
     ) -> dict[str, Any]:
-        return GenerationReport(
+        """D-178 V1.5 post-render check: cita decreti nei text_fields
+        coerenti con course.regulation_ids?
+
+        Per ogni slide: scansiona bullets + speaker_notes + quiz_options.
+        Estrae slug citati (citation_normalizer pattern regex). Confronta con
+        allowed_slugs = set(course['regulation_ids']) [oppure derivato da
+        catalog se assente]. Slide con citazioni fuori scope: emit log +
+        accumula in report.
+
+        Comportamento marca-only: NESSUNA modifica alle slide, NESSUNA
+        rigenerazione. Trasparenza visibile (telemetria + report), operatore
+        review.
+        """
+        allowed_raw = course.get("regulation_ids") or course.get("regs") or []
+        if not isinstance(allowed_raw, list):
+            allowed_raw = []
+        allowed_slugs: set[str] = {str(s) for s in allowed_raw}
+
+        if not allowed_slugs:
+            # No allowed list known -> skip check (no false positives).
+            return {
+                "total_slides": len(slides),
+                "slides_with_warnings": 0,
+                "warnings": [],
+                "skipped": True,
+                "skip_reason": "no_allowed_slugs_in_course",
+            }
+
+        warnings: list[dict[str, Any]] = []
+        for idx, s in enumerate(slides):
+            text_fields: list[str] = []
+            text_fields.extend(s.bullets or [])
+            if s.speaker_notes:
+                text_fields.append(s.speaker_notes)
+            if s.quiz_options:
+                text_fields.extend(s.quiz_options)
+            hallucinated = find_hallucinated_citations(text_fields, allowed_slugs)
+            if hallucinated:
+                warnings.append(
+                    {
+                        "slide_index": idx,
+                        "slide_title": s.title,
+                        "module_index": s.module_index,
+                        "hallucinated_slugs": hallucinated,
+                    }
+                )
+                logger.warning(
+                    "bullet_citation_warning",
+                    slide_index=idx,
+                    slide_title=s.title,
+                    module_index=s.module_index,
+                    hallucinated_slugs=hallucinated,
+                    allowed_slugs=sorted(allowed_slugs),
+                )
+
+        logger.info(
+            "bullet_citation_check_done",
+            total_slides=len(slides),
+            slides_with_warnings=len(warnings),
+            allowed_slugs=sorted(allowed_slugs),
+        )
+        return {
+            "total_slides": len(slides),
+            "slides_with_warnings": len(warnings),
+            "warnings": warnings,
+            "skipped": False,
+        }
+
+    def _build_report(
+        self,
+        slides: list[SlideContent],
+        validation: dict[str, Any],
+        hallucination_report: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        base = GenerationReport(
             total_slides=len(slides),
             slides_with_images=sum(
                 1 for s in slides if s.image.strategy == "web_search"
@@ -182,6 +266,9 @@ class ProductionBuilder:
             warnings=validation.get("warnings", []),
             generation_time_seconds=0,
         ).model_dump()
+        if hallucination_report is not None:
+            base["bullet_citation_check"] = hallucination_report
+        return base
 
 
 __all__ = [

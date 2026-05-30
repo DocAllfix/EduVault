@@ -55,6 +55,25 @@ import re
 #
 # Articoli fuori range riconosciuto: top_section = "Sconosciuto".
 
+# D-177 (analista sign-off 2026-05-30): range articoli VALIDI per ogni
+# regulation. Universale, NON hardcoded "if slug=='dlgs_81_08'".
+# Articoli "Art. N" con N fuori range valido sono citazioni cross-codice
+# (Codice Penale Art. 329/331/395/589, Codice Civile Art. 1418/1478/2083/2222
+# incrociati dentro chunks del D.Lgs) -> top_section='external_reference'.
+# regulations single-section (DM, Reg CE) NON hanno range articoli definito
+# qui (sono atomiche, nessun concetto di "out of range"): None.
+ARTICLE_RANGE_VALID_BY_SLUG: dict[str, range | None] = {
+    "dlgs_81_08":                    range(1, 307),   # Art. 1-306 (escluso 307+)
+    "dm_01_09_2021":                 None,            # single section
+    "dm_02_09_2021":                 None,
+    "dm_03_09_2021":                 None,
+    "dm_388_2003":                   None,
+    "reg_ce_852_2004":               None,
+    "reg_ce_1272_2008":              None,
+    "accordo_stato_regioni_2011":    None,
+    "accordo_stato_regioni_2025":    None,
+}
+
 # 12 Titoli con range numerico continuo (escludiamo Titolo X-bis che e'
 # gestito separatamente per via dei suffissi).
 DLGS_81_08_TITOLI_NUMERICI: dict[str, range] = {
@@ -301,6 +320,22 @@ def _classify_dlgs_81_08(article: str | None) -> str:
         if art_num in art_range:
             return titolo_name
 
+    # D-177 (2026-05-30): Art. con numero ABOVE range valido D.Lgs (> 306)
+    # = citazione di codice esterno (CP/CC) incrociata dentro chunk del D.Lgs.
+    # Esempi reali nel corpus: Art. 329 CP (omissione referto), Art. 589 CP
+    # (omicidio colposo), Art. 1418 CC (nullita' contratto), Art. 2222 CC
+    # (lavoro autonomo). Semanticamente validi MA non sono articoli del
+    # D.Lgs 81/08; usarli come fonte primaria di slide produce nx_normative_ref
+    # errati (es. "D.Lgs 81/08 Art. 1418" inesistente).
+    # Filtro upstream nel retrieval esclude questi chunks dal pool LLM
+    # (filter upstream pattern, coerente VAA-c safer than prompt-level).
+    # Discriminazione below-range (Art. 0, numeri negativi) = parsing-noise
+    # ("Sconosciuto"), NON external_reference: 0 non e' un articolo di codice
+    # esterno, e' rumore di parsing.
+    valid_range = ARTICLE_RANGE_VALID_BY_SLUG.get("dlgs_81_08")
+    if valid_range is not None and art_num > valid_range.stop - 1:
+        return "external_reference"
+
     return "Sconosciuto"
 
 
@@ -322,8 +357,17 @@ def top_section_of(regulation_slug: str, article: str | None) -> str:
       top_section_of("dlgs_81_08", "Art. 286-bis") -> "Titolo X-bis"
       top_section_of("dlgs_81_08", "Allegato XV") -> "Titolo IV"
       top_section_of("dlgs_81_08", "Allegato XLI") -> "Titolo IX"
+      top_section_of("dlgs_81_08", "Art. 329") -> "external_reference"  (CP omissione referto)
+      top_section_of("dlgs_81_08", "Art. 1418") -> "external_reference"  (CC nullita' contratto)
+      top_section_of("dlgs_81_08", "Art. 2222") -> "external_reference"  (CC lavoro autonomo)
       top_section_of("dm_02_09_2021", "Art. 1") -> "dm_02_09_2021"
       top_section_of("reg_ce_852_2004", "Art. 5") -> "reg_ce_852_2004"
+
+    D-177 (2026-05-30): "external_reference" e' categoria semantica
+    esplicita per articoli oltre il range valido della regulation (per
+    dlgs_81_08: Art > 306 sono citazioni Codice Penale/Codice Civile
+    incrociati dentro chunks del D.Lgs). Filtro upstream nel retrieval
+    pool li esclude dal LLM (VAA-c safer than prompt-level).
     """
     if regulation_slug == "dlgs_81_08":
         return _classify_dlgs_81_08(article)
