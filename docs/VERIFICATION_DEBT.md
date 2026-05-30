@@ -189,6 +189,101 @@ GEN M2 voce 1 (Organizzazione della prevenzione): top=0.988, media=0.468, distri
 
 Peso decisionale asimmetrico ma ground-truth oracolo umano resta sui 5 moduli per completezza.
 
+### CHIARIMENTO ETICHETTA "GEN M1" (2026-05-30, post analista domanda 8)
+
+Catalog `formazione_lavoratori_generale` ha 4 moduli:
+- M1 catalog index 0 → "Concetti di rischio"
+- M2 catalog index 1 → "Prevenzione e protezione"
+- M3 catalog index 2 → "Organizzazione della prevenzione"
+- M4 catalog index 3 → "Diritti e doveri"
+
+**"GEN M1" della settimana scorsa** (audit 2026-05-29 in `audit_d3_skeleton_gen_m1.py`) usava `module_title="Prevenzione e protezione"` (M2 del catalog reale), voce 1 "Definizione e finalità della prevenzione e protezione" → top 0.994 media 0.747 (DENSO).
+
+**"GEN M1" di oggi** (extract_groundtruth_5moduli.py 2026-05-30) usa `module_title="Concetti di rischio, danno, prevenzione, protezione"` (M1 del catalog), voce 1 "Definizione di rischio e sue caratteristiche principali" → top 0.7945 media 0.1285 (SPARSO con mis-ranking).
+
+**NON è regressione**: sono 2 moduli GEN diversi su 2 sub_topic diversi. Etichetta "M1" ambigua nel mio piano. Quadro regimi aggiornato:
+- GEN "Prevenzione e protezione" v1 = DENSO 0.99 (settimana scorsa)
+- GEN "Organizzazione della prevenzione" v1 = DENSO 0.998 (oggi)
+- GEN "Concetti di rischio" v1 = SPARSO 0.79 (oggi)
+- PRE M3 v1 = SPARSO 0.73 (oggi)
+- ANT M0 v1 = SPARSO 0.68 (oggi)
+- HACCP M3 v1 = LCU 0.34
+- HACCP M2 v1 = LCU 0.21
+
+Implicazione meta: dentro lo stesso corso GEN, sotto-temi diversi producono regimi diversi. Per il ground-truth questo non cambia che 5 moduli sono ok (sono campioni di 5 voci 1 distinte attraverso 4 corsi). Ma sample-read disconfermativa GEN M2 (Organizzazione della prevenzione voce 1) diventa più importante: serve a capire se DENSO 0.998 è "denso vero (top-15 = cuore organizzativo D.Lgs)" o "denso apparente (Cohere uniformemente generoso, mis-rank uguale ai 'sparsi')".
+
+### D-171 — Cohere rerank mis-ranking strutturale su top-1/top-2 (2026-05-30, analista formalizza review 17)
+
+**D-171 — "Il rerank Cohere multilingual-v3 ha mis-ranking strutturale su top-1/top-2 quando la retrieval_query contiene riferimenti normativi specifici (Art. X, D.Lgs Y)."** Il fenomeno è universale ai regimi (osservato su GEN "Concetti di rischio" sparso, PRE M3 sparso, ANT M0 sparso post-ingest), non specifico ai moduli ombrello. La causa: la query auto-generata via LLM cita articoli/decreti per ancorare il dominio, ma Cohere reputa "topicalmente affini" chunk che menzionano quegli stessi articoli in **altri contesti** (es. Allegato I "classi di laurea esonero formazione" menziona Art. 2 in significato di "definizioni del decreto"; chunk reale on-topic Art. 222 "Definizioni agenti chimici" a rank 21 con score 0.0274).
+
+**Implicazione su B2**: la funzione di B2 non è "filtro di rumore di superficie su regimi sparsi" ma "**ricostruzione di ranking title-aligned sopra un ranker topicalmente-largo strutturalmente inaffidabile sui primi-rank quando la query è normativamente specifica**". Cambia il modello mentale del filtro: B2 non lavora SOLO sui regimi sparsi/LCU, lavora anche sui regimi che credevamo densi (perché mis-ranking è universale).
+
+**Possibili soluzioni in ordine di invasività (decidere DOPO ground-truth):**
+- (a) B2 come **ri-ranking secondario** via Voyage embedding diretto sul subtopic (non solo filtro a soglia). Cosine(chunk.body_emb, sub_topic.text_emb) calcolato direttamente su tutti i top-30 reranked → ri-ordina o ri-pesa il ranking Cohere senza fiducia incondizionata.
+- (b) Fine-tuning cross-encoder italiano-normativo (oneroso, mesi).
+- (c) Riformulare retrieval_query in skeleton senza riferimenti normativi specifici (sposta il problema, perde l'ancora che già esiste in skeleton, possibile peggioramento del recall).
+
+**Tendenza**: (a). Richiede di calcolare cosine_to_subtopic via Voyage (input già in DB chunk.embedding 1024-dim, sub_topic da embedare), poi formula B2 relativa = ri-pesa rerank Cohere con cosine Voyage. È vicino al "B2 cosine Voyage diretto + soglia relativa" che l'analista aveva descritto nelle direttive originarie, ma in versione "ri-ranking" non "filtro a soglia". Il ground-truth oracolo umano resta lo stesso (classificazione manuale on-topic/adjacent/off-topic), perché serve a stabilire la verità su cui valutare ENTRAMBE le formule B2 (filtro-a-soglia vs ri-ranking).
+
+**Sample-read disconfermativa GEN M2 v1 (next)** discrimina fra esito 1 (DENSO vero → B2 filtro basta) ed esito 2 (DENSO apparente → B2 ri-ranking necessario). Costo 20 min, decisione architetturale.
+
+### D-171 ESITO 2 confermato + D-171-bis (Cohere collo di bottiglia top-30, 2026-05-30)
+
+**ESITO 2 confermato empiricamente**: sample-read disconfermativa GEN M3 "Organizzazione della prevenzione" v1 (post predizione 8 chunk attesi PRIMA della lettura):
+- Conteggio top-30: 4 on-topic (Art. 30 ×2 rank 3+9, Art. 15 rank 11, Art. 34 rank 17), 3 adjacent (Art. 19 ×2, Art. 21), 15+ off-topic (Art. 37 ×3 formazione, Allegato I esonero classi laurea, Allegato XIV ×3 cross-titolo IV Cantieri, Allegato IV schema ore corsi, Art. 98 cross-titolo IV, Art. 95 cross-titolo IV, Art. 286-quater cross-titolo X-bis, Allegato XV cross-titolo IV, Allegato XLI cross-titolo IX, Allegato XX cross-titolo VIII, Allegato VIII cross-titolo III, Allegato XXXIV cross-titolo VII, Allegato I-bis sospensione sanzionatoria, Art. 1 legge delega 123/2007).
+- Top-2 a score 0.998-0.995: **entrambi off-topic** (Art. 37 formazione + Allegato I esonero).
+- **Cohere è uniformemente generoso (tutti gli score >0.5) ma il cuore organizzativo non emerge ai primi rank.**
+- 4 on-topic / 9 attesi del cuore. I 5 mancanti (Art. 31 SPP, Art. 32 capacità RSPP, Art. 33 compiti SPP, Art. 35 riunione, Art. 28 VDR) e Art. 18 obblighi datore → DA CHECK DB se ingeriti.
+
+**SQL check D-corpus vs D-rerank (`scripts/check_d_corpus_vs_d_rerank.py`):**
+Tutti e 9 gli articoli del cuore SONO INGERITI in `dlgs_81_08`:
+- Art. 15: 14 chunks, Art. 18: 4, Art. 28: 5, Art. 30: 10, Art. 31: 3, Art. 32: 5, Art. 33: 1, Art. 34: 4, Art. 35: 5.
+- Nessuno ASSENTE. **Verdetto: D-rerank, non D-corpus.**
+
+**SQL check pool RRF vs Cohere top-30 (`scripts/check_articles_in_recall_pool.py`):**
+
+| Articolo | Best rank pool RRF top-200 | Rank top-30 Cohere | Score Cohere | Verdetto |
+|----------|---------------------------|---------------------|--------------|----------|
+| Art. 15 (Misure generali) | 8 | 11 | 0.932 | OK |
+| Art. 30 (Modelli org.) | 2 | 3, 9 | 0.993, 0.970 | OK |
+| Art. 33 (Compiti SPP) | **24** | ESCLUSO | — | DROPPED |
+| Art. 34 (Datore-RSPP) | 23 | 17 | 0.814 | OK |
+| Art. 28 (Oggetto VDR) | **57** | ESCLUSO | — | DROPPED |
+| Art. 32 (Capacità RSPP) | **91** | ESCLUSO | — | DROPPED |
+| Art. 18 (Obblighi datore) | **108** | ESCLUSO | — | DROPPED |
+| Art. 35 (Riunione periodica) | **144** | ESCLUSO | — | DROPPED |
+| Art. 31 (SPP) | **148** | ESCLUSO | — | DROPPED |
+
+**D-171-bis (2026-05-30) — Cohere collo di bottiglia: chunk on-topic veri presenti nel pool RRF top-200 ma esclusi dal top-30 reranked.**
+
+Recall ibrido (BM25+cosine RRF) porta tutti i 9 articoli del cuore nel pool top-200. **Il rerank Cohere ne sceglie 30 e ne SCARTA 6 dei 9**, includendo Art. 33 che era rank 24 nel pool (vicinissimo al top). Eppure Art. 33 body chunk ha titolo letterale "Compiti del servizio di prevenzione e protezione" — il più letteralmente correlato al subtopic "Principi normativi e obiettivi dell'organizzazione della prevenzione".
+
+**Implicazione architetturale forte (cambia il piano B2)**:
+
+PRE-D-171-bis tendenza:
+- B2 come ri-ranking secondario via cosine Voyage sul **top-30 Cohere reranked**.
+
+POST-D-171-bis:
+- B2 come ri-ranking secondario via cosine Voyage sul **pool RRF top-100 o top-200** (saltando Cohere come ranker). Cohere resta:
+  - per la telemetria (vedo il mis-ranking come sensore D9 corpus-thin alternativo)
+  - come ranker di fallback se Voyage cosine non discrimina abbastanza (improbabile)
+- Il top-30 finale del materialize_module_from_skeleton viene da B2 sul pool RRF, non da Cohere.
+
+Conseguenze concrete:
+1. Cohere passa da "ranker primario decisionale" a "telemetria + recall accelerator". È un downgrade di ruolo.
+2. Il rate_limit Cohere (free tier rerank multilingual-v3.0) diventa meno critico perché lo usiamo solo per la telemetria diagnostica (potremmo anche skip-larlo in prod se troppo lento).
+3. Il pool che B2 vede passa da 30 a 100-200 chunk. Costo cosine_voyage: 1 chiamata Voyage per il subtopic (1024-dim) + dot product con 100-200 chunk.body_emb già in DB. Calcolo in-memory veloce (<50ms).
+4. **Soglia relativa su cosine_voyage**: ora `< (max_cosine_voyage - delta)` o percentile, calcolata su un pool di 100-200 con Art. 31/32/33/35/28/18 dentro. Il top-30 finale sarà arricchito dei chunk on-topic veri che Cohere escludeva.
+
+**Ground-truth oracolo umano - PROBLEMA**: i 180 chunk che ho estratto sono `retrieve_for_subtopic` top-30 Cohere, **NON il pool RRF top-100/200**. Se calibro B2 nuovo (ri-ranking sul pool RRF) sui 30 Cohere classificati, ottengo soglia tarata su un subset che esclude gli on-topic veri della D-171-bis. Devo rivedere il dataset di calibrazione:
+
+**OPZIONI per il ground-truth (decidere con analista):**
+- (A) Classifico i 180 top-30 Cohere come previsto e accetto che B2 calibrazione vede solo il subset Cohere. La soglia che esce è "soglia ri-ranking dentro top-30 Cohere" — utile, ma non gestisce il caso "Art. 33 rank 24 nel pool ma escluso da Cohere".
+- (B) Riestraggo il **pool RRF top-100** per ciascuno dei 5 moduli (5×100 = 500 chunk), poi classifico (più lavoro: 500 invece di 150; ma è la calibrazione architettonicamente corretta). HACCP M2/M3 hanno 147 chunks totali fusi, quindi solo i moduli GEN/PRE/ANT impattano sul volume reale.
+- (C) Approccio ibrido: classifico i top-30 Cohere come avevo previsto + aggiungo per ciascun modulo i 10-20 chunk del pool RRF top-30 che Cohere ha escluso (probabilmente proprio gli Art. 31/32/33/35/28/18 + analoghi). Volume: 5 × (30 + ~15) = ~225 chunk.
+
+**Tendenza**: (B) o (C). (A) è già la calibrazione del modello pre-D-171-bis, inutile dopo questa scoperta.
+
 ### ANALISTA SIGN-OFF STEP 3 (2026-05-30) — BIVIO A confermato + raffinamento metodologico
 
 **Decisione**: A. HACCP M3 entra nel ground-truth com'è, marchiato `LOW-CONFIDENCE-UNIFORMLY, corpus_parziale (D.Lgs 193/2007 non ingerito)`. NON ingerire 193/2007 prima del ground-truth.

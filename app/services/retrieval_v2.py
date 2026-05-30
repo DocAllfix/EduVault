@@ -21,16 +21,27 @@ L'architettura (decisione D2 del piano, vincolata dall'analista):
   3) rerank_chunks (Cohere rerank-multilingual-v3.0, top_n=30)
             |
             v
-  ScoredChunk[]  +  module_top_rerank_score loggato (sensore badge D9
-                   `module_corpus_thin` quando sotto MIN_RERANK_SCORE_ALERT)
+  ScoredChunk[]  +  module_top_topical_affinity_score loggato (sensore badge D9
+                   `module_corpus_thin` quando sotto MIN_TOPICAL_AFFINITY_ALERT)
+
+NOTA NOMENCLATURA (D-171-bis, 2026-05-30):
+  Il punteggio Cohere e' stato rinominato da "rerank_score" a "topical_affinity_score"
+  per onesta' nominale. Il check empirico GEN M3 ha dimostrato che Cohere
+  multilingual-v3.0 NON e' ranker title-aligned su questo dominio normativo:
+  esclude dal top-30 chunk on-topic veri presenti nel pool RRF (Art. 33 era rank
+  24 nel pool, escluso). Cohere e' affidabile come selettore di candidati
+  topicalmente affini al dominio (recall accelerator + telemetria), non come
+  ranker decisionale. B2 ri-ranking via cosine_voyage diretto sostituisce Cohere
+  come ranker; questo nome (topical_affinity_score) lo dichiara esplicitamente
+  per prevenire drift architetturale futuro.
 
 VAA:
-  - (a) verifica al render: `module_top_rerank_score` esposto, non scartato.
+  - (a) verifica al render: `module_top_topical_affinity_score` esposto, non scartato.
   - (b) provenienza: ogni ScoredChunk porta `source='rerank_cohere'` o `'bm25'`
         a seconda dello stadio in cui ha vinto. In caso di disabilitazione
         Cohere fallback al solo recall RRF con `source='rrf_fallback'`.
   - (d) sensore vs gate: il vecchio MIN_RELEVANCE filtrava silenziosamente.
-        Qui MIN_RERANK_SCORE_ALERT NON filtra: tutti i top-30 entrano sempre,
+        Qui MIN_TOPICAL_AFFINITY_ALERT NON filtra: tutti i top-30 entrano sempre,
         ma se max_score < soglia il chunk emette l'evento che alimenta D9.
   - (e) safety-net: se `v2_rerank_enabled=False` il modulo non viene neppure
         importato in hot path (lazy import in research_agent).
@@ -61,7 +72,13 @@ logger = structlog.get_logger(__name__)
 # i chunk passano comunque. Calibrata sul corpus reale (sample dei 3 demo gia'
 # approvati alla review 10 dell'analista). FIX D2/sessione: era MIN_RELEVANCE
 # 0.3 e tagliava. Ora e' soglia di allerta visibile, non un coltello.
-MIN_RERANK_SCORE_ALERT = 0.45
+#
+# Rinominata D-171-bis (2026-05-30): da MIN_RERANK_SCORE_ALERT a
+# MIN_TOPICAL_AFFINITY_ALERT per onesta' nominale. E' soglia sull'output Cohere
+# (topical-affinity, non ranking title-aligned). L'alias all'ex-nome resta come
+# backward-compatibility.
+MIN_TOPICAL_AFFINITY_ALERT = 0.45
+MIN_RERANK_SCORE_ALERT = MIN_TOPICAL_AFFINITY_ALERT  # alias deprecato — vedi D-171-bis
 
 # Parametri di recall (top_k pre-rerank). 200 e' compromesso fra coverage
 # (il rerank lavora solo su cio' che vede) e latenza Cohere (~50ms per 200 doc
@@ -85,10 +102,15 @@ class ScoredChunk:
     """Risultato finale del retrieval: chunk + score + provenienza.
 
     Importante: `score` puo' essere su scale diverse a seconda di `source`:
-      - 'rerank_cohere': 0..1 (Cohere normalizza)
+      - 'rerank_cohere': 0..1 (Cohere normalizza). NOTA D-171-bis: questo e'
+        un "topical-affinity score", NON un ranking title-aligned. Cohere
+        multilingual-v3.0 esclude dal top-30 chunk on-topic veri (Art. 33 GEN M3
+        rank pool 24 escluso). Usare come telemetria + recall accelerator, NON
+        come ranker decisionale. Il ranker decisionale e' B2 cosine_voyage.
       - 'rrf_fallback' / 'bm25_only': il valore RRF grezzo (sommatorie di 1/k+rank)
     Il caller usa `source` per sapere come interpretarlo. La soglia
-    MIN_RERANK_SCORE_ALERT vale solo per `source='rerank_cohere'`.
+    MIN_TOPICAL_AFFINITY_ALERT (alias retro MIN_RERANK_SCORE_ALERT) vale solo
+    per `source='rerank_cohere'`.
     """
 
     chunk: NormativeChunk
@@ -364,7 +386,7 @@ async def rerank_chunks(
         delle candidate per la loro posizione attuale (gia' RRF-fused) con
         `source='rrf_fallback'`. La soglia D9 non si applica.
       - Altrimenti chiama Cohere e ritorna i top_n con `source='rerank_cohere'`.
-        Emette `module_top_rerank_score` per il sensore badge.
+        Emette `top_score` (topical-affinity, D-171-bis) per il sensore badge.
     """
     if not candidates:
         emit(
@@ -443,8 +465,8 @@ async def rerank_chunks(
 
         ev["output_size"] = len(out)
         if out:
-            ev["top_score"] = out[0].score
-            ev["under_alert_threshold"] = out[0].score < MIN_RERANK_SCORE_ALERT
+            ev["top_score"] = out[0].score  # topical-affinity (Cohere), D-171-bis
+            ev["under_alert_threshold"] = out[0].score < MIN_TOPICAL_AFFINITY_ALERT
         return out
 
 

@@ -141,6 +141,115 @@ sostanza.
 
 ---
 
+## H4 — Regime "denso vero" non esiste su questo corpus per query con riferimenti normativi specifici
+
+**Ipotesi formulata in messaggio 9 (2026-05-30) post-extraction GEN M3 v1:**
+> "Quello che apparentemente sembra denso (top 0.99, media 0.82) è un 'denso apparente'
+> — Cohere uniformemente generoso, ma il cuore on-topic vero è sparso ai rank intermedi
+> (3, 9, 11, 17), e i primi rank sono mis-rank topicalmente-larghi (Allegato I esonero,
+> Art. 37 formazione durata, Allegato XIV cantieri)."
+
+**Verifica empirica (2026-05-30, sample-read disconfermativa GEN M3 v1):**
+
+Disciplina disconfermativa applicata: predizione 8 chunk attesi PRIMA della lettura
+(Art. 30 modelli, Art. 31 SPP, Art. 32 capacità RSPP, Art. 33 compiti SPP, Art. 35
+riunione periodica, Art. 15 misure generali, Art. 18 obblighi datore, Art. 28 oggetto
+VDR). Poi confronto col top-30 reale di GEN M3 voce 1 ("Principi normativi e obiettivi
+dell'organizzazione della prevenzione"), top_score 0.9985, media 0.8202, distribuzione
+score 0.998 → 0.541.
+
+Conteggio onesto:
+- 4 on-topic / 9 attesi del cuore (Art. 30 rank 3+9, Art. 15 rank 11, Art. 34 rank 17)
+- 3 adjacent legittimi (Art. 19 ×2, Art. 21 lavoratori autonomi)
+- 15+ off-topic chiari (Art. 37 ×3 formazione, Allegato I esonero formatori, Allegato
+  XIV ×3 cross-titolo IV Cantieri, Allegato IV schema ore corsi, Art. 98/95 cross-
+  titolo IV, Art. 286-quater cross-titolo X-bis, Allegati VIII/XV/XX/XXXIV/XLI cross-
+  titolo, Allegato I-bis sanzionatorio, Art. 1 legge 123/2007)
+- 6-7 dubbi su body fragmenti corti
+
+**Top-2 a score 0.998-0.995: entrambi off-topic** (Art. 37 + Allegato I esonero).
+
+**Conclusione**: il regime "denso vero" non esiste su questo corpus per query con
+riferimenti normativi specifici. Cohere è uniformemente generoso (tutti i 30 score
+>0.5) ma il cuore on-topic è sparso ai rank intermedi e i primi rank sono mis-rank.
+
+**Implicazione architetturale**: i 3 regimi previsti (DENSO/SPARSO/LCU) si comprimono
+operativamente a 2 (sparso-con-mis-ranking, low-confidence), perché il "denso
+apparente" è strutturalmente sparso-con-mis-ranking + Cohere uniformemente generoso.
+B2 deve essere la stessa formula su tutti i regimi, perché il problema di base è
+uniforme.
+
+**Difesa contro drift**: se in 6 mesi qualcuno proporrà "rimettiamo Cohere come ranker
+primario su corso denso, dai" la registrazione di H4 è la prova empirica del perché
+no. Il pattern "regime apparente sbagliato perché la metrica primaria è sbagliata" è
+D-160 in altra forma, applicato al rerank score.
+
+---
+
+## H5 — Cohere rerank esclude dal top-30 chunk on-topic veri presenti nel pool RRF (D-171-bis)
+
+**Ipotesi formulata in messaggio 10 (2026-05-30):**
+> "D-171 dice: Cohere mis-rank top-1/top-2. D-171-bis dice: Cohere esclude dal top-30
+> chunk on-topic veri presenti nel pool RRF. Il primo è errore di ordinamento (correggibile
+> riordinando); il secondo è errore di selezione (i chunk omessi non li vedi nemmeno,
+> non li puoi riordinare). Le due ipotesi sono di natura diversa, anche se gestite dalla
+> stessa formula B2-ri-ranking-su-pool-RRF."
+
+**Verifica empirica (2026-05-30, SQL check + pool RRF check):**
+
+SQL check sui 9 articoli attesi del cuore organizzativo per GEN M3 voce 1 (script
+`scripts/check_d_corpus_vs_d_rerank.py`):
+- Tutti e 9 INGERITI in `dlgs_81_08` (Art. 15: 14 chunks, Art. 18: 4, Art. 28: 5,
+  Art. 30: 10, Art. 31: 3, Art. 32: 5, Art. 33: 1, Art. 34: 4, Art. 35: 5).
+- Verdetto: D-rerank, non D-corpus.
+
+Pool RRF top-200 vs Cohere top-30 (script `scripts/check_articles_in_recall_pool.py`):
+
+| Articolo | Rank pool RRF top-200 | Rank top-30 Cohere |
+|----------|----------------------|---------------------|
+| Art. 30 | **2** | rank 3+9 (OK) |
+| Art. 15 | **8** | rank 11 (OK) |
+| Art. 34 | **23** | rank 17 (OK) |
+| **Art. 33** | **24** | ESCLUSO |
+| Art. 28 | 57 | ESCLUSO |
+| Art. 32 | 91 | ESCLUSO |
+| Art. 18 | 108 | ESCLUSO |
+| Art. 35 | 144 | ESCLUSO |
+| Art. 31 | 148 | ESCLUSO |
+
+**6 dei 9 articoli del cuore esclusi da Cohere top-30. Art. 33 era rank 24 nel pool
+RRF (vicinissimo al top), Cohere lo esclude.** Body chunk di Art. 33: titolo letterale
+"Compiti del servizio di prevenzione e protezione" — il più letteralmente correlato
+al subtopic "Principi normativi e obiettivi dell'organizzazione della prevenzione".
+
+**Conclusione architetturale (analista sign-off 2026-05-30)**: la formula B2 corretta
+è ri-ranking via cosine Voyage diretto sul **pool RRF top-100/200**, saltando Cohere
+come ranker. Cohere passa da "ranker primario decisionale" a "telemetria + recall
+accelerator". Rinominazione: "Cohere score" → "topical-affinity score" nei log e
+metriche (commit D-171-bis), per onestà nominale e per prevenire drift futuro.
+
+**Differenza categorica H4 vs H5** (analista 2026-05-30):
+- H4 è ipotesi sul corpus/regime (Cohere generoso uniformemente, cuore sparso in
+  zone intermedie).
+- H5 è ipotesi sul ranker (Cohere esclude dal pool che vede gli on-topic letterali).
+- Sono ipotesi su componenti diversi (corpus vs ranker), entrambe gestite dalla stessa
+  formula B2-ri-ranking-su-pool-RRF.
+
+**Difesa contro drift (H5)**: se in 6 mesi qualcuno proporrà "ottimizziamo Cohere
+rerank top_n a 50 invece di 30 per recuperare gli on-topic" — H5 mostra che il problema
+non è il `top_n` (Art. 33 era rank 24 nel pool e Cohere lo escluderebbe anche
+con top_n=50, se il suo ranking lo mette oltre il taglio). Il problema è che Cohere
+non è ranker title-aligned. La cura non è "alzare il taglio Cohere"; la cura è "non
+usare Cohere come ranker decisionale".
+
+**Work-item esplorativo D-172 (analista 2026-05-30, post-calibrazione)**: se Cohere
+passa a telemetria-pura, valutare di non chiamarlo a runtime in produzione, ma solo
+periodicamente sul dataset di evaluation. Path generazione corso: BM25+cosine fusi
+RRF → cosine_voyage diretto su top-100 fusi → B2 + KG. Zero chiamate Cohere a runtime.
+Architettonicamente più pulito, elimina dipendenza esterna runtime, ma non urgente.
+
+---
+
 ## Schema di registrazione per ipotesi future
 
 Ogni nuova H si registra con:
