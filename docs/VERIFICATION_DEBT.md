@@ -351,6 +351,45 @@ con motivazione_breve disciplinata + colonna pattern_misrank su zona C.
 - H7: B2+B3 in COMPLEMENTO necessario, ordine B2-poi-B3 in serie (drift protection).
 - H8: REGIME 3 corpus-thin per concetto → work-item esplorativo scheletro doppio livello (post-V2).
 
+### E2E B2 ANT L1 PASS sostanziale + ANALISTA REGISTRA H9 + SIGN-OFF B3 (2026-05-30)
+
+**E2E B2 ANT L1 4h (commit 7217737, flag V2_B2_COSINE_SELECTOR_ENABLED=true):**
+- 565s totali (-28% vs baseline HACCP ~780s) → B2 più veloce, saving Cohere call
+- 335 slide, distribuzione 83+84+84+84 (vs ANT V2-pre-D3 review 17 che era 84+84+84+76 con M3 degraded → ferita strutturale risolta dal refactor D3)
+- Articoli del cuore ANT_M0 (Art. 40, Art. 46, Allegato I CPI) **tutti presenti dominanti** nei top-5 articoli per modulo
+
+**ANALISTA SAMPLE-READ M0 84 slide (disciplina D-160 al render):**
+- Slide 1-30 buone (combustione, sostanze pericolose, classificazione fuochi, GSA, strategia antincendio)
+- Slide 31-39 (9): meta-formazione corsi antincendio livello 1/2 → cross-corso intra-regulation
+- Slide 43-49 (5): medico competente e idoneità → cross-modulo (vive in GEN M1, non ANT M0)
+- Slide 51-60 (10): Titolo IV Cantieri → cross-titolo strutturale
+- Slide 61-70 (10 parziali): atmosfere esplosive ATEX → cross-titolo XI parziale
+- Slide 71-82 (10): meta-formazione e ruoli formali → pattern V2 baseline review 17 in scala minore
+
+**Conteggio onesto analista**: ~28-30 on-topic veri + ~10-12 adjacent legittimi + **~35-40 slide cross-scope problematiche = ~42-48% problematico**.
+
+**Differenza categorica vs mia regex strict**: 0.9% (regex) vs 42% (sample-read) = **~33-42 punti percentuali invisibili alla regex**. Stesso ordine di grandezza della discrepanza review 17 (regex 0% medico-bio M1 vs occhio 50% cross-corso Modulo A).
+
+### H9 — Regex strict NON è metrica di verifica per il refactor; sample-read manuale al render è gate primario (analista 2026-05-30)
+
+Lezione D-160 estesa: regex misura pattern noto del giorno; pattern emergente è invisibile alla regex finché non viene aggiunto come ulteriore espressione. Sample-read manuale al render resta gate primario; regex è metrica di partenza, non decisionale.
+
+**Applicazione operativa**: da H9 in avanti, ogni E2E del refactor passa per sample-read PPTX modulo per modulo come gate primario (analista). Regex resta come proxy veloce.
+
+### B3 SIGN-OFF analista 2026-05-30 con 3 raffinamenti
+
+(a) **Decay×0.4 + soglia scarto, NON hard-scarto cross-titolo**. Ragione: hard-scarto non recuperabile da cosine_voyage alto. Se chunk Titolo IV Cantieri ha *altissimo* cosine_voyage al subtopic (perché parla anche di prevenzione incendi in cantieri), hard-scarto lo elimina senza chance. Decay×0.4 + soglia lo lascia in gioco se cosine compensa. Architetturalmente più robusto.
+
+(b) **Titolo atteso del subtopic, NON Titolo dominante calcolato dal pool**. Ragione: su REGIME 3 (PRE M3, GEN M1 voci definitorie) il pool top-30 è già grab-bag; "Titolo dominante" del pool è il Titolo che il grab-bag ha messo più volte, NON il Titolo corretto per il subtopic. Su ANT M0 meno problematico (Titolo dominante "Titolo I-bis Prevenzione incendi" è coerente), ma su PRE M3 voce 1 "Definizione incidente mancato" il pool potrebbe avere Art. 37 (Titolo I formazione) come dominante, e B3 finirebbe per favorire Art. 37 penalizzando Art. 35.
+
+**Soluzione (b)**: usa "Titolo atteso del subtopic" pre-calcolato dal `regulation_slugs` del course_type + indizi del subtopic stesso. Per ANT M0 il Titolo atteso è "D.Lgs 81/08 Titolo I-bis + DM 02/09/2021 Allegato I" (dichiarato nel catalogo). Quel "Titolo atteso del subtopic" è essenzialmente l'opzione (d) di grounding scheletro che era D-166 work-item.
+
+**Fallback se costoso recuperarlo dal DB attuale**: accetta "Titolo dominante per regulation calcolato dal pool" come compromesso, ma con cautela esplicita: **su moduli REGIME 3 il majority vote del pool è già contaminato → B3 potrebbe favorire chunks sbagliati. Registra come limite noto e considera scheletro doppio livello (H8) come soluzione post-V2.**
+
+(c) **Sequenza implementazione: flag dedicato `v2_b3_cross_title_decay_enabled` default False + E2E ANT L1 post-B3 + sample-read analista al render come gate**. Quando E2E post-B3 gira, mandare PPTX all'analista. Lui legge M0 modulo per modulo come ha fatto ora. PASS se ~17-22 slide problematiche residue (corpus-thin strutturale) emergono come previsto; FAIL se B3 elimina meno del previsto o introduce regressioni.
+
+**Aspettativa post-B3 ricalibrata (analista)**: B3 elimina ~15-18 slide cross-titolo veri (Cantieri Titolo IV + ATEX Titolo XI parziali), lascia ~17-22 slide residue corpus-thin strutturale ANT (DM 02/09 sospetto parsing povero + corpus non denso su principi tecnici incendio). Residue sono target di **B4 D9 vincolante + #R14-estesa** (riparsing DM 02/09 + completamento corpus antincendio).
+
 ### ANALISTA SIGN-OFF STEP 3 (2026-05-30) — BIVIO A confermato + raffinamento metodologico
 
 **Decisione**: A. HACCP M3 entra nel ground-truth com'è, marchiato `LOW-CONFIDENCE-UNIFORMLY, corpus_parziale (D.Lgs 193/2007 non ingerito)`. NON ingerire 193/2007 prima del ground-truth.

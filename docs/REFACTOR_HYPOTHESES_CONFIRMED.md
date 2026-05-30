@@ -516,6 +516,48 @@ operativamente irrisolvibile sul corpus. La cura non è "ranking più aggressivo
 
 ---
 
+## H9 — Regex strict NON è metrica di verifica per il refactor; sample-read manuale al render è gate primario
+
+**Ipotesi formulata (analista messaggio 15, 2026-05-30 post E2E B2 ANT L1):**
+> "La regex strict misura un pattern (Modulo A RSPP esplicito) che il refactor ha
+> effettivamente risolto; non misura la classe di patologie (cross-scope semantico,
+> meta-formazione, cross-titolo cantieri, medico-bio cross-modulo) che persiste.
+> Da qui in avanti, ogni E2E del refactor passa per sample-read al render, non per
+> la regex come metrica primaria."
+
+**Verifica empirica (2026-05-30, E2E B2 ANT L1 4h post-D3+B2):**
+
+Confronto su STESSO PPTX (corso ANT L1 generato con B2 ON):
+- Mia metrica regex strict (`RSPP|ASPP|Coordinatore|Preposti|HACCP|Modulo A/B/C|DPI industriali`): 7/335 = 2.1%, post sample-read 3/335 = 0.9% veri cross-corso.
+- Sample-read analista (lettura M0 84 slide modulo per modulo): ~28-30 on-topic veri + ~10-12 adjacent legittimi + **~35-40 slide cross-scope problematiche = ~42-48%** problematico.
+
+Pattern delle slide cross-scope individuate dall'analista NON catturate dalla regex strict:
+- **Slide 31-39 (9): meta-formazione corsi antincendio** ("Corsi formazione livello 1/2", "Differenza tipo 1 e 2", "Obbligo formazione aggiornamento"). Cross-corso intra-regulation (DM 02/09 stessa regulation, scope = corso Formatori Antincendio non principi tecnici).
+- **Slide 43-49 (5): medico competente e idoneità** ("Ruolo medico competente rischio incendio", "Giudizi idoneità", "Valutazione medica lavoratore rischio incendio"). Pattern medico-biologico cross-modulo (vive in GEN M1 sorveglianza sanitaria, non in ANT M0 principi incendio).
+- **Slide 51-60 (10): Titolo IV Cantieri** ("Ambienti esigenze tutela", "Monitoraggio esposizioni", "Infrastrutture interferenti", "Polveri/fumi cantieri", "Linee aeree", "Caduta materiali", "Viabilità mezzi soccorso"). Cross-titolo strutturale.
+- **Slide 61-70 (10 parziali): atmosfere esplosive ATEX** ("Cos'è atmosfera esplosiva", "Rilevazione controllo atmosfere", "Segnaletica DPI in atmosfera esplosiva"). 5-8 di queste cross-titolo XI ATEX-specifiche.
+- **Slide 71-82 (10): meta-formazione e ruoli formali** ("Formazione specifica", "Aggiornamento", "Ruolo datore prevenzione", "Formazione pratica datore", "Esempi formazione cantiere", "Riunione periodica obiettivi", "RLS", "Processo formazione"). Pattern V2 baseline review 17 ricomparso in scala minore.
+
+**Differenza categorica: ~33-42 punti percentuali** tra regex strict (0.9%) e sample-read (42%). Stesso ordine di grandezza della discrepanza review 17 V2 (regex 0% medico-bio M1 vs occhio 50% cross-corso Modulo A RSPP).
+
+**Conclusione (analista sign-off 2026-05-30):**
+
+1. **La regex strict è strumento di verifica per la CLASSE DI PROBLEMI CHE DISEGNA ESPLICITAMENTE**, non per il refactor D3+B2+B3 nel suo complesso. Misura efficacemente il pattern Modulo A/RSPP esplicito (che il refactor ha effettivamente risolto: da ~50% baseline a 0.9% E2E B2), ma non misura la patologia spostata in dimensione nuova.
+
+2. **Da H9 in avanti, ogni E2E del refactor passa per sample-read al render come gate primario, non per la regex.** Regex resta come metrica di partenza (proxy veloce), ma il PASS/FAIL si decide alla lettura del PPTX modulo per modulo.
+
+3. **Lezione D-160 estesa**: D-160 originale ("metrica regex secondaria, sample-read manuale primaria") era formulata su rerank score Cohere. H9 estende lo stesso principio a **metriche di evaluation del refactor in produzione**: la metrica automatizzata misura il pattern noto, l'occhio umano vede il pattern emergente. Le due NON sono intercambiabili.
+
+**Difesa contro drift H9**: se in 6 mesi qualcuno proporrà "rendiamo automatica la verifica via regex/metrica per ogni E2E del cliente, così è scalabile", H9 mostra che la regex misura il pattern noto del giorno; il pattern emergente è invisibile alla regex finché non viene aggiunto come ulteriore espressione. La cura: sample-read manuale al render resta gate primario; la regex è metrica di partenza, non metrica decisionale.
+
+**Implicazione pratica per B3** (analista 2026-05-30):
+- B3 elimina ~15-18 slide cross-titolo veri (Cantieri Titolo IV + ATEX Titolo XI parziali).
+- B3 NON elimina ~17-22 slide problematiche residue (meta-formazione corsi ANT intra-regulation, medico-bio cross-modulo).
+- Quelle ~17-22 slide residue sono **corpus-thin strutturale di ANT** (DM 02/09 58 chunks sospetti per qualità parsing; corpus non denso sui principi tecnici dell'incendio; sistema attinge a materiale adiacente). Target di **B4 D9 vincolante + #R14-estesa** (riparsing DM 02/09 + completamento corpus antincendio).
+- **Aspettativa post-B3 ricalibrata da "0.9% → 0.0%" a "~42% problematico → ~15-20% problematico residuo strutturale".**
+
+---
+
 ## Schema di registrazione per ipotesi future
 
 Ogni nuova H si registra con:
