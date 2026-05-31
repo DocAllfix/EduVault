@@ -989,6 +989,7 @@ async def apply_b3_cross_title_decay(
 
     # Per ogni regulation, scegli dominante (max count, tie-break lessicografico)
     noop_reasons: list[str] = []
+    dominance_ratio_per_reg: dict[str, float] = {}  # H8b-γ3: winner_count / total
     for rid, ts_counts in counts_per_reg.items():
         if not ts_counts:
             dominante_per_reg[rid] = None
@@ -997,13 +998,39 @@ async def apply_b3_cross_title_decay(
         sorted_ts = sorted(ts_counts.items(), key=lambda kv: (-kv[1], kv[0]))
         winner = sorted_ts[0][0]
         winner_count = sorted_ts[0][1]
+        total_count = sum(ts_counts.values())
         dominante_per_reg[rid] = winner
+        # H8b-γ3 (2026-05-31): cardinality ratio = quanto e' dominata la regulation
+        # nel pool della voce. Usato per identificare strong_dominance_regs.
+        dominance_ratio_per_reg[rid] = winner_count / total_count if total_count > 0 else 0.0
         # Flag low_confidence_dominante se dominante calcolata su < 3 chunks
         if winner_count < 3:
             noop_reasons.append(f"low_confidence_dominante:{rid}")
         # Flag monosection se TUTTI chunks della regulation hanno stesso top_section
         if len(ts_counts) == 1:
             noop_reasons.append(f"monosection:{rid}")
+
+    # H8b-γ3 (analista sign-off 2026-05-31 post-H8 verdict 22.4% core M0):
+    # Strong dominance escalation. Quando una regulation ha dominanza forte
+    # (>=70% chunks della top_section dominante nel pool della voce), i chunks
+    # cross-titolo vengono HARD_DISCARD invece di decay_kept.
+    # Razionale (analista): pool ben-dominato e' indicatore robusto che la voce
+    # ha trovato il "Titolo giusto" nel corpus; i pochi chunks cross-titolo
+    # sopravvissuti a B2 cosine sono rumore residuo che il LLM userebbe come
+    # padding (vedi cluster #35-41 PPTX 691405b1 Titolo III in M0 Principi,
+    # pool dominato Titolo I 78%). γ-3 e' estensione naturale B3 majority-vote,
+    # zero conoscenza course-specific (no Tabella 2 mascherata).
+    # Flag-gated: v2_b3_strong_dominance_enabled default False per safety.
+    strong_dominance_regs: set[str] = set()
+    if settings.v2_b3_strong_dominance_enabled:
+        threshold_dom = settings.b3_strong_dominance_threshold
+        for rid, ratio in dominance_ratio_per_reg.items():
+            # Skip strong_dominance se regulation e' trivial single-section (sempre 100%
+            # dominanza per costruzione - non e' "vera" dominanza informativa) o se
+            # rientra in skip_low_obs_regs (calcoleremo questo set dopo, applichiamo
+            # post-hoc).
+            if ratio >= threshold_dom:
+                strong_dominance_regs.add(rid)
 
     # Trivial single-section regulations: rilevate dal mapping interno
     from app.services.regulation_metadata import SINGLE_SECTION_REGULATIONS
@@ -1037,6 +1064,13 @@ async def apply_b3_cross_title_decay(
             noop_reasons.append(
                 f"b3_skipped_insufficient_obs:{rid}:n_obs={n_obs}<{min_obs}"
             )
+
+    # H8b-γ3: rimuovi dal set strong_dominance le regulations che sono
+    # trivial_single_section (100% dominanza per costruzione, non informativa)
+    # o skip_low_obs (dominante e' rumore statistico, NON applicare hard_discard).
+    # Coerente con esistenti gate "do no harm sotto incertezza" di B3.
+    strong_dominance_regs -= trivial_regs
+    strong_dominance_regs -= skip_low_obs_regs
 
     # Step 3 + 4: applica decay e soglia scarto.
     max_pool_score = max(sc.score for sc in pool_b2)
@@ -1088,17 +1122,28 @@ async def apply_b3_cross_title_decay(
             decisione = "keep_skipped_insufficient_obs"
             weight_post = cosine_orig
         else:
-            # Cross-titolo: applica decay
-            weight_post = cosine_orig * decay_factor
-            if weight_post < soglia_scarto:
-                decisione = "discard_below_threshold"
+            # Cross-titolo: H8b-γ3 strong dominance gate PRIMA di decay.
+            # Se regulation e' in strong_dominance_regs (>=70% pool dominato dalla
+            # top_section dominante) -> hard_discard senza seconda chance.
+            # Razionale: pool ben-dominato + chunk cross-titolo = rumore residuo
+            # che il LLM userebbe come padding cross-scope (vedi cluster #35-41
+            # PPTX 691405b1 post-H8). Gate flag-gated via v2_b3_strong_dominance_enabled.
+            if rid in strong_dominance_regs:
+                decisione = "hard_discard_strong_dominance"
+                weight_post = 0.0  # per telemetria, no survivor add
                 # NON aggiungo a survivors
             else:
-                decisione = "decay_kept"
-                # Riassegno il peso al ScoredChunk per ordinamento finale
-                survivors.append(
-                    ScoredChunk(chunk=sc.chunk, score=weight_post, source="b3_decayed")
-                )
+                # Cross-titolo legacy: applica decay
+                weight_post = cosine_orig * decay_factor
+                if weight_post < soglia_scarto:
+                    decisione = "discard_below_threshold"
+                    # NON aggiungo a survivors
+                else:
+                    decisione = "decay_kept"
+                    # Riassegno il peso al ScoredChunk per ordinamento finale
+                    survivors.append(
+                        ScoredChunk(chunk=sc.chunk, score=weight_post, source="b3_decayed")
+                    )
 
         decay_log.append({
             "chunk_id": cid,
@@ -1126,6 +1171,12 @@ async def apply_b3_cross_title_decay(
         rid: dom for rid, dom in dominante_per_reg.items() if dom is not None
     }
 
+    # H8b-γ3 telemetria estesa: strong_dominance regs + ratios + hard_discards count.
+    hard_discards_count = decision_counts.get("hard_discard_strong_dominance", 0)
+    dominance_ratios_rounded = {
+        rid: round(ratio, 3) for rid, ratio in dominance_ratio_per_reg.items()
+    }
+
     emit(
         PipelinePhase.GRAPH_TRAVERSAL,
         course_id=course_id,
@@ -1140,6 +1191,11 @@ async def apply_b3_cross_title_decay(
         extra_threshold_ratio=settings.b3_threshold_ratio,
         extra_decision_counts=decision_counts,
         extra_dominante_per_regulation=dominante_summary,
+        extra_strong_dominance_enabled=settings.v2_b3_strong_dominance_enabled,
+        extra_strong_dominance_threshold=settings.b3_strong_dominance_threshold,
+        extra_strong_dominance_regs=sorted(strong_dominance_regs),
+        extra_dominance_ratio_per_regulation=dominance_ratios_rounded,
+        extra_hard_discards_count=hard_discards_count,
     )
 
     # Log per-chunk (livello debug, alto volume): emesso via logger.info per

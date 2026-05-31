@@ -134,6 +134,8 @@ class Settings(BaseSettings):
     b3_decay_factor: float = 0.4   # F2.13 B3: peso decay per chunk cross-titolo (analista sign-off 2026-05-30)
     b3_threshold_ratio: float = 0.30  # F2.13 B3: soglia scarto = max_pool * ratio (auto-adattiva, sign-off analista)
     b3_min_observations: int = 4   # F2.13 B3: numero minimo chunks per regulation per applicare decay. Se n_obs(rid) < soglia, dominante e' rumore statistico (3 obs split 2:1 = singola differenza) -> skip B3 sui chunks di quella regulation (do no harm sotto incertezza). Sign-off analista 2026-05-30 post-osservazione GEN M1 Art. 236 false-discard.
+    v2_b3_strong_dominance_enabled: bool = False  # H8b-γ3 (analista 2026-05-31 post H8 verdict 22.4% core): B3 escalation hard_discard quando dominanza_per_regulation supera soglia. Estensione naturale di B3 esistente, zero conoscenza course-specific (NO Tabella 2 mascherata).
+    b3_strong_dominance_threshold: float = 0.70  # H8b-γ3: ratio (winner_count / total_chunks_per_reg) sopra cui regulation e' considerata "strong dominance". Su pool ben-dominato (>=70% chunks della top_section dominante), cross-titolo chunks vengono hard_discard invece di decay_kept. Su pool diversificati (<70%) comportamento legacy invariato. Calibrato sul sample-read M0 post-H8 (cluster #35-41 Titolo III in pool dominato Titolo I 78%).
     v2_b4_corpus_thin_enabled: bool = False  # F2.14 B4: D9 vincolante corpus-thin (Caso 1 sign-off analista 2026-05-30 post-sample-read M0 PPTX). Caso 2+3 esclusi (richiedevano Tabella 2 course_type->expected_titoli, vanno a F2.13 D8 catalog DB).
     b4_min_chunks_per_voice: int = 3   # F2.14 B4: soglia n_chunks_per_regulation_per_voce. Se una regulation ha meno chunks di questa soglia nel pool finale post-B3 di una voce -> corpus thin per quella voce. Default start point analista 2026-05-30, calibrazione dai prossimi E2E.
     b4_corpus_thin_behavior: str = "block"  # F2.14 B4: "block" (default sicura) | "mark_only" (scappatoia). Block: warning visibile in generation_jobs.status, UI mostra all'operatore prima del replay. Mark_only: genera comunque + scrive low_corpus_confidence in metadata slide. Analista sign-off 2026-05-30: default block, mark_only solo se operatore esperto override.
@@ -159,6 +161,7 @@ class Settings(BaseSettings):
             "quality_badges_enabled": self.v2_quality_badges_enabled,
             "b2_cosine_selector_enabled": self.v2_b2_cosine_selector_enabled,
             "b3_cross_title_decay_enabled": self.v2_b3_cross_title_decay_enabled,
+            "b3_strong_dominance_enabled": self.v2_b3_strong_dominance_enabled,
             "b4_corpus_thin_enabled": self.v2_b4_corpus_thin_enabled,
         }
 

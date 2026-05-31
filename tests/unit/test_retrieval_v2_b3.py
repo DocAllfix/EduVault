@@ -268,3 +268,129 @@ async def test_b3_per_regulation_dominante_isolated() -> None:
     art_121 = next(sc for sc in survivors if sc.chunk.chunk_id.endswith("121"))
     assert art_121.source == "b3_decayed"
     assert art_121.score == pytest.approx(0.50 * 0.4)
+
+
+# =============================================================================
+# H8b-γ3 — B3 strong dominance escalation hard_discard (analista 2026-05-31)
+# =============================================================================
+
+
+@pytest.mark.asyncio
+async def test_b3_strong_dominance_hard_discards_cross_titolo(monkeypatch: pytest.MonkeyPatch) -> None:
+    """H8b-γ3: pool dominato fortemente (≥70%) da Titolo I → chunks Titolo III
+    cross-titolo HARD_DISCARD invece di decay_kept. Cura cluster #35-41 PPTX
+    691405b1 post-H8 (Titolo III Attrezzature in M0 Principi).
+
+    Pool simulato: 8 Titolo I + 2 Titolo III in regulation dlgs (ratio 8/10=80%).
+    Strong dominance threshold default 0.70 → triggers hard_discard.
+    Atteso: 8 Titolo I survivors, 2 Titolo III hard_discarded (NON in pool).
+    """
+    from app.config import settings
+    monkeypatch.setattr(settings, "v2_b3_strong_dominance_enabled", True)
+
+    pool_b2 = [
+        _scored(15, 0.55),   # Titolo I dominante
+        _scored(40, 0.50),
+        _scored(46, 0.48),
+        _scored(18, 0.45),
+        _scored(20, 0.43),
+        _scored(35, 0.40),
+        _scored(37, 0.38),
+        _scored(50, 0.35),   # 8 Titolo I = 80% dominance
+        _scored(69, 0.42),   # Titolo III cross
+        _scored(75, 0.41),   # Titolo III cross
+    ]
+    meta_rows = [
+        {"chunk_id": pool_b2[i].chunk.chunk_id, "rid": "rid_dlgs",
+         "top_section": "Titolo I" if i < 8 else "Titolo III"}
+        for i in range(10)
+    ]
+    reg_rows = [{"rid": "rid_dlgs", "slug": "dlgs_81_08"}]
+    repo = _mock_repo_with_meta(meta_rows, reg_rows)
+
+    survivors = await apply_b3_cross_title_decay(pool_b2=pool_b2, repo=repo)
+
+    # Solo 8 Titolo I sopravvivono. 2 Titolo III hard_discarded.
+    assert len(survivors) == 8, f"atteso 8 survivors (solo Titolo I), trovato {len(survivors)}"
+    survivor_ids = {sc.chunk.chunk_id for sc in survivors}
+    # Verifica Titolo III idx 69 e 75 NON nel survivor pool
+    assert pool_b2[8].chunk.chunk_id not in survivor_ids, "Titolo III idx 69 doveva essere hard_discarded"
+    assert pool_b2[9].chunk.chunk_id not in survivor_ids, "Titolo III idx 75 doveva essere hard_discarded"
+
+
+@pytest.mark.asyncio
+async def test_b3_diversified_pool_no_hard_discard(monkeypatch: pytest.MonkeyPatch) -> None:
+    """H8b-γ3: pool diversificato (no top_section ≥70%) → comportamento legacy
+    (decay_kept come pre-γ3). Verifica che γ-3 NON danneggi pool legittimamente
+    diversificati (es. PRE M3 voce 1 grab-bag).
+    """
+    from app.config import settings
+    monkeypatch.setattr(settings, "v2_b3_strong_dominance_enabled", True)
+
+    # Pool 10 chunks: 4 Titolo I (40%) + 3 Titolo IV (30%) + 3 Titolo IX (30%)
+    # Max dominance = 40% < 70% threshold → no hard_discard, decay legacy
+    pool_b2 = [
+        _scored(15, 0.55), _scored(40, 0.50), _scored(46, 0.45), _scored(18, 0.43),  # Titolo I
+        _scored(95, 0.42), _scored(121, 0.40), _scored(125, 0.38),                    # Titolo IV
+        _scored(225, 0.36), _scored(236, 0.35), _scored(244, 0.33),                    # Titolo IX
+    ]
+    top_sections = ["Titolo I"] * 4 + ["Titolo IV"] * 3 + ["Titolo IX"] * 3
+    meta_rows = [
+        {"chunk_id": pool_b2[i].chunk.chunk_id, "rid": "rid_dlgs",
+         "top_section": top_sections[i]}
+        for i in range(10)
+    ]
+    reg_rows = [{"rid": "rid_dlgs", "slug": "dlgs_81_08"}]
+    repo = _mock_repo_with_meta(meta_rows, reg_rows)
+
+    survivors = await apply_b3_cross_title_decay(pool_b2=pool_b2, repo=repo)
+
+    # Decisioni legacy: 4 Titolo I keep_same_titolo + Titolo IV/IX decayed
+    # (cosine * 0.4: 0.42*0.4=0.168 vs soglia max=0.55*0.3=0.165 → quasi tutti decay_kept).
+    # Nessun hard_discard atteso (max dominance 40% < 70%).
+    sources = {sc.source for sc in survivors}
+    assert "b3_decayed" in sources, "cross-titolo doveva essere decay_kept (no strong dominance)"
+    # Tutti i Titolo I survivors devono avere source originale (b2_cosine_voyage)
+    titolo_i_survivors = [sc for sc in survivors if sc.score >= 0.43]
+    assert all(sc.source == "b2_cosine_voyage" for sc in titolo_i_survivors)
+
+
+@pytest.mark.asyncio
+async def test_b3_strong_dominance_flag_off_no_change(monkeypatch: pytest.MonkeyPatch) -> None:
+    """H8b-γ3: flag v2_b3_strong_dominance_enabled=False (default) → comportamento
+    identico a pre-γ3 (decay_kept anche su pool fortemente dominati). Garantisce
+    safety: γ-3 e' opt-in, deploy commit non rompe runtime esistente.
+    """
+    from app.config import settings
+    monkeypatch.setattr(settings, "v2_b3_strong_dominance_enabled", False)  # OFF
+
+    # Pool con 8 Titolo I (80% dominance) + 2 Titolo III con cosine sufficientemente
+    # alta da sopravvivere a decay legacy (cosine * 0.4 > soglia 0.165).
+    # Cosine 0.50 * 0.4 = 0.20 > 0.165 → decay_kept (NO discard_below_threshold).
+    pool_b2 = [
+        _scored(15, 0.55), _scored(40, 0.50), _scored(46, 0.48), _scored(18, 0.45),
+        _scored(20, 0.43), _scored(35, 0.40), _scored(37, 0.38), _scored(50, 0.35),
+        _scored(69, 0.50), _scored(75, 0.48),  # cosine ALTA per sopravvivere decay legacy
+    ]
+    meta_rows = [
+        {"chunk_id": pool_b2[i].chunk.chunk_id, "rid": "rid_dlgs",
+         "top_section": "Titolo I" if i < 8 else "Titolo III"}
+        for i in range(10)
+    ]
+    reg_rows = [{"rid": "rid_dlgs", "slug": "dlgs_81_08"}]
+    repo = _mock_repo_with_meta(meta_rows, reg_rows)
+
+    survivors = await apply_b3_cross_title_decay(pool_b2=pool_b2, repo=repo)
+
+    # Flag OFF: comportamento legacy. Titolo III chunks decayed ma sopravvivono
+    # (0.50*0.4=0.20 > soglia 0.55*0.3=0.165 → decay_kept).
+    # Atteso 10 survivors totali (no hard_discard quando flag OFF).
+    assert len(survivors) == 10, f"flag OFF: atteso 10 survivors (legacy), trovato {len(survivors)}"
+    # Titolo III chunks devono essere decayed ma presenti
+    survivor_ids = {sc.chunk.chunk_id: sc for sc in survivors}
+    titolo_3_69 = survivor_ids.get(pool_b2[8].chunk.chunk_id)
+    titolo_3_75 = survivor_ids.get(pool_b2[9].chunk.chunk_id)
+    assert titolo_3_69 is not None, "flag OFF: Titolo III doveva sopravvivere"
+    assert titolo_3_75 is not None
+    assert titolo_3_69.source == "b3_decayed"
+    assert titolo_3_75.source == "b3_decayed"

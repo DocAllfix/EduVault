@@ -393,18 +393,45 @@ async def _generate_module_h8(
         share = pool_sizes[ord_v] / total_pool if total_pool > 0 else 1.0 / n_voci
         slide_per_voce[ord_v] = max(1, int(ceil(content_slide_target * share)))
 
+    # H8b-α (analista 2026-05-31): cap proporzionale al numero voci skeleton.
+    # Patologia osservata post-H8 (PPTX 691405b1): voci tematicamente larghe
+    # (v1 "Concetto incendio", v2 "Triangolo del fuoco") hanno ricevuto sizing
+    # eccessivo (~10-15 slide/voce) -> LLM ha esaurito subtopic e riempito con
+    # materia adjacent ridondando (slide 1-9 + 17-19 + 25-34 = 20 slide su
+    # prevenzione/applicazione, identicamente ripetute).
+    # Cura: cap auto-adattivo basato su avg = content_target / n_voci, tolleranza
+    # +/-2. Voce con pool grande NON puo' espandere oltre cap; voce thin con
+    # pool piccolo NON scende sotto floor (garanzia visibilita' minima).
+    # Auto-adattivo: M0 (9 voci, 80 target) -> range 7-11; M con 12 voci -> 5-9.
+    avg_slides_per_voce = content_slide_target / n_voci if n_voci > 0 else 1.0
+    slide_cap_per_voce = max(3, round(avg_slides_per_voce + 2))
+    slide_floor_per_voce = max(2, round(avg_slides_per_voce - 2))
+    for ord_v in slide_per_voce:
+        slide_per_voce[ord_v] = max(
+            slide_floor_per_voce,
+            min(slide_cap_per_voce, slide_per_voce[ord_v])
+        )
+
     # Correzione: aggiusta verso target esatto (preferendo voci con piu` pool)
-    while sum(slide_per_voce.values()) > content_slide_target:
-        # Rimuovi 1 dalla voce con piu` slide
-        max_ord = max(slide_per_voce, key=lambda k: slide_per_voce[k])
-        if slide_per_voce[max_ord] > 1:
-            slide_per_voce[max_ord] -= 1
-        else:
+    # NOTA H8b-α: il target post-cap puo' divergere significativamente da
+    # content_slide_target se molte voci sono clamped. Correzione tollerata
+    # entro +/- 20% del target originale (range 0.8-1.2 x); oltre, accetta
+    # divergenza come trade-off del cap (meglio cluster focali che target esatto).
+    target_lower = int(content_slide_target * 0.8)
+    target_upper = int(content_slide_target * 1.2)
+    while sum(slide_per_voce.values()) > target_upper:
+        # Rimuovi 1 dalla voce con piu` slide (rispettando floor)
+        candidates = {k: v for k, v in slide_per_voce.items() if v > slide_floor_per_voce}
+        if not candidates:
             break
-    while sum(slide_per_voce.values()) < content_slide_target:
-        # Aggiungi 1 alla voce con piu` pool (proporzionalmente sotto-allocata)
-        # Ordina per pool_size desc
-        sorted_voci = sorted(slide_per_voce.keys(), key=lambda k: -pool_sizes[k])
+        max_ord = max(candidates, key=lambda k: candidates[k])
+        slide_per_voce[max_ord] -= 1
+    while sum(slide_per_voce.values()) < target_lower:
+        # Aggiungi 1 alla voce con piu` pool (rispettando cap)
+        candidates = {k: v for k, v in slide_per_voce.items() if v < slide_cap_per_voce}
+        if not candidates:
+            break
+        sorted_voci = sorted(candidates.keys(), key=lambda k: -pool_sizes[k])
         slide_per_voce[sorted_voci[0]] += 1
 
     logger.info(
@@ -414,6 +441,11 @@ async def _generate_module_h8(
         pool_sizes=pool_sizes,
         slide_per_voce=slide_per_voce,
         content_slide_target=content_slide_target,
+        # H8b-α telemetria cap
+        slide_cap_per_voce=slide_cap_per_voce,
+        slide_floor_per_voce=slide_floor_per_voce,
+        avg_slides_per_voce=round(avg_slides_per_voce, 2),
+        total_after_cap=sum(slide_per_voce.values()),
     )
 
     # ── Distribuzione tipi slide: ripartisco mod_slide_distribution fra voci ──
