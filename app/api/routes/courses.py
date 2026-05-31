@@ -1434,10 +1434,23 @@ async def chat_apply_message(
         raise HTTPException(400, "Solo i messaggi assistant possono essere applicati")
     if row["applied_at"] is not None:
         raise HTTPException(409, "Messaggio gia' applicato")
-    tool_calls = row["tool_calls"]
+    # BUG #4 fix: asyncpg restituisce JSONB come str → decodifica a dict
+    tool_calls_raw = row["tool_calls"]
+    tool_calls: dict[str, Any] | None
+    if tool_calls_raw is None:
+        tool_calls = None
+    elif isinstance(tool_calls_raw, dict):
+        tool_calls = tool_calls_raw
+    else:
+        import json as _json3
+        try:
+            tool_calls = _json3.loads(tool_calls_raw)
+        except Exception:
+            tool_calls = None
+
     if not tool_calls or not isinstance(tool_calls, dict):
         raise HTTPException(400, "Nessun patch proposto in questo messaggio")
-    patch = tool_calls.get("proposed_patch") if isinstance(tool_calls, dict) else None
+    patch = tool_calls.get("proposed_patch")
     if not patch or not isinstance(patch, dict):
         raise HTTPException(400, "Nessun proposed_patch nel messaggio")
 

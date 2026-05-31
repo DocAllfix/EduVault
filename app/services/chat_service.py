@@ -203,7 +203,22 @@ async def list_messages(
         uuid_mod.UUID(conversation_id),
         limit,
     )
-    # Reverse cronologico ascendente per UI
+    # Reverse cronologico ascendente per UI.
+    # BUG #4 fix: asyncpg restituisce JSONB come str → decodifica a dict per
+    # la response Pydantic (ChatMessageDTO.tool_calls: dict | None).
+    import json as _json2
+
+    def _parse_tool_calls(raw: Any) -> dict[str, Any] | None:
+        if raw is None:
+            return None
+        if isinstance(raw, dict):
+            return raw
+        try:
+            parsed = _json2.loads(raw)
+            return parsed if isinstance(parsed, dict) else None
+        except Exception:
+            return None
+
     return list(
         reversed(
             [
@@ -212,7 +227,7 @@ async def list_messages(
                     "role": r["role"],
                     "content": r["content"],
                     "slide_index": r["slide_index"],
-                    "tool_calls": r["tool_calls"],
+                    "tool_calls": _parse_tool_calls(r["tool_calls"]),
                     "applied_at": r["applied_at"].isoformat() if r["applied_at"] else None,
                     "created_at": r["created_at"].isoformat() if r["created_at"] else None,
                 }
