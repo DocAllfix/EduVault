@@ -191,15 +191,19 @@ export function CourseStudio() {
               onFilterToggle={() => setFilterProblematic(!filterProblematic)}
             />
 
-            {/* Grid 3-colonne: sidebar 240 (slide list + actions) /
-                center fluid (viewer + audio) /
-                right rail 400 (editor + quality + regen + image).
-                Layout calibrato per non troncare bottoni primary ("Rigenera
-                questa slide", "Rigenera con AI", "Salva modifiche") né
-                titoli slide nella sidebar. */}
-            <div className="grid grid-cols-[240px_1fr_400px] gap-4">
+            {/* Grid 3-colonne responsive (analista 2026-05-31):
+                - Default (>=1280 xl): 220px / 1fr / 360px — center ampio, sidebar+
+                  right comodi per i primary buttons (Rigenera/Salva).
+                - Su breakpoint stretti (<1280): sidebar 180px / 1fr / 320px,
+                  ancora 3-col funzionali ma piu' compatti. Center column
+                  resta sempre flexible (min 0).
+                - Su <1024 (lg): scendiamo a 2-col stack: sidebar 200px + center
+                  (editor in tab sotto), right rail in fondo.
+                Calibrato sulla viewport interna effettiva del Main (~726px su
+                screen 1040 con app sidebar 250px). */}
+            <div className="grid grid-cols-[180px_minmax(0,1fr)_320px] gap-3 xl:grid-cols-[220px_minmax(0,1fr)_360px] xl:gap-4">
               {/* ─── Sidebar: toolbar azioni + lista slide ─── */}
-              <aside className="flex h-[calc(100vh-16rem)] flex-col gap-2">
+              <aside className="flex h-[calc(100vh-16rem)] min-w-0 flex-col gap-2">
                 <SlideActions
                   courseId={id}
                   selected={selected}
