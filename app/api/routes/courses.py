@@ -822,6 +822,37 @@ async def get_course_slide_audio(
                         filename=f"slide_{idx:04d}.mp3")
 
 
+@router.get("/{course_id}/audio/{idx}/info")
+async def get_course_slide_audio_info(
+    course_id: str,
+    idx: int,
+    user: dict[str, Any] = Depends(get_current_user),
+) -> dict[str, Any]:
+    """F7.4 — Metadata audio track per UI badge (vast-hopping post-MVP 2026-05-31).
+
+    Ritorna provider (edge | azure) + voice + duration. Usato da audio-player.tsx
+    per mostrare badge "Azure" premium signal accanto al play button.
+    """
+    pool = get_pool()
+    course = await _load_course_or_404(course_id, pool)
+    _enforce_ownership(course, user)
+    row = await pool.fetchrow(
+        "SELECT provider, voice, duration_seconds "
+        "FROM audio_tracks WHERE course_id = $1 AND slide_index = $2",
+        uuid_mod.UUID(course_id),
+        idx,
+    )
+    if not row:
+        raise HTTPException(404, f"Audio track slide {idx} non trovato")
+    return {
+        "provider": row["provider"] or "edge",
+        "voice": row["voice"],
+        "duration_seconds": float(row["duration_seconds"])
+        if row["duration_seconds"] is not None
+        else None,
+    }
+
+
 @router.get("/{course_id}/slides/{idx}/preview.png")
 async def get_slide_preview_png(
     course_id: str,

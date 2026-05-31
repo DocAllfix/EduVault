@@ -16,10 +16,12 @@
  */
 
 import { useEffect, useState } from 'react'
-import { Volume2, VolumeX } from 'lucide-react'
+import { useQuery } from '@tanstack/react-query'
+import { Sparkles, Volume2, VolumeX } from 'lucide-react'
 
 import { api, tokenStorage } from '@/lib/api'
 import { useAudioNarration } from '@/stores/audio-narration-store'
+import { Badge } from '@/components/ui/badge'
 import { Switch } from '@/components/ui/switch'
 
 export function AudioPlayer({
@@ -42,6 +44,15 @@ export function AudioPlayer({
   useEffect(() => {
     setHasError(false)
   }, [src])
+
+  // F7.4 — fetch provider metadata per badge. Solo se enabled + no error.
+  const infoQ = useQuery({
+    queryKey: ['audio-info', courseId, slideIndex] as const,
+    queryFn: () => api.getSlideAudioInfo(courseId, slideIndex),
+    enabled: enabled && !hasError,
+    staleTime: 5 * 60_000,
+    retry: false,
+  })
 
   return (
     <div className='border-border bg-muted/50 flex items-center gap-3 rounded-md border px-3 py-2'>
@@ -80,14 +91,27 @@ export function AudioPlayer({
           Audio in elaborazione… (può richiedere alcuni minuti)
         </span>
       ) : (
-        <audio
-          controls
-          src={src}
-          className='h-8 min-w-0 flex-1'
-          onError={() => setHasError(true)}
-        >
-          Il tuo browser non supporta l'audio HTML5.
-        </audio>
+        <>
+          <audio
+            controls
+            src={src}
+            className='h-8 min-w-0 flex-1'
+            onError={() => setHasError(true)}
+          >
+            Il tuo browser non supporta l'audio HTML5.
+          </audio>
+          {/* F7.4 provider badge: signal premium quality quando Azure */}
+          {infoQ.data && infoQ.data.provider === 'azure' && (
+            <Badge
+              variant='outline'
+              className='border-brand-secondary/40 bg-brand-secondary/10 text-brand-secondary shrink-0 gap-1 font-mono text-[9px]'
+              title={`Azure Neural TTS · ${infoQ.data.voice}`}
+            >
+              <Sparkles className='size-2.5' />
+              Azure
+            </Badge>
+          )}
+        </>
       )}
     </div>
   )

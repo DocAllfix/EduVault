@@ -703,6 +703,19 @@ function slideAudioUrl(id: string, idx: number): string {
   return buildUrl(`/api/courses/${encodeURIComponent(id)}/audio/${idx}`)
 }
 
+// F7.4 — audio track metadata per UI badge provider (post-MVP 2026-05-31).
+export interface AudioInfo {
+  provider: 'edge' | 'azure'
+  voice: string
+  duration_seconds: number | null
+}
+
+async function getSlideAudioInfo(id: string, idx: number): Promise<AudioInfo> {
+  return request<AudioInfo>(
+    `/api/courses/${encodeURIComponent(id)}/audio/${idx}/info`,
+  )
+}
+
 /** URL diretto del PNG-render della pagina PDF della slide (per <img src>).
  *  Restituisce 404 finché il corso non è mai stato rigenerato/non ha PDF. */
 function slidePreviewUrl(id: string, idx: number): string {
@@ -1038,6 +1051,8 @@ export const api = {
   getChatHistory,
   applyChatMessage,
   chatStreamUrl,
+  // F7 audio
+  getSlideAudioInfo,
   slideAudioUrl,
   slidePreviewUrl,
   regenerateSlide,

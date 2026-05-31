@@ -141,11 +141,18 @@ class AudioService:
                     "off_target": off_target,
                 }
             )
+            from app.config import settings as _s
+
+            provider_used = (
+                "azure"
+                if _s.v2_audio_provider_azure and _s.azure_speech_key
+                else "edge"
+            )
             await pool.execute(
                 "INSERT INTO audio_tracks "
                 "(course_id, slide_index, narration_text, audio_path, "
-                "duration_seconds, voice, off_target) "
-                "VALUES ($1, $2, $3, $4, $5, $6, $7)",
+                "duration_seconds, voice, off_target, provider) "
+                "VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
                 course_id,
                 slide.index,
                 narration,
@@ -153,6 +160,7 @@ class AudioService:
                 round(duration_s, 2),
                 self.voice,
                 off_target,
+                provider_used,
             )
 
         manifest_path = course_audio_dir / "sync_manifest.json"
@@ -253,10 +261,76 @@ class AudioService:
             return None
 
     async def _tts_save(self, narration: str, audio_path: str) -> None:
-        """Thin wrapper around edge_tts.Communicate.save() — isolated so
-        tests can patch a single seam."""
+        """Thin wrapper around TTS provider save() — isolated so tests
+        can patch a single seam.
+
+        F7.1 (vast-hopping post-MVP 2026-05-31): selettore provider.
+        Default edge-tts (free, no key). Se `settings.v2_audio_provider_azure`
+        True E `settings.azure_speech_key` valorizzato → Azure Speech SDK
+        con SSML completo (via app.services.ssml.text_to_ssml). Fallback
+        automatico a edge-tts se azure-cognitiveservices-speech NON
+        installato o se Azure raises (es. quota / key invalida).
+        """
+        from app.config import settings
+
+        if settings.v2_audio_provider_azure and settings.azure_speech_key:
+            try:
+                await _azure_tts_save(
+                    narration, audio_path, self.voice, settings.azure_speech_region
+                )
+                return
+            except Exception as exc:
+                logger.warning(
+                    "azure_tts_fallback_to_edge",
+                    error_class=type(exc).__name__,
+                    error_msg=str(exc)[:200],
+                )
+                # fallthrough to edge-tts
+
+        # Default path: edge-tts (no SSML, plain text)
         communicate = edge_tts.Communicate(narration, self.voice)
         await communicate.save(audio_path)
+
+
+async def _azure_tts_save(
+    narration: str, audio_path: str, voice: str, region: str
+) -> None:
+    """F7.3 — Azure Speech SDK wrapper con SSML.
+
+    Import gated dentro la funzione: il pacchetto
+    `azure-cognitiveservices-speech` e' OPTIONAL (non in pyproject base),
+    da installare con `pip install azure-cognitiveservices-speech` per
+    abilitare il provider. Se ImportError → eccezione catturata dal caller
+    che falla automaticamente su edge-tts.
+    """
+    try:
+        import azure.cognitiveservices.speech as speechsdk  # type: ignore[import-untyped]
+    except ImportError as exc:
+        raise RuntimeError(
+            "azure-cognitiveservices-speech NON installato. "
+            "Install: pip install azure-cognitiveservices-speech"
+        ) from exc
+
+    from app.config import settings
+    from app.services.ssml import text_to_ssml
+
+    speech_config = speechsdk.SpeechConfig(
+        subscription=settings.azure_speech_key, region=region
+    )
+    audio_config = speechsdk.audio.AudioOutputConfig(filename=audio_path)
+    synthesizer = speechsdk.SpeechSynthesizer(
+        speech_config=speech_config, audio_config=audio_config
+    )
+    ssml = text_to_ssml(narration, voice)
+
+    # Azure SDK e' sync; wrap in asyncio.to_thread per non bloccare event loop
+    result = await asyncio.to_thread(synthesizer.speak_ssml, ssml)
+
+    if result.reason != speechsdk.ResultReason.SynthesizingAudioCompleted:
+        raise RuntimeError(
+            f"Azure TTS synthesis failed: {result.reason} "
+            f"(details: {result.cancellation_details if result.reason == speechsdk.ResultReason.Canceled else 'n/a'})"
+        )
 
 
 __all__ = ["AudioService"]
