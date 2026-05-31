@@ -766,7 +766,11 @@ async def search_slide_images(
 
 
 class RegenerateBody(BaseModel):
-    instruction: str
+    instruction: str = ""
+    # F4b (analista 2026-05-31): flag per usare H8 voce-aware regen invece di
+    # legacy instruction-based regen. Quando True, ignora instruction e usa
+    # build_voice_prompt con chunks della voce skeleton owner della slide.
+    use_h8: bool = False
 
 
 @router.post("/{course_id}/slides/{idx}/regenerate")
@@ -776,14 +780,56 @@ async def regenerate_slide(
     body: RegenerateBody,
     user: dict[str, Any] = Depends(require_role("admin", "reviewer")),
 ) -> dict[str, Any]:
-    """Rigenera UNA slide via LLM secondo l'istruzione utente (FASE 11).
+    """Rigenera UNA slide via LLM (FASE 11 + F4b H8 voce-aware 2026-05-31).
 
-    Mantiene source_chunk_ids (provenance) e slide_type. Ri-valida strict.
-    Marca dirty=true.
+    Due modalita`:
+      - Legacy (default, use_h8=False): rigenera secondo body.instruction
+        passato dall'utente (es. "rendi piu` operativo", "accorcia speaker_notes").
+        Mantiene source_chunk_ids + slide_type. Usato da F6 chat Studio futuro.
+      - H8 voce-aware (use_h8=True): ignora instruction, identifica voce skeleton
+        owner della slide via heuristica + materializza chunks B2+B3+B4 per voce
+        + genera slide con build_voice_prompt. Usato da F4b bottone "Rigenera
+        questa slide" su slide flagged da quality-issues.
+
+    Entrambe le modalita`: marca dirty=true, persiste slide nel JSON. Cliente
+    deve poi POST /rebuild per ricostruire PPTX.
     """
     pool = get_pool()
     course = await _load_course_or_404(course_id, pool)
     _enforce_ownership(course, user)
+
+    if body.use_h8:
+        # F4b H8 voce-aware path
+        # Verifica slide_type rigenerabile (no bookends)
+        try:
+            slide = await studio_service.get_slide_by_idx(course_id, idx, pool)
+        except LookupError as exc:
+            raise HTTPException(404, f"Slide {idx} non trovata") from exc
+        slide_type = slide.get("slide_type", "")
+        if slide_type in ("MODULE_OPEN", "MODULE_CLOSE", "TITLE", "CLOSING"):
+            raise HTTPException(
+                409,
+                f"Slide {idx} di tipo {slide_type} e' bookend programmatico, non rigenerabile via LLM H8. "
+                "Edita manualmente via PATCH /slides/{idx} se necessario."
+            )
+        # Verifica prerequisito skeleton
+        if course.get("module_skeletons_json") is None:
+            raise HTTPException(
+                409,
+                "Corso senza module_skeletons_json: rigenerazione H8 richiede skeleton. "
+                "Genera il corso con flag v2_skeleton_validation=true."
+            )
+        from app.agents.content_agent import regenerate_single_slide_h8
+        try:
+            return await regenerate_single_slide_h8(
+                course_id=course_id, slide_index=idx, pool=pool
+            )
+        except RuntimeError as exc:
+            raise HTTPException(409, f"Rigenerazione H8 fallita: {exc}") from exc
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(500, f"Errore interno rigenerazione H8: {exc}") from exc
+
+    # Legacy path (instruction-based, retro-compat)
     try:
         updated = await studio_service.regenerate_slide(
             course_id, idx, body.instruction, pool
@@ -959,85 +1005,5 @@ async def get_quality_issues(
         expected_slides_per_module=70,
     )
     result["course_id"] = course_id
-    return result
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# F4b Rigenera singola slide (analista 2026-05-31, sinergia F4 quality badge)
-# ─────────────────────────────────────────────────────────────────────────────
-
-
-@router.post("/{course_id}/slides/{idx}/regenerate")
-async def regenerate_single_slide(
-    course_id: str,
-    idx: int,
-    user: dict[str, Any] = Depends(require_role("admin", "reviewer")),
-) -> dict[str, Any]:
-    """F4b (analista 2026-05-31): rigenera SINGOLA slide via H8 voce-aware.
-
-    Workflow:
-      1. Carica slide_contents_json + module_skeletons_json da DB
-      2. Identifica voce skeleton "owner" della slide (heuristica keywords overlap
-         + fallback posizionale)
-      3. Materializza chunks della voce (B2+B3+B4 rerun, deterministico)
-      4. Genera UNA slide via generate_module_structured con prompt voce-aware
-      5. Sostituisce slide nel JSON + persiste + marca dirty=true (RebuildBanner
-         mostra al cliente "Esegui /rebuild per ricostruire PPTX")
-
-    Synchronous: il cliente attende il completion (15-30s tipico). Pattern
-    diverso da /rebuild fire-and-forget perche' qui il risultato e' immediato
-    e visibile a slide_index specifico.
-
-    Requirements:
-      - course.module_skeletons_json NON NULL (flag v2_skeleton_validation
-        deve essere stato ON al momento della generazione iniziale)
-      - slide_type NOT IN (MODULE_OPEN, MODULE_CLOSE, TITLE, CLOSING)
-        (bookends programmatici, no LLM gen)
-      - voce skeleton del modulo deve avere chunks non vuoti post-B2/B3/B4
-
-    Returns: dict con status, old_title, new_title, voce_used, provider.
-    404 se slide/course non trovato, 409 se prerequisiti mancanti.
-    """
-    pool = get_pool()
-    course = await _load_course_or_404(course_id, pool)
-    _enforce_ownership(course, user)
-
-    # Verifica esistenza slide
-    try:
-        slide = await studio_service.get_slide_by_idx(course_id, idx, pool)
-    except LookupError as exc:
-        raise HTTPException(404, f"Slide {idx} non trovata") from exc
-
-    # Verifica slide_type rigenerabile (no bookends)
-    slide_type = slide.get("slide_type", "")
-    if slide_type in ("MODULE_OPEN", "MODULE_CLOSE", "TITLE", "CLOSING"):
-        raise HTTPException(
-            409,
-            f"Slide {idx} di tipo {slide_type} e' bookend programmatico, non rigenerabile via LLM. "
-            "Edita manualmente via PATCH /slides/{idx} se necessario."
-        )
-
-    # Verifica prerequisito skeleton
-    if course.get("module_skeletons_json") is None:
-        raise HTTPException(
-            409,
-            "Corso senza module_skeletons_json: rigenerazione H8 richiede skeleton. "
-            "Genera il corso con flag v2_skeleton_validation=true."
-        )
-
-    from app.agents.content_agent import regenerate_single_slide_h8
-
-    try:
-        result = await regenerate_single_slide_h8(
-            course_id=course_id,
-            slide_index=idx,
-            pool=pool,
-        )
-    except RuntimeError as exc:
-        # Errori applicativi (voce non identificabile, chunks vuoti, LLM fallisce)
-        raise HTTPException(409, f"Rigenerazione fallita: {exc}") from exc
-    except Exception as exc:  # noqa: BLE001
-        raise HTTPException(500, f"Errore interno rigenerazione: {exc}") from exc
-
     return result
 
