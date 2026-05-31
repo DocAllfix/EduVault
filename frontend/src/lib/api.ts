@@ -1088,10 +1088,18 @@ export interface DiagramTemplateInfo {
   slots: DiagramSlotInfo[]
   usage_count: number
   svg_available: boolean
+  svg_content?: string | null
 }
 
 async function adminDiagramsCatalog(): Promise<DiagramTemplateInfo[]> {
   return request<DiagramTemplateInfo[]>('/api/admin/diagrams/catalog')
+}
+
+function adminDiagramSvgUrl(name: string): string {
+  // Token in query string to allow <iframe> preview (no Authorization header
+  // possible on iframe src). Backend accepts ?access_token= as fallback.
+  const token = tokenStorage.getAccess() ?? ''
+  return `${API_BASE}/api/admin/diagrams/${encodeURIComponent(name)}/svg?access_token=${encodeURIComponent(token)}`
 }
 
 // ─────────────────────────── Public surface ────────────────────────────
@@ -1174,6 +1182,7 @@ export const api = {
   adminDeleteImage,
   // Step C — diagram catalog admin
   adminDiagramsCatalog,
+  adminDiagramSvgUrl,
 } as const
 
 // Type-only re-export so consumers can refer to the OpenAPI schema directly.

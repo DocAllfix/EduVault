@@ -597,6 +597,32 @@ class DiagramTemplateInfo(BaseModel):
     slots: list[DiagramSlotInfo]
     usage_count: int
     svg_available: bool
+    svg_content: str | None = None  # inline SVG markup (sicuro: lo controlliamo noi)
+
+
+@router.get("/api/admin/diagrams/{name}/svg")
+async def admin_diagram_svg(
+    name: str,
+    user: dict[str, Any] = Depends(require_role("admin", "reviewer")),
+):
+    """Step C — serve SVG template content for /admin/diagrams iframe preview.
+
+    Path validation: name must match DIAGRAM_CATALOG keys (no path traversal).
+    """
+    from fastapi.responses import FileResponse
+
+    from app.services.diagram_service import DIAGRAM_CATALOG
+
+    tpl = DIAGRAM_CATALOG.get(name)
+    if tpl is None:
+        raise HTTPException(404, "diagram template not found")
+    if not tpl.template_path.exists():
+        raise HTTPException(404, "svg file not found on disk")
+    return FileResponse(
+        str(tpl.template_path),
+        media_type="image/svg+xml",
+        filename=f"{name}.svg",
+    )
 
 
 @router.get("/api/admin/diagrams/catalog", response_model=list[DiagramTemplateInfo])
@@ -631,6 +657,12 @@ async def admin_diagrams_catalog(
 
     out: list[DiagramTemplateInfo] = []
     for tpl in DIAGRAM_CATALOG.values():
+        svg_content: str | None = None
+        if tpl.template_path.exists():
+            try:
+                svg_content = tpl.template_path.read_text(encoding="utf-8")
+            except Exception:
+                svg_content = None
         out.append(DiagramTemplateInfo(
             name=tpl.name,
             description=tpl.description,
@@ -639,6 +671,7 @@ async def admin_diagrams_catalog(
                 for s in tpl.slots
             ],
             usage_count=usage_counter.get(tpl.name, 0),
-            svg_available=tpl.template_path.exists(),
+            svg_available=svg_content is not None,
+            svg_content=svg_content,
         ))
     return out

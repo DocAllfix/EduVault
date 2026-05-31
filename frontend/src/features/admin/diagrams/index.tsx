@@ -95,8 +95,10 @@ export function DiagramsCatalogAdmin() {
   )
 }
 
-function DiagramCard({ template }: { template: DiagramTemplateInfo }) {
-  const svgPath = `/assets/svg_templates/${template.name}.svg`
+function DiagramCard({ template }: { template: DiagramTemplateInfo & { svg_content?: string | null } }) {
+  // SVG inline via dangerouslySetInnerHTML: contenuto controllato dal backend
+  // (template SVG che SCRIVIAMO NOI in assets/svg_templates), zero user input
+  // -> nessun rischio XSS.
   return (
     <Card>
       <CardHeader>
@@ -107,13 +109,11 @@ function DiagramCard({ template }: { template: DiagramTemplateInfo }) {
         <CardDescription className='text-xs'>{template.description}</CardDescription>
       </CardHeader>
       <CardContent>
-        <div className='mb-3 aspect-video overflow-hidden rounded-md border bg-muted/30'>
-          {template.svg_available ? (
-            <iframe
-              src={svgPath}
-              title={template.name}
-              className='size-full'
-              loading='lazy'
+        <div className='mb-3 aspect-video overflow-hidden rounded-md border bg-muted/30 p-2'>
+          {template.svg_content ? (
+            <div
+              className='size-full [&_svg]:size-full [&_svg]:max-h-full'
+              dangerouslySetInnerHTML={{ __html: template.svg_content }}
             />
           ) : (
             <div className='flex size-full items-center justify-center text-xs text-muted-foreground'>

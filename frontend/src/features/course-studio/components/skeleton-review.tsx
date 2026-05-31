@@ -14,6 +14,7 @@
 
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useNavigate } from '@tanstack/react-router'
 import { ArrowDown, ArrowUp, Check, Loader2, Plus, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -47,6 +48,7 @@ interface Props {
 
 export function SkeletonReview({ courseId, onApproved }: Props) {
   const queryClient = useQueryClient()
+  const navigate = useNavigate()
   const [modules, setModules] = useState<ModuleSkeleton[] | null>(null)
 
   const skeletonQ = useQuery({
@@ -69,9 +71,25 @@ export function SkeletonReview({ courseId, onApproved }: Props) {
 
   const approveMut = useMutation({
     mutationFn: () => api.approveCourseSkeleton(courseId),
-    onSuccess: async () => {
-      toast.success('Scheletro approvato — generazione slide avviata.')
+    onSuccess: async (data) => {
+      toast.success('Scheletro approvato', {
+        description:
+          'La generazione delle slide è partita. Stima: 5–10 min per un corso 4-8h.',
+        duration: 6000,
+        action: data?.job_id
+          ? {
+              label: 'Vedi avanzamento',
+              onClick: () =>
+                navigate({
+                  to: '/courses/$id/progress',
+                  params: { id: courseId },
+                  search: { job: data.job_id },
+                }),
+            }
+          : undefined,
+      })
       await queryClient.invalidateQueries({ queryKey: ['course-skeleton', courseId] })
+      await queryClient.invalidateQueries({ queryKey: ['course', courseId] })
       onApproved?.()
     },
     onError: (e) =>
