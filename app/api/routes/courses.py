@@ -1199,3 +1199,232 @@ async def get_quality_issues(
     result["course_id"] = course_id
     return result
 
+
+# ─────────────── F6 — Chat LLM Course Studio (vast-hopping post-MVP) ───────────────
+
+
+class ChatTurnBody(BaseModel):
+    """Body per POST /chat: utente manda messaggio ancorato a una slide."""
+
+    message: str
+    slide_index: int
+
+
+class ChatMessageDTO(BaseModel):
+    id: str
+    role: str
+    content: str
+    slide_index: int | None = None
+    tool_calls: dict[str, Any] | None = None
+    applied_at: str | None = None
+    created_at: str | None = None
+
+
+class ChatHistoryResponse(BaseModel):
+    conversation_id: str
+    messages: list[ChatMessageDTO]
+
+
+@router.get("/{course_id}/chat/history", response_model=ChatHistoryResponse)
+async def get_chat_history(
+    course_id: str,
+    user: dict[str, Any] = Depends(require_role("admin", "reviewer")),
+) -> ChatHistoryResponse:
+    """Ritorna la cronologia chat per il corso (memoria cross-session)."""
+    from app.services.chat_service import get_or_create_conversation, list_messages
+
+    pool = get_pool()
+    course = await _load_course_or_404(course_id, pool)
+    _enforce_ownership(course, user)
+    conv_id = await get_or_create_conversation(pool, course_id, str(user["id"]))
+    msgs = await list_messages(pool, conv_id, limit=200)
+    return ChatHistoryResponse(
+        conversation_id=conv_id,
+        messages=[ChatMessageDTO(**m) for m in msgs],
+    )
+
+
+@router.post("/{course_id}/chat")
+@limiter.limit("30/minute")
+async def chat_send(
+    request: Request,
+    course_id: str,
+    body: ChatTurnBody,
+    user: dict[str, Any] = Depends(require_role("admin", "reviewer")),
+) -> StreamingResponse:
+    """Streaming SSE: invia un turno chat, ritorna parziali ChatTurnResponse
+    via SSE mentre il LLM compila. Frontend rende typing-effect.
+
+    Format SSE event:
+      event: partial
+      data: {"assistant_message": "...", "proposed_patch": null}
+
+      event: done
+      data: {"message_id_user": "...", "message_id_assistant": "...", "provider": "azure"}
+
+      event: error
+      data: {"detail": "..."}
+    """
+    import json as _json
+
+    from app.services.chat_service import (
+        ChatTurnResponse,
+        chat_turn_stream,
+        get_or_create_conversation,
+        insert_message,
+        list_messages,
+    )
+
+    pool = get_pool()
+    course = await _load_course_or_404(course_id, pool)
+    _enforce_ownership(course, user)
+
+    msg = (body.message or "").strip()
+    if len(msg) < 2:
+        raise HTTPException(400, "Messaggio troppo corto")
+    if len(msg) > 2000:
+        raise HTTPException(400, "Messaggio troppo lungo (max 2000 char)")
+
+    # Carica slide context
+    slides_raw = course.get("slide_contents_json") or []
+    if not isinstance(slides_raw, list):
+        raise HTTPException(409, "Slide non disponibili (corso non generato)")
+    target_slide = next(
+        (s for s in slides_raw if s.get("index") == body.slide_index), None
+    )
+    if target_slide is None:
+        raise HTTPException(404, f"Slide {body.slide_index} non trovata")
+
+    slide_title = str(target_slide.get("title", ""))
+    slide_body = target_slide.get("body", []) or []
+    slide_notes = str(target_slide.get("speaker_notes", ""))
+
+    # Course title
+    from config.catalog_config import COURSE_CATALOG
+
+    catalog_entry = COURSE_CATALOG.get(course["course_type"], {})
+    course_title = str(catalog_entry.get("title") or course["title"])
+
+    # Conversation persistente (memoria cross-session)
+    conv_id = await get_or_create_conversation(pool, course_id, str(user["id"]))
+    history = await list_messages(pool, conv_id, limit=24)
+
+    # INSERT user message subito (visibile anche se streaming fallisce)
+    user_msg_id = await insert_message(
+        pool,
+        conversation_id=conv_id,
+        role="user",
+        content=msg,
+        slide_index=body.slide_index,
+    )
+
+    async def _stream() -> "Any":
+        last_partial: ChatTurnResponse | None = None
+        try:
+            async for partial in chat_turn_stream(
+                user_message=msg,
+                slide_title=slide_title,
+                slide_body=slide_body,
+                slide_notes=slide_notes,
+                course_title=course_title,
+                history=history,
+                course_id=course_id,
+            ):
+                last_partial = partial
+                payload = partial.model_dump(exclude_none=False)
+                yield f"event: partial\ndata: {_json.dumps(payload)}\n\n"
+            # Stream done: INSERT assistant message + done event
+            if last_partial is not None:
+                tool_calls_dict = (
+                    {"proposed_patch": last_partial.proposed_patch.model_dump()}
+                    if last_partial.proposed_patch
+                    else None
+                )
+                assistant_msg_id = await insert_message(
+                    pool,
+                    conversation_id=conv_id,
+                    role="assistant",
+                    content=last_partial.assistant_message or "",
+                    slide_index=body.slide_index,
+                    tool_calls=tool_calls_dict,
+                )
+                done = {
+                    "message_id_user": user_msg_id,
+                    "message_id_assistant": assistant_msg_id,
+                    "conversation_id": conv_id,
+                }
+                yield f"event: done\ndata: {_json.dumps(done)}\n\n"
+        except Exception as exc:  # noqa: BLE001
+            err = {"detail": str(exc)[:200]}
+            yield f"event: error\ndata: {_json.dumps(err)}\n\n"
+
+    return StreamingResponse(
+        _stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",  # Nginx/Railway proxy: disable buffering
+        },
+    )
+
+
+@router.post("/{course_id}/chat/messages/{message_id}/apply")
+@limiter.limit("30/minute")
+async def chat_apply_message(
+    request: Request,
+    course_id: str,
+    message_id: str,
+    user: dict[str, Any] = Depends(require_role("admin", "reviewer")),
+) -> dict[str, Any]:
+    """Applica il proposed_patch di un assistant message alla slide.
+
+    Idempotente: se gia' applicato → 409. Riusa PATCH /slides/{idx} esistente
+    via update_slide del studio_service.
+    """
+    from app.services.chat_service import mark_message_applied
+
+    pool = get_pool()
+    course = await _load_course_or_404(course_id, pool)
+    _enforce_ownership(course, user)
+
+    # Verifica esistenza message + recupera tool_calls (proposed_patch)
+    row = await pool.fetchrow(
+        "SELECT id, role, slide_index, tool_calls, applied_at "
+        "FROM messages WHERE id = $1::uuid",
+        message_id,
+    )
+    if row is None:
+        raise HTTPException(404, "Messaggio non trovato")
+    if row["role"] != "assistant":
+        raise HTTPException(400, "Solo i messaggi assistant possono essere applicati")
+    if row["applied_at"] is not None:
+        raise HTTPException(409, "Messaggio gia' applicato")
+    tool_calls = row["tool_calls"]
+    if not tool_calls or not isinstance(tool_calls, dict):
+        raise HTTPException(400, "Nessun patch proposto in questo messaggio")
+    patch = tool_calls.get("proposed_patch") if isinstance(tool_calls, dict) else None
+    if not patch or not isinstance(patch, dict):
+        raise HTTPException(400, "Nessun proposed_patch nel messaggio")
+
+    slide_idx = row["slide_index"]
+    if slide_idx is None:
+        raise HTTPException(400, "Messaggio senza slide_index ancorato")
+
+    # Applica patch: riusa studio_service.update_slide come PATCH /slides/{idx}
+    # Solo i campi != None del proposed_patch vengono inviati.
+    patch_clean: dict[str, Any] = {}
+    if patch.get("title") is not None:
+        patch_clean["title"] = patch["title"]
+    if patch.get("body") is not None:
+        patch_clean["body"] = patch["body"]
+    if patch.get("speaker_notes") is not None:
+        patch_clean["speaker_notes"] = patch["speaker_notes"]
+    if not patch_clean:
+        raise HTTPException(400, "proposed_patch vuoto (nessun campo da applicare)")
+
+    await studio_service.update_slide(course_id, slide_idx, patch_clean, pool)
+
+    # Marca message come applicato (idempotency)
+    await mark_message_applied(pool, message_id)
+    return {"applied": True, "message_id": message_id, "slide_index": slide_idx}
+

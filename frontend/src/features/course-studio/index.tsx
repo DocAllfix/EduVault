@@ -37,6 +37,9 @@ import {
   QualityIssuesPanel,
   QualityIssuesSummary,
 } from './components/quality-badge'
+import { ChatPanel } from './components/chat-panel'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { MessageCircle, ShieldCheck } from 'lucide-react'
 import { useQualityChecks, getSlideMaxSeverity } from '@/hooks/use-quality-checks'
 
 function slideTypeLabel(t: string): string {
@@ -270,19 +273,36 @@ export function CourseStudio() {
                 <AudioPlayer courseId={id} slideIndex={selected.index} />
               </section>
 
-              {/* ─── Right rail: editor + quality panel + AI regen + image picker ─── */}
-              <aside className="border-border h-[calc(100vh-16rem)] space-y-4 overflow-y-auto rounded-lg border p-4">
+              {/* ─── Right rail: editor + Tabs (Quality | Chat) + AI regen + image picker ─── */}
+              <aside className="border-border flex h-[calc(100vh-16rem)] flex-col gap-3 overflow-hidden rounded-lg border p-4">
                 <h2 className="text-sm font-semibold tracking-wide uppercase">
                   Modifica slide {selected.index + 1}
                 </h2>
                 <SlideEditor courseId={id} slide={selected} />
-                {/* F4 D9 quality panel + F4b H8 regenerate button (sinergia visiva) */}
-                <QualityIssuesPanel
-                  courseId={id}
-                  slideIndex={selected.index}
-                  data={qualityQ.data}
-                  slideType={selected.slide_type}
-                />
+                {/* F4+F6 Tabs Quality/Chat (vast-hopping post-MVP 2026-05-31) */}
+                <Tabs defaultValue="quality" className="flex min-h-0 flex-1 flex-col">
+                  <TabsList className="grid w-full grid-cols-2">
+                    <TabsTrigger value="quality" className="gap-1.5 text-xs">
+                      <ShieldCheck className="size-3.5" />
+                      Qualità
+                    </TabsTrigger>
+                    <TabsTrigger value="chat" className="gap-1.5 text-xs">
+                      <MessageCircle className="size-3.5" />
+                      Chat AI
+                    </TabsTrigger>
+                  </TabsList>
+                  <TabsContent value="quality" className="mt-3 flex-1 overflow-y-auto">
+                    <QualityIssuesPanel
+                      courseId={id}
+                      slideIndex={selected.index}
+                      data={qualityQ.data}
+                      slideType={selected.slide_type}
+                    />
+                  </TabsContent>
+                  <TabsContent value="chat" className="mt-3 flex min-h-0 flex-1 flex-col">
+                    <ChatPanel courseId={id} slideIndex={selected.index} />
+                  </TabsContent>
+                </Tabs>
                 <div className="border-border space-y-2 border-t pt-4">
                   <RegenerateDialog courseId={id} slide={selected} />
                   {(selected.slide_type === 'CONTENT_IMAGE' ||

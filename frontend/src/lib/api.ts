@@ -649,6 +649,55 @@ async function searchImageLibrary(
   )
 }
 
+// ─── F6 — Chat Studio (vast-hopping post-MVP 2026-05-31) ───
+// Memoria conversation cross-session + SSE streaming + apply diff.
+
+export interface ProposedPatchDTO {
+  title?: string | null
+  body?: string[] | null
+  speaker_notes?: string | null
+}
+
+export interface ChatMessage {
+  id: string
+  role: 'user' | 'assistant' | 'tool' | 'system'
+  content: string
+  slide_index: number | null
+  tool_calls: { proposed_patch?: ProposedPatchDTO } | null
+  applied_at: string | null
+  created_at: string | null
+}
+
+export interface ChatHistoryResponse {
+  conversation_id: string
+  messages: ChatMessage[]
+}
+
+async function getChatHistory(id: string): Promise<ChatHistoryResponse> {
+  return request<ChatHistoryResponse>(
+    `/api/courses/${encodeURIComponent(id)}/chat/history`,
+  )
+}
+
+async function applyChatMessage(
+  id: string,
+  messageId: string,
+): Promise<{ applied: boolean; slide_index: number }> {
+  return request(
+    `/api/courses/${encodeURIComponent(id)}/chat/messages/${encodeURIComponent(messageId)}/apply`,
+    { method: 'POST' },
+  )
+}
+
+/**
+ * URL endpoint SSE per POST /chat. Il client streaming usa fetch+ReadableStream
+ * (non EventSource: EventSource non supporta header Authorization). Token JWT
+ * passato in query string come fallback per autenticazione GET di Vercel proxy.
+ */
+function chatStreamUrl(id: string): string {
+  return buildUrl(`/api/courses/${encodeURIComponent(id)}/chat`)
+}
+
 /** URL diretto del singolo MP3 di una slide (per <audio src>). */
 function slideAudioUrl(id: string, idx: number): string {
   return buildUrl(`/api/courses/${encodeURIComponent(id)}/audio/${idx}`)
@@ -985,6 +1034,10 @@ export const api = {
   patchSlideImage,
   searchSlideImages,
   searchImageLibrary,
+  // F6 chat
+  getChatHistory,
+  applyChatMessage,
+  chatStreamUrl,
   slideAudioUrl,
   slidePreviewUrl,
   regenerateSlide,
