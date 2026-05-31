@@ -41,6 +41,8 @@ import { Route as AuthenticatedErrorsErrorRouteImport } from './routes/_authenti
 import { Route as AuthenticatedCoursesStudioRouteImport } from './routes/_authenticated/courses/studio'
 import { Route as AuthenticatedCoursesNewRouteImport } from './routes/_authenticated/courses/new'
 import { Route as AuthenticatedCoursesIdRouteImport } from './routes/_authenticated/courses/$id'
+import { Route as AuthenticatedAdminImagesRouteImport } from './routes/_authenticated/admin/images'
+import { Route as AuthenticatedAdminDiagramsRouteImport } from './routes/_authenticated/admin/diagrams'
 import { Route as AuthenticatedAdminCatalogRouteImport } from './routes/_authenticated/admin/catalog'
 import { Route as AuthenticatedCoursesIdStudioRouteImport } from './routes/_authenticated/courses/$id_.studio'
 import { Route as AuthenticatedCoursesIdProgressRouteImport } from './routes/_authenticated/courses/$id_.progress'
@@ -213,6 +215,18 @@ const AuthenticatedCoursesIdRoute = AuthenticatedCoursesIdRouteImport.update({
   path: '/courses/$id',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
+const AuthenticatedAdminImagesRoute =
+  AuthenticatedAdminImagesRouteImport.update({
+    id: '/admin/images',
+    path: '/admin/images',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
+const AuthenticatedAdminDiagramsRoute =
+  AuthenticatedAdminDiagramsRouteImport.update({
+    id: '/admin/diagrams',
+    path: '/admin/diagrams',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const AuthenticatedAdminCatalogRoute =
   AuthenticatedAdminCatalogRouteImport.update({
     id: '/admin/catalog',
@@ -244,6 +258,8 @@ export interface FileRoutesByFullPath {
   '/503': typeof errors503Route
   '/dashboard': typeof AuthenticatedDashboardRoute
   '/admin/catalog': typeof AuthenticatedAdminCatalogRoute
+  '/admin/diagrams': typeof AuthenticatedAdminDiagramsRoute
+  '/admin/images': typeof AuthenticatedAdminImagesRoute
   '/courses/$id': typeof AuthenticatedCoursesIdRoute
   '/courses/new': typeof AuthenticatedCoursesNewRoute
   '/courses/studio': typeof AuthenticatedCoursesStudioRoute
@@ -277,6 +293,8 @@ export interface FileRoutesByTo {
   '/dashboard': typeof AuthenticatedDashboardRoute
   '/': typeof AuthenticatedIndexRoute
   '/admin/catalog': typeof AuthenticatedAdminCatalogRoute
+  '/admin/diagrams': typeof AuthenticatedAdminDiagramsRoute
+  '/admin/images': typeof AuthenticatedAdminImagesRoute
   '/courses/$id': typeof AuthenticatedCoursesIdRoute
   '/courses/new': typeof AuthenticatedCoursesNewRoute
   '/courses/studio': typeof AuthenticatedCoursesStudioRoute
@@ -315,6 +333,8 @@ export interface FileRoutesById {
   '/_authenticated/dashboard': typeof AuthenticatedDashboardRoute
   '/_authenticated/': typeof AuthenticatedIndexRoute
   '/_authenticated/admin/catalog': typeof AuthenticatedAdminCatalogRoute
+  '/_authenticated/admin/diagrams': typeof AuthenticatedAdminDiagramsRoute
+  '/_authenticated/admin/images': typeof AuthenticatedAdminImagesRoute
   '/_authenticated/courses/$id': typeof AuthenticatedCoursesIdRoute
   '/_authenticated/courses/new': typeof AuthenticatedCoursesNewRoute
   '/_authenticated/courses/studio': typeof AuthenticatedCoursesStudioRoute
@@ -351,6 +371,8 @@ export interface FileRouteTypes {
     | '/503'
     | '/dashboard'
     | '/admin/catalog'
+    | '/admin/diagrams'
+    | '/admin/images'
     | '/courses/$id'
     | '/courses/new'
     | '/courses/studio'
@@ -384,6 +406,8 @@ export interface FileRouteTypes {
     | '/dashboard'
     | '/'
     | '/admin/catalog'
+    | '/admin/diagrams'
+    | '/admin/images'
     | '/courses/$id'
     | '/courses/new'
     | '/courses/studio'
@@ -421,6 +445,8 @@ export interface FileRouteTypes {
     | '/_authenticated/dashboard'
     | '/_authenticated/'
     | '/_authenticated/admin/catalog'
+    | '/_authenticated/admin/diagrams'
+    | '/_authenticated/admin/images'
     | '/_authenticated/courses/$id'
     | '/_authenticated/courses/new'
     | '/_authenticated/courses/studio'
@@ -681,6 +707,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedCoursesIdRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/admin/images': {
+      id: '/_authenticated/admin/images'
+      path: '/admin/images'
+      fullPath: '/admin/images'
+      preLoaderRoute: typeof AuthenticatedAdminImagesRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/admin/diagrams': {
+      id: '/_authenticated/admin/diagrams'
+      path: '/admin/diagrams'
+      fullPath: '/admin/diagrams'
+      preLoaderRoute: typeof AuthenticatedAdminDiagramsRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/admin/catalog': {
       id: '/_authenticated/admin/catalog'
       path: '/admin/catalog'
@@ -733,6 +773,8 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedDashboardRoute: typeof AuthenticatedDashboardRoute
   AuthenticatedIndexRoute: typeof AuthenticatedIndexRoute
   AuthenticatedAdminCatalogRoute: typeof AuthenticatedAdminCatalogRoute
+  AuthenticatedAdminDiagramsRoute: typeof AuthenticatedAdminDiagramsRoute
+  AuthenticatedAdminImagesRoute: typeof AuthenticatedAdminImagesRoute
   AuthenticatedCoursesIdRoute: typeof AuthenticatedCoursesIdRoute
   AuthenticatedCoursesNewRoute: typeof AuthenticatedCoursesNewRoute
   AuthenticatedCoursesStudioRoute: typeof AuthenticatedCoursesStudioRoute
@@ -753,6 +795,8 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedDashboardRoute: AuthenticatedDashboardRoute,
   AuthenticatedIndexRoute: AuthenticatedIndexRoute,
   AuthenticatedAdminCatalogRoute: AuthenticatedAdminCatalogRoute,
+  AuthenticatedAdminDiagramsRoute: AuthenticatedAdminDiagramsRoute,
+  AuthenticatedAdminImagesRoute: AuthenticatedAdminImagesRoute,
   AuthenticatedCoursesIdRoute: AuthenticatedCoursesIdRoute,
   AuthenticatedCoursesNewRoute: AuthenticatedCoursesNewRoute,
   AuthenticatedCoursesStudioRoute: AuthenticatedCoursesStudioRoute,

@@ -1,0 +1,727 @@
+[
+  {
+    "file_path": "assets/icons/iso7010/E001_uscita_emergenza_sinistra.png",
+    "tags": [
+      "segnaletica",
+      "iso7010",
+      "emergenza",
+      "verde",
+      "e001",
+      "uscita",
+      "evacuazione"
+    ],
+    "source": "iso7010",
+    "license": "Public Domain",
+    "attribution": "ISO 7010:2020 E001 — uscita di emergenza a sinistra",
+    "source_url": "https://www.iso.org/standard/72424.html"
+  },
+  {
+    "file_path": "assets/icons/iso7010/E002_uscita_emergenza_destra.png",
+    "tags": [
+      "segnaletica",
+      "iso7010",
+      "emergenza",
+      "verde",
+      "e002",
+      "uscita",
+      "evacuazione"
+    ],
+    "source": "iso7010",
+    "license": "Public Domain",
+    "attribution": "ISO 7010:2020 E002 — uscita di emergenza a destra",
+    "source_url": "https://www.iso.org/standard/72424.html"
+  },
+  {
+    "file_path": "assets/icons/iso7010/E003_primo_soccorso.png",
+    "tags": [
+      "segnaletica",
+      "iso7010",
+      "emergenza",
+      "verde",
+      "e003",
+      "primo_soccorso",
+      "salvataggio",
+      "croce"
+    ],
+    "source": "iso7010",
+    "license": "Public Domain",
+    "attribution": "ISO 7010:2020 E003 — presidio di primo soccorso",
+    "source_url": "https://www.iso.org/standard/72424.html"
+  },
+  {
+    "file_path": "assets/icons/iso7010/E004_telefono_emergenza.png",
+    "tags": [
+      "segnaletica",
+      "iso7010",
+      "emergenza",
+      "verde",
+      "e004",
+      "telefono",
+      "contatto"
+    ],
+    "source": "iso7010",
+    "license": "Public Domain",
+    "attribution": "ISO 7010:2020 E004 — telefono di emergenza",
+    "source_url": "https://www.iso.org/standard/72424.html"
+  },
+  {
+    "file_path": "assets/icons/iso7010/E005_freccia_emergenza_su.png",
+    "tags": [
+      "segnaletica",
+      "iso7010",
+      "emergenza",
+      "verde",
+      "e005",
+      "freccia",
+      "direzione",
+      "evacuazione"
+    ],
+    "source": "iso7010",
+    "license": "Public Domain",
+    "attribution": "ISO 7010:2020 E005 — freccia direzionale verso l'alto",
+    "source_url": "https://www.iso.org/standard/72424.html"
+  },
+  {
+    "file_path": "assets/icons/iso7010/E006_scala_emergenza.png",
+    "tags": [
+      "segnaletica",
+      "iso7010",
+      "emergenza",
+      "verde",
+      "e006",
+      "scala",
+      "evacuazione",
+      "uscita"
+    ],
+    "source": "iso7010",
+    "license": "Public Domain",
+    "attribution": "ISO 7010:2020 E006 — scala di emergenza",
+    "source_url": "https://www.iso.org/standard/72424.html"
+  },
+  {
+    "file_path": "assets/icons/iso7010/E007_punto_raccolta.png",
+    "tags": [
+      "segnaletica",
+      "iso7010",
+      "emergenza",
+      "verde",
+      "e007",
+      "raccolta",
+      "evacuazione",
+      "punto_sicurezza"
+    ],
+    "source": "iso7010",
+    "license": "Public Domain",
+    "attribution": "ISO 7010:2020 E007 — punto di raccolta in caso di emergenza",
+    "source_url": "https://www.iso.org/standard/72424.html"
+  },
+  {
+    "file_path": "assets/icons/iso7010/E008_doccia_emergenza.png",
+    "tags": [
+      "segnaletica",
+      "iso7010",
+      "emergenza",
+      "verde",
+      "e008",
+      "doccia",
+      "decontaminazione"
+    ],
+    "source": "iso7010",
+    "license": "Public Domain",
+    "attribution": "ISO 7010:2020 E008 — doccia di emergenza",
+    "source_url": "https://www.iso.org/standard/72424.html"
+  },
+  {
+    "file_path": "assets/icons/iso7010/E009_lavaocchi_emergenza.png",
+    "tags": [
+      "segnaletica",
+      "iso7010",
+      "emergenza",
+      "verde",
+      "e009",
+      "lavaocchi",
+      "decontaminazione",
+      "occhi"
+    ],
+    "source": "iso7010",
+    "license": "Public Domain",
+    "attribution": "ISO 7010:2020 E009 — stazione di lavaggio occhi",
+    "source_url": "https://www.iso.org/standard/72424.html"
+  },
+  {
+    "file_path": "assets/icons/iso7010/E010_defibrillatore_aed.png",
+    "tags": [
+      "segnaletica",
+      "iso7010",
+      "emergenza",
+      "verde",
+      "e010",
+      "dae",
+      "defibrillatore",
+      "soccorso"
+    ],
+    "source": "iso7010",
+    "license": "Public Domain",
+    "attribution": "ISO 7010:2020 E010 — defibrillatore semiautomatico DAE",
+    "source_url": "https://www.iso.org/standard/72424.html"
+  },
+  {
+    "file_path": "assets/icons/iso7010/F001_estintore.png",
+    "tags": [
+      "segnaletica",
+      "iso7010",
+      "antincendio",
+      "rosso",
+      "f001",
+      "estintore",
+      "fuoco"
+    ],
+    "source": "iso7010",
+    "license": "Public Domain",
+    "attribution": "ISO 7010:2020 F001 — estintore portatile",
+    "source_url": "https://www.iso.org/standard/72424.html"
+  },
+  {
+    "file_path": "assets/icons/iso7010/F002_idrante_uni.png",
+    "tags": [
+      "segnaletica",
+      "iso7010",
+      "antincendio",
+      "rosso",
+      "f002",
+      "idrante",
+      "naspo"
+    ],
+    "source": "iso7010",
+    "license": "Public Domain",
+    "attribution": "ISO 7010:2020 F002 — idrante a muro UNI",
+    "source_url": "https://www.iso.org/standard/72424.html"
+  },
+  {
+    "file_path": "assets/icons/iso7010/F003_scala_antincendio.png",
+    "tags": [
+      "segnaletica",
+      "iso7010",
+      "antincendio",
+      "rosso",
+      "f003",
+      "scala",
+      "evacuazione"
+    ],
+    "source": "iso7010",
+    "license": "Public Domain",
+    "attribution": "ISO 7010:2020 F003 — scala antincendio fissa",
+    "source_url": "https://www.iso.org/standard/72424.html"
+  },
+  {
+    "file_path": "assets/icons/iso7010/F004_telefono_antincendio.png",
+    "tags": [
+      "segnaletica",
+      "iso7010",
+      "antincendio",
+      "rosso",
+      "f004",
+      "telefono",
+      "vigili_fuoco",
+      "115"
+    ],
+    "source": "iso7010",
+    "license": "Public Domain",
+    "attribution": "ISO 7010:2020 F004 — telefono per chiamata vigili del fuoco",
+    "source_url": "https://www.iso.org/standard/72424.html"
+  },
+  {
+    "file_path": "assets/icons/iso7010/F005_pulsante_allarme_antincendio.png",
+    "tags": [
+      "segnaletica",
+      "iso7010",
+      "antincendio",
+      "rosso",
+      "f005",
+      "pulsante",
+      "allarme"
+    ],
+    "source": "iso7010",
+    "license": "Public Domain",
+    "attribution": "ISO 7010:2020 F005 — pulsante manuale di allarme antincendio",
+    "source_url": "https://www.iso.org/standard/72424.html"
+  },
+  {
+    "file_path": "assets/icons/iso7010/F006_naspo_antincendio.png",
+    "tags": [
+      "segnaletica",
+      "iso7010",
+      "antincendio",
+      "rosso",
+      "f006",
+      "naspo",
+      "tubo"
+    ],
+    "source": "iso7010",
+    "license": "Public Domain",
+    "attribution": "ISO 7010:2020 F006 — naspo antincendio",
+    "source_url": "https://www.iso.org/standard/72424.html"
+  },
+  {
+    "file_path": "assets/icons/iso7010/F007_tromba_allarme.png",
+    "tags": [
+      "segnaletica",
+      "iso7010",
+      "antincendio",
+      "rosso",
+      "f007",
+      "sirena",
+      "allarme",
+      "acustico"
+    ],
+    "source": "iso7010",
+    "license": "Public Domain",
+    "attribution": "ISO 7010:2020 F007 — tromba di allarme acustico",
+    "source_url": "https://www.iso.org/standard/72424.html"
+  },
+  {
+    "file_path": "assets/icons/iso7010/F008_coperta_antincendio.png",
+    "tags": [
+      "segnaletica",
+      "iso7010",
+      "antincendio",
+      "rosso",
+      "f008",
+      "coperta",
+      "asbesto"
+    ],
+    "source": "iso7010",
+    "license": "Public Domain",
+    "attribution": "ISO 7010:2020 F008 — coperta antincendio",
+    "source_url": "https://www.iso.org/standard/72424.html"
+  },
+  {
+    "file_path": "assets/icons/iso7010/M001_obbligo_generico.png",
+    "tags": [
+      "segnaletica",
+      "iso7010",
+      "obbligo",
+      "blu",
+      "m001",
+      "azione_richiesta"
+    ],
+    "source": "iso7010",
+    "license": "Public Domain",
+    "attribution": "ISO 7010:2020 M001 — obbligo generico",
+    "source_url": "https://www.iso.org/standard/72424.html"
+  },
+  {
+    "file_path": "assets/icons/iso7010/M002_leggere_istruzioni.png",
+    "tags": [
+      "segnaletica",
+      "iso7010",
+      "obbligo",
+      "blu",
+      "m002",
+      "istruzioni",
+      "manuale",
+      "leggere"
+    ],
+    "source": "iso7010",
+    "license": "Public Domain",
+    "attribution": "ISO 7010:2020 M002 — obbligo leggere le istruzioni",
+    "source_url": "https://www.iso.org/standard/72424.html"
+  },
+  {
+    "file_path": "assets/icons/iso7010/M003_protezione_udito.png",
+    "tags": [
+      "segnaletica",
+      "iso7010",
+      "obbligo",
+      "blu",
+      "m003",
+      "cuffie",
+      "udito",
+      "dpi"
+    ],
+    "source": "iso7010",
+    "license": "Public Domain",
+    "attribution": "ISO 7010:2020 M003 — obbligo protezione udito (cuffie)",
+    "source_url": "https://www.iso.org/standard/72424.html"
+  },
+  {
+    "file_path": "assets/icons/iso7010/M004_casco_protezione.png",
+    "tags": [
+      "segnaletica",
+      "iso7010",
+      "obbligo",
+      "blu",
+      "m004",
+      "casco",
+      "testa",
+      "dpi"
+    ],
+    "source": "iso7010",
+    "license": "Public Domain",
+    "attribution": "ISO 7010:2020 M004 — obbligo casco di protezione",
+    "source_url": "https://www.iso.org/standard/72424.html"
+  },
+  {
+    "file_path": "assets/icons/iso7010/M005_protezione_vista.png",
+    "tags": [
+      "segnaletica",
+      "iso7010",
+      "obbligo",
+      "blu",
+      "m005",
+      "occhiali",
+      "vista",
+      "dpi"
+    ],
+    "source": "iso7010",
+    "license": "Public Domain",
+    "attribution": "ISO 7010:2020 M005 — obbligo occhiali protettivi",
+    "source_url": "https://www.iso.org/standard/72424.html"
+  },
+  {
+    "file_path": "assets/icons/iso7010/M006_calzature_sicurezza.png",
+    "tags": [
+      "segnaletica",
+      "iso7010",
+      "obbligo",
+      "blu",
+      "m006",
+      "scarpe",
+      "calzature",
+      "dpi"
+    ],
+    "source": "iso7010",
+    "license": "Public Domain",
+    "attribution": "ISO 7010:2020 M006 — obbligo calzature di sicurezza",
+    "source_url": "https://www.iso.org/standard/72424.html"
+  },
+  {
+    "file_path": "assets/icons/iso7010/M007_guanti_protezione.png",
+    "tags": [
+      "segnaletica",
+      "iso7010",
+      "obbligo",
+      "blu",
+      "m007",
+      "guanti",
+      "mani",
+      "dpi"
+    ],
+    "source": "iso7010",
+    "license": "Public Domain",
+    "attribution": "ISO 7010:2020 M007 — obbligo guanti di protezione",
+    "source_url": "https://www.iso.org/standard/72424.html"
+  },
+  {
+    "file_path": "assets/icons/iso7010/M008_protezione_vie_respiratorie.png",
+    "tags": [
+      "segnaletica",
+      "iso7010",
+      "obbligo",
+      "blu",
+      "m008",
+      "respiratore",
+      "maschera",
+      "dpi"
+    ],
+    "source": "iso7010",
+    "license": "Public Domain",
+    "attribution": "ISO 7010:2020 M008 — obbligo protezione vie respiratorie",
+    "source_url": "https://www.iso.org/standard/72424.html"
+  },
+  {
+    "file_path": "assets/icons/iso7010/M009_imbragatura_anticaduta.png",
+    "tags": [
+      "segnaletica",
+      "iso7010",
+      "obbligo",
+      "blu",
+      "m009",
+      "imbracatura",
+      "anticaduta",
+      "dpi"
+    ],
+    "source": "iso7010",
+    "license": "Public Domain",
+    "attribution": "ISO 7010:2020 M009 — obbligo imbragatura anticaduta",
+    "source_url": "https://www.iso.org/standard/72424.html"
+  },
+  {
+    "file_path": "assets/icons/iso7010/M010_indumento_alta_visibilita.png",
+    "tags": [
+      "segnaletica",
+      "iso7010",
+      "obbligo",
+      "blu",
+      "m010",
+      "gilet",
+      "alta_visibilita",
+      "dpi"
+    ],
+    "source": "iso7010",
+    "license": "Public Domain",
+    "attribution": "ISO 7010:2020 M010 — obbligo indumento alta visibilita",
+    "source_url": "https://www.iso.org/standard/72424.html"
+  },
+  {
+    "file_path": "assets/icons/iso7010/W001_pericolo_generico.png",
+    "tags": [
+      "segnaletica",
+      "iso7010",
+      "avvertimento",
+      "giallo",
+      "w001",
+      "pericolo",
+      "attenzione"
+    ],
+    "source": "iso7010",
+    "license": "Public Domain",
+    "attribution": "ISO 7010:2020 W001 — pericolo generico",
+    "source_url": "https://www.iso.org/standard/72424.html"
+  },
+  {
+    "file_path": "assets/icons/iso7010/W012_tensione_elettrica.png",
+    "tags": [
+      "segnaletica",
+      "iso7010",
+      "avvertimento",
+      "giallo",
+      "w012",
+      "elettrico",
+      "tensione",
+      "fulmine"
+    ],
+    "source": "iso7010",
+    "license": "Public Domain",
+    "attribution": "ISO 7010:2020 W012 — pericolo tensione elettrica",
+    "source_url": "https://www.iso.org/standard/72424.html"
+  },
+  {
+    "file_path": "assets/icons/iso7010/W005_materiale_esplosivo.png",
+    "tags": [
+      "segnaletica",
+      "iso7010",
+      "avvertimento",
+      "giallo",
+      "w005",
+      "esplosivo",
+      "bomba"
+    ],
+    "source": "iso7010",
+    "license": "Public Domain",
+    "attribution": "ISO 7010:2020 W005 — pericolo materiale esplosivo",
+    "source_url": "https://www.iso.org/standard/72424.html"
+  },
+  {
+    "file_path": "assets/icons/iso7010/W021_materiale_infiammabile.png",
+    "tags": [
+      "segnaletica",
+      "iso7010",
+      "avvertimento",
+      "giallo",
+      "w021",
+      "infiammabile",
+      "fuoco",
+      "fiamma"
+    ],
+    "source": "iso7010",
+    "license": "Public Domain",
+    "attribution": "ISO 7010:2020 W021 — pericolo materiale infiammabile",
+    "source_url": "https://www.iso.org/standard/72424.html"
+  },
+  {
+    "file_path": "assets/icons/iso7010/W016_materiale_tossico.png",
+    "tags": [
+      "segnaletica",
+      "iso7010",
+      "avvertimento",
+      "giallo",
+      "w016",
+      "tossico",
+      "veleno",
+      "teschio"
+    ],
+    "source": "iso7010",
+    "license": "Public Domain",
+    "attribution": "ISO 7010:2020 W016 — pericolo materiale tossico",
+    "source_url": "https://www.iso.org/standard/72424.html"
+  },
+  {
+    "file_path": "assets/icons/iso7010/W026_rischio_biologico.png",
+    "tags": [
+      "segnaletica",
+      "iso7010",
+      "avvertimento",
+      "giallo",
+      "w026",
+      "biologico",
+      "infettivo"
+    ],
+    "source": "iso7010",
+    "license": "Public Domain",
+    "attribution": "ISO 7010:2020 W026 — pericolo rischio biologico",
+    "source_url": "https://www.iso.org/standard/72424.html"
+  },
+  {
+    "file_path": "assets/icons/iso7010/W004_raggi_laser.png",
+    "tags": [
+      "segnaletica",
+      "iso7010",
+      "avvertimento",
+      "giallo",
+      "w004",
+      "laser",
+      "raggi"
+    ],
+    "source": "iso7010",
+    "license": "Public Domain",
+    "attribution": "ISO 7010:2020 W004 — pericolo radiazione laser",
+    "source_url": "https://www.iso.org/standard/72424.html"
+  },
+  {
+    "file_path": "assets/icons/iso7010/W009_rischio_caduta.png",
+    "tags": [
+      "segnaletica",
+      "iso7010",
+      "avvertimento",
+      "giallo",
+      "w009",
+      "caduta",
+      "altezza",
+      "vuoto"
+    ],
+    "source": "iso7010",
+    "license": "Public Domain",
+    "attribution": "ISO 7010:2020 W009 — pericolo rischio caduta dall'alto",
+    "source_url": "https://www.iso.org/standard/72424.html"
+  },
+  {
+    "file_path": "assets/icons/iso7010/W015_carichi_sospesi.png",
+    "tags": [
+      "segnaletica",
+      "iso7010",
+      "avvertimento",
+      "giallo",
+      "w015",
+      "carichi",
+      "sospesi",
+      "gru"
+    ],
+    "source": "iso7010",
+    "license": "Public Domain",
+    "attribution": "ISO 7010:2020 W015 — pericolo carichi sospesi",
+    "source_url": "https://www.iso.org/standard/72424.html"
+  },
+  {
+    "file_path": "assets/icons/iso7010/W014_carrelli_industriali.png",
+    "tags": [
+      "segnaletica",
+      "iso7010",
+      "avvertimento",
+      "giallo",
+      "w014",
+      "carrello",
+      "muletto",
+      "trasporto"
+    ],
+    "source": "iso7010",
+    "license": "Public Domain",
+    "attribution": "ISO 7010:2020 W014 — pericolo carrelli industriali in movimento",
+    "source_url": "https://www.iso.org/standard/72424.html"
+  },
+  {
+    "file_path": "assets/icons/iso7010/P001_divieto_generico.png",
+    "tags": [
+      "segnaletica",
+      "iso7010",
+      "divieto",
+      "rosso",
+      "p001",
+      "vietato"
+    ],
+    "source": "iso7010",
+    "license": "Public Domain",
+    "attribution": "ISO 7010:2020 P001 — divieto generico",
+    "source_url": "https://www.iso.org/standard/72424.html"
+  },
+  {
+    "file_path": "assets/icons/iso7010/P002_vietato_fumare.png",
+    "tags": [
+      "segnaletica",
+      "iso7010",
+      "divieto",
+      "rosso",
+      "p002",
+      "fumare",
+      "sigarette"
+    ],
+    "source": "iso7010",
+    "license": "Public Domain",
+    "attribution": "ISO 7010:2020 P002 — vietato fumare",
+    "source_url": "https://www.iso.org/standard/72424.html"
+  },
+  {
+    "file_path": "assets/icons/iso7010/P003_vietato_fiamme_libere.png",
+    "tags": [
+      "segnaletica",
+      "iso7010",
+      "divieto",
+      "rosso",
+      "p003",
+      "fiamma",
+      "fuoco"
+    ],
+    "source": "iso7010",
+    "license": "Public Domain",
+    "attribution": "ISO 7010:2020 P003 — vietato fiamme libere",
+    "source_url": "https://www.iso.org/standard/72424.html"
+  },
+  {
+    "file_path": "assets/icons/iso7010/P004_vietato_acqua_estinguere.png",
+    "tags": [
+      "segnaletica",
+      "iso7010",
+      "divieto",
+      "rosso",
+      "p004",
+      "acqua",
+      "estinguere"
+    ],
+    "source": "iso7010",
+    "license": "Public Domain",
+    "attribution": "ISO 7010:2020 P004 — vietato usare acqua per estinguere",
+    "source_url": "https://www.iso.org/standard/72424.html"
+  },
+  {
+    "file_path": "assets/icons/iso7010/P005_non_potabile.png",
+    "tags": [
+      "segnaletica",
+      "iso7010",
+      "divieto",
+      "rosso",
+      "p005",
+      "acqua",
+      "potabile"
+    ],
+    "source": "iso7010",
+    "license": "Public Domain",
+    "attribution": "ISO 7010:2020 P005 — acqua non potabile",
+    "source_url": "https://www.iso.org/standard/72424.html"
+  },
+  {
+    "file_path": "assets/icons/iso7010/P006_divieto_accesso_pedoni.png",
+    "tags": [
+      "segnaletica",
+      "iso7010",
+      "divieto",
+      "rosso",
+      "p006",
+      "pedoni",
+      "accesso"
+    ],
+    "source": "iso7010",
+    "license": "Public Domain",
+    "attribution": "ISO 7010:2020 P006 — divieto accesso pedoni",
+    "source_url": "https://www.iso.org/standard/72424.html"
+  }
+]

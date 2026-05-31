@@ -183,6 +183,7 @@ export function CourseProgress() {
   const currentPhase = deriveCurrentPhase(progress)
   const isFailed = progress?.status === 'failed' || error !== null
   const isCompleted = progress?.status === 'completed'
+  const isSkeletonPending = progress?.status === 'skeleton_pending'
 
   return (
     <>
@@ -210,7 +211,9 @@ export function CourseProgress() {
                     ? 'Completato'
                     : isFailed
                       ? 'Errore'
-                      : 'In corso'}
+                      : isSkeletonPending
+                        ? 'Scheletro pronto per revisione'
+                        : 'In corso'}
                 </span>
                 <span className='tabular-nums text-base font-medium text-muted-foreground'>
                   {percent}%
@@ -221,7 +224,9 @@ export function CourseProgress() {
                   ? (error ?? progress?.error_message ?? 'Errore sconosciuto.')
                   : isCompleted
                     ? 'Pipeline conclusa. Apertura del corso in corso…'
-                    : (progress?.current_step ?? 'Avvio…')}
+                    : isSkeletonPending
+                      ? 'La ricerca normativa è completa. Apri Course Studio per revisionare i sotto-temi e approvare lo scheletro: la generazione delle slide partirà dopo.'
+                      : (progress?.current_step ?? 'Avvio…')}
               </CardDescription>
             </CardHeader>
             <CardContent className='space-y-6'>
@@ -278,6 +283,34 @@ export function CourseProgress() {
                   )
                 })}
               </ol>
+
+              {/* Skeleton pending: human-in-the-loop gate */}
+              {isSkeletonPending && (
+                <div className='flex items-center gap-3 rounded-md border border-brand-primary/40 bg-brand-primary/5 p-3 text-sm'>
+                  <Check className='size-5 text-brand-primary' aria-hidden='true' />
+                  <div className='flex-1'>
+                    <div className='font-medium text-foreground'>
+                      Scheletro generato. Attesa revisione utente.
+                    </div>
+                    <div className='text-muted-foreground'>
+                      Verifica i sotto-temi prima che parta la generazione
+                      delle slide.
+                    </div>
+                  </div>
+                  <Button
+                    size='sm'
+                    className='bg-brand-primary hover:bg-brand-primary/90'
+                    onClick={() =>
+                      navigate({
+                        to: '/courses/$id/studio',
+                        params: { id: courseId },
+                      })
+                    }
+                  >
+                    Apri scheletro
+                  </Button>
+                </div>
+              )}
 
               {/* Failure recovery */}
               {isFailed && (

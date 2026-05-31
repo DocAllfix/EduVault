@@ -1,4 +1,6 @@
 import { useNavigate, useRouter } from '@tanstack/react-router'
+import { RefreshCw, ShieldAlert } from 'lucide-react'
+
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 
@@ -12,22 +14,42 @@ export function GeneralError({
 }: GeneralErrorProps) {
   const navigate = useNavigate()
   const { history } = useRouter()
+
   return (
     <div className={cn('h-svh w-full', className)}>
-      <div className='m-auto flex h-full w-full flex-col items-center justify-center gap-2'>
+      <div className='m-auto flex h-full w-full flex-col items-center justify-center gap-3 px-6'>
         {!minimal && (
-          <h1 className='text-[7rem] leading-tight font-bold'>500</h1>
+          <div className='mb-2 flex size-20 items-center justify-center rounded-full bg-destructive/10'>
+            <ShieldAlert
+              className='size-10 text-destructive'
+              aria-hidden='true'
+            />
+          </div>
         )}
-        <span className='font-medium'>Oops! Something went wrong {`:')`}</span>
-        <p className='text-center text-muted-foreground'>
-          We apologize for the inconvenience. <br /> Please try again later.
+        <span className='text-lg font-semibold'>
+          Si è verificato un errore imprevisto
+        </span>
+        <p className='max-w-md text-center text-sm text-muted-foreground'>
+          La pagina non si è caricata correttamente. Può capitare se la
+          connessione è instabile, il server sta riavviando, o il controllo
+          anti-bot di Vercel è scattato. Riprova fra qualche secondo.
         </p>
         {!minimal && (
-          <div className='mt-6 flex gap-4'>
-            <Button variant='outline' onClick={() => history.go(-1)}>
-              Go Back
+          <div className='mt-4 flex flex-wrap items-center justify-center gap-3'>
+            <Button
+              variant='default'
+              className='bg-brand-primary hover:bg-brand-primary/90 gap-2'
+              onClick={() => window.location.reload()}
+            >
+              <RefreshCw className='size-4' aria-hidden='true' />
+              Riprova
             </Button>
-            <Button onClick={() => navigate({ to: '/' })}>Back to Home</Button>
+            <Button variant='outline' onClick={() => history.go(-1)}>
+              Pagina precedente
+            </Button>
+            <Button variant='ghost' onClick={() => navigate({ to: '/' })}>
+              Dashboard
+            </Button>
           </div>
         )}
       </div>

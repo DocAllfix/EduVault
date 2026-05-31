@@ -13,9 +13,9 @@
  * worst possible UX.
  */
 
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import { Info, Loader2, Upload } from 'lucide-react'
+import { Check, Info, Loader2, Upload } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { api, ApiError } from '@/lib/api'
@@ -31,6 +31,7 @@ import {
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Progress } from '@/components/ui/progress'
 import {
   Select,
   SelectContent,
@@ -39,6 +40,31 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { cn } from '@/lib/utils'
+
+// ─── Ingestion stage estimator (UX progress chiaro) ───
+// Tempi stimati basati sulla taglia file. Backend non emette progress
+// granulare in upload, ma le 4 fasi sono deterministiche: parse PDF →
+// chunk + segment → classify LLM → embed Voyage. ETA aggiornato live.
+
+interface IngestionStage {
+  id: 'upload' | 'parse' | 'chunk' | 'classify' | 'embed'
+  label: string
+  description: string
+}
+
+const INGESTION_STAGES: IngestionStage[] = [
+  { id: 'upload', label: 'Upload', description: 'Trasferimento file al server.' },
+  { id: 'parse', label: 'Parsing PDF', description: 'Estrazione testo strutturato.' },
+  { id: 'chunk', label: 'Segmentazione', description: 'Divisione in chunk semantici.' },
+  { id: 'classify', label: 'Classificazione', description: 'LLM categorizza articoli e commi.' },
+  { id: 'embed', label: 'Embedding', description: 'Voyage genera vettori per ricerca.' },
+]
+
+function estimateTotalMs(sizeMB: number): number {
+  // Misurato empiricamente: 1 MB ~ 30s pipeline completa.
+  // Min 30s (overhead fisso) + 25s per MB.
+  return Math.max(30_000, Math.round(30_000 + sizeMB * 25_000))
+}
 
 const REG_TYPES = ['DECRETO', 'LEGGE', 'ACCORDO', 'CIRCOLARE', 'NORMA_TECNICA'] as const
 
@@ -63,12 +89,40 @@ export function UploadRegulationDialog() {
   const [regType, setRegType] = useState<string>('DECRETO')
   const [region, setRegion] = useState('NAZIONALE')
 
+  // Progress UX: stage corrente + elapsed time + ETA. Avanza autonomamente
+  // basandosi su timer (backend non emette progress granulare in upload).
+  const [stageIndex, setStageIndex] = useState(0)
+  const [elapsedMs, setElapsedMs] = useState(0)
+  const [totalEtaMs, setTotalEtaMs] = useState(60_000)
+  const startTimeRef = useRef<number | null>(null)
+
+  useEffect(() => {
+    if (!isLoading) return
+    const tick = () => {
+      if (!startTimeRef.current) return
+      const elapsed = Date.now() - startTimeRef.current
+      setElapsedMs(elapsed)
+      // Avanza stage in modo proporzionale: ogni 1/5 del totale ETA cambia stage
+      const stageStep = totalEtaMs / INGESTION_STAGES.length
+      const target = Math.min(
+        INGESTION_STAGES.length - 1,
+        Math.floor(elapsed / stageStep),
+      )
+      setStageIndex(target)
+    }
+    const interval = window.setInterval(tick, 500)
+    return () => window.clearInterval(interval)
+  }, [isLoading, totalEtaMs])
+
   function reset() {
     setFile(null)
     setSlug('')
     setTitle('')
     setRegType('DECRETO')
     setRegion('NAZIONALE')
+    setStageIndex(0)
+    setElapsedMs(0)
+    startTimeRef.current = null
   }
 
   function acceptFile(f: File | undefined) {
@@ -95,6 +149,10 @@ export function UploadRegulationDialog() {
     const sizeMB = file.size / 1024 / 1024
     const isLarge = sizeMB > LARGE_FILE_THRESHOLD_MB
     setIsLoading(true)
+    setStageIndex(0)
+    setElapsedMs(0)
+    startTimeRef.current = Date.now()
+    setTotalEtaMs(estimateTotalMs(sizeMB))
     // PDF grossi: il server completa anche se il client va in timeout. Mostriamo
     // un toast informativo PRIMA del fetch cosi' l'utente sa che attesa lunga
     // non vuol dire fallimento. Il toast successivo (success / network-error)
@@ -279,6 +337,59 @@ export function UploadRegulationDialog() {
             </div>
           </div>
         </div>
+
+        {/* Progress stepper visibile durante upload (UX feedback chiaro) */}
+        {isLoading && (
+          <div className='space-y-4 rounded-md border bg-muted/30 p-4'>
+            <div className='flex items-center justify-between text-sm'>
+              <span className='font-medium'>
+                {INGESTION_STAGES[stageIndex]?.label ?? 'Avvio…'}
+              </span>
+              <span className='tabular-nums text-muted-foreground'>
+                {Math.round(elapsedMs / 1000)}s / ~{Math.round(totalEtaMs / 1000)}s
+              </span>
+            </div>
+            <Progress
+              value={Math.min(100, Math.round((elapsedMs / totalEtaMs) * 100))}
+              className='h-2'
+            />
+            <ul className='space-y-1.5'>
+              {INGESTION_STAGES.map((s, i) => {
+                const done = i < stageIndex
+                const active = i === stageIndex
+                return (
+                  <li
+                    key={s.id}
+                    className={cn(
+                      'flex items-center gap-2 text-xs transition-opacity',
+                      done && 'text-muted-foreground',
+                      active && 'font-medium text-foreground',
+                      !done && !active && 'opacity-50',
+                    )}
+                  >
+                    <span className='flex size-5 items-center justify-center'>
+                      {done ? (
+                        <Check className='size-4 text-brand-secondary' aria-hidden='true' />
+                      ) : active ? (
+                        <Loader2 className='size-4 animate-spin text-brand-primary' aria-hidden='true' />
+                      ) : (
+                        <span className='size-2 rounded-full bg-muted-foreground/40' />
+                      )}
+                    </span>
+                    <span>{s.label}</span>
+                    {active && (
+                      <span className='ml-1 text-muted-foreground'>— {s.description}</span>
+                    )}
+                  </li>
+                )
+              })}
+            </ul>
+            <p className='text-[11px] text-muted-foreground'>
+              Il server continua l'elaborazione anche se chiudi il dialog. La
+              normativa apparirà nell'elenco al termine.
+            </p>
+          </div>
+        )}
 
         <DialogFooter>
           <Button variant='ghost' onClick={() => setOpen(false)} disabled={isLoading}>

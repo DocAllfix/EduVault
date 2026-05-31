@@ -43,6 +43,7 @@ export interface JobProgress {
 export type JobStatus =
   | 'queued'
   | 'research'
+  | 'skeleton_pending'   // research done, waiting for user approval (D3 D-186)
   | 'content'
   | 'building'
   | 'completed'
@@ -58,6 +59,9 @@ export const TERMINAL_STATES: ReadonlySet<JobStatus> = new Set<JobStatus>([
   'failed',
   'cancelled',
   'archived',
+  // skeleton_pending: terminal from the JOB perspective (user must approve);
+  // CourseProgress UI shows a "Revisiona scheletro" CTA instead of spinner.
+  'skeleton_pending',
 ])
 
 /** Reasons we exposed why a watcher closed. Useful for UI debugging. */
@@ -144,6 +148,12 @@ function courseStatusToJobProgress(course: CourseDetail): JobProgress {
       break
     case 'archived':
       status = 'archived'
+      break
+    case 'skeleton_pending':
+      // Research done, awaiting human approval (D3 D-186). Terminal from
+      // the job perspective: the polling layer can stop and the UI will
+      // surface a "Revisiona scheletro" CTA.
+      status = 'skeleton_pending'
       break
     case 'generating':
     default:
