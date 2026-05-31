@@ -64,6 +64,18 @@ _DLGS = re.compile(
     re.IGNORECASE,
 )
 
+# Formato giuridico italiano completo: "D.Lgs 8 marzo 2006, n. 139"
+# (data prima del numero — pattern slide 42 PPTX 0dfe39ad D.Lgs 139/2006 attribuito
+# ad antincendio in luogo del DM 03/09/2021. Riconosciuto come Tipo 3 hallucination
+# D-181-quinquies, deve essere catturato anche nel titolo della slide).
+_DLGS_DATED = re.compile(
+    r"(?:Decreto\s+[Ll]egislativo|D\.?\s*[Ll]gs\.?)\s+"
+    r"\d{1,2}\s+(?:gennaio|febbraio|marzo|aprile|maggio|giugno|luglio|"
+    r"agosto|settembre|ottobre|novembre|dicembre)\s+"
+    r"(\d{4})\s*,?\s*n\.?\s*(\d+)",
+    re.IGNORECASE,
+)
+
 _REG_CE = re.compile(
     r"(?:Regolamento\s*\(?\s*CE\s*\)?|Reg\.?\s*\(?\s*CE\s*\)?)\s+"
     r"(?:n\.?\s*)?(\d+)/(\d{4})",
@@ -168,8 +180,23 @@ def extract_citation_slugs(text: str) -> list[str]:
             seen.add(slug)
             found.append(slug)
 
+    # D.Lgs giuridico full: "D.Lgs 8 marzo 2006, n. 139" -> "dlgs_139_06"
+    # (data prima del numero — pattern slide 42 PPTX 0dfe39ad).
+    # Eseguito PRIMA di _DLGS standard per intercettare la forma completa
+    # prima che _DLGS catturi solo parti del numero.
+    text_for_dlgs_simple = text
+    for m in _DLGS_DATED.finditer(text):
+        year = _normalize_year_2digit(m.group(1))
+        n = m.group(2)
+        slug = f"dlgs_{n}_{year}"
+        if slug not in seen:
+            seen.add(slug)
+            found.append(slug)
+        # Blank la porzione matchata per evitare doppio match in _DLGS
+        text_for_dlgs_simple = text_for_dlgs_simple.replace(m.group(0), " " * len(m.group(0)), 1)
+
     # D.Lgs: "81/2008" -> "dlgs_81_08"
-    for m in _DLGS.finditer(text):
+    for m in _DLGS.finditer(text_for_dlgs_simple):
         n = m.group(1)
         year = _normalize_year_2digit(m.group(2))
         slug = f"dlgs_{n}_{year}"

@@ -588,6 +588,254 @@ async def _generate_module_h8(
     ).model_dump()
 
 
+async def regenerate_single_slide_h8(
+    *,
+    course_id: str,
+    slide_index: int,
+    pool: object,
+) -> dict[str, object]:
+    """F4b V1 (analista 2026-05-31): rigenera UNA singola slide via H8 voce-aware.
+
+    Strategia coerente con _generate_module_h8:
+      1. Carica slide_contents_json + module_skeletons_json + course meta
+      2. Identifica slide target + module_index della slide
+      3. Identifica voce skeleton "owner" della slide via heuristica posizione
+         cluster (slide non-bookend) OPPURE via re-mapping euristico bullets
+         keywords ↔ sub_topic skeleton
+      4. Re-invoca generate_module_structured con expected_slides=1 +
+         chunks della voce + prompt voce-aware (build_voice_prompt)
+      5. Sostituisce slide nel slide_contents_json + persiste + marca dirty=true
+         (RebuildBanner mostra al cliente che serve rebuild PPTX)
+
+    Returns: dict con status, slide_index, regenerated_slide_summary.
+
+    Raise: HTTPException-equivalente RuntimeError se voce non identificabile o
+    LLM fallisce (caller wrappa in HTTPException).
+    """
+    import json as _json
+    import uuid as _uuid
+
+    from app.agents.prompts import build_voice_prompt
+    from app.config import settings
+    from app.models.pipeline import SlideContent
+    from app.services.dependencies import get_pool as _get_pool
+    from app.services.ingestion_service import generate_module_structured
+    from app.services.knowledge_repo import KnowledgeRepository
+    from app.services.skeleton_service import materialize_module_from_skeleton
+
+    # ── 1. Load course + slides + skeleton from DB ──
+    course_uuid = _uuid.UUID(course_id)
+    row = await pool.fetchrow(
+        "SELECT slide_contents_json, module_skeletons_json, course_type, target, region "
+        "FROM courses WHERE id = $1",
+        course_uuid,
+    )
+    if row is None:
+        raise RuntimeError(f"Course {course_id} not found")
+    raw_slides = row["slide_contents_json"]
+    if raw_slides is None:
+        raise RuntimeError(f"Course {course_id} has no slide_contents_json")
+    slides = _json.loads(raw_slides) if isinstance(raw_slides, str) else raw_slides
+    if not isinstance(slides, list) or slide_index >= len(slides):
+        raise RuntimeError(f"Invalid slide_index {slide_index} (n_slides={len(slides) if isinstance(slides, list) else '?'})")
+    target_slide = slides[slide_index]
+    if not isinstance(target_slide, dict):
+        raise RuntimeError(f"Slide {slide_index} not a dict")
+
+    mod_idx = target_slide.get("module_index")
+    slide_type = target_slide.get("slide_type", "")
+    if mod_idx is None:
+        raise RuntimeError(f"Slide {slide_index} missing module_index")
+    # Skip MODULE_OPEN / MODULE_CLOSE / TITLE: bookends programmatici, no LLM gen
+    if slide_type in ("MODULE_OPEN", "MODULE_CLOSE", "TITLE", "CLOSING"):
+        raise RuntimeError(
+            f"Slide {slide_index} e' bookend/title ({slide_type}), no rigenerazione LLM. "
+            "Edita manualmente via patch_slide se necessario."
+        )
+
+    # ── 2. Load skeleton + identifica voce owner ──
+    raw_sk = row["module_skeletons_json"]
+    if raw_sk is None:
+        raise RuntimeError(
+            f"Course {course_id} senza module_skeletons_json: rigenerazione H8 "
+            "richiede skeleton (flag v2_skeleton_validation deve essere stato ON)"
+        )
+    sk_payload = _json.loads(raw_sk) if isinstance(raw_sk, str) else raw_sk
+    modules_sk = sk_payload.get("modules") if isinstance(sk_payload, dict) else None
+    if not isinstance(modules_sk, list):
+        raise RuntimeError(f"module_skeletons_json malformato per course {course_id}")
+    module_sk = next(
+        (m for m in modules_sk if isinstance(m, dict) and m.get("module_index") == mod_idx),
+        None,
+    )
+    if module_sk is None:
+        raise RuntimeError(f"Skeleton modulo {mod_idx} non trovato per course {course_id}")
+    voci = module_sk.get("items") or []
+    if not voci:
+        raise RuntimeError(f"Modulo {mod_idx} senza voci skeleton")
+
+    # Heuristica voce-owner: identifica la voce il cui sub_topic ha più keyword
+    # overlap col title + bullets della slide target. Fallback: voce in posizione
+    # proporzionale al slide_index_in_module / n_slides_in_module * n_voci.
+    target_text = (
+        (target_slide.get("title") or "")
+        + " "
+        + " ".join(target_slide.get("bullets") or [])
+        + " "
+        + (target_slide.get("speaker_notes") or "")
+    ).lower()
+    target_words = set(w for w in target_text.split() if len(w) > 3)
+
+    best_voce: dict[str, object] | None = None
+    best_overlap = -1
+    for voce in voci:
+        if not isinstance(voce, dict):
+            continue
+        st_text = (str(voce.get("sub_topic", "")) + " " + str(voce.get("retrieval_query", ""))).lower()
+        st_words = set(w for w in st_text.split() if len(w) > 3)
+        overlap = len(target_words & st_words)
+        if overlap > best_overlap:
+            best_overlap = overlap
+            best_voce = voce
+
+    if best_voce is None or best_overlap < 1:
+        # Fallback proporzionale
+        module_slides = [s for s in slides if isinstance(s, dict) and s.get("module_index") == mod_idx]
+        slide_pos_in_module = next(
+            (i for i, s in enumerate(module_slides) if s.get("index") == slide_index),
+            0,
+        )
+        voce_idx_est = min(int(slide_pos_in_module * len(voci) / max(len(module_slides), 1)), len(voci) - 1)
+        best_voce = voci[voce_idx_est] if isinstance(voci[voce_idx_est], dict) else voci[0]
+
+    voce_ord = int(best_voce.get("ordinal", 1)) if isinstance(best_voce.get("ordinal"), (int, str, float)) else 1
+    voce_sub_topic = str(best_voce.get("sub_topic", ""))
+    voce_retrieval_query = str(best_voce.get("retrieval_query", voce_sub_topic))
+
+    # ── 3. Materializza chunks della voce (re-run B2+B3+B4 per la voce) ──
+    from app.models.pipeline import ModuleSkeleton, SkeletonItem
+    sk_obj = ModuleSkeleton(
+        module_index=mod_idx,
+        title=str(module_sk.get("title", f"Modulo {mod_idx}")),
+        items=[SkeletonItem(**v) for v in voci if isinstance(v, dict)],
+    )
+    # Resolve regulation_ids dal course_type catalog
+    from config.catalog_config import COURSE_CATALOG
+    course_type_str = str(row["course_type"])
+    catalog_entry = COURSE_CATALOG.get(course_type_str, {})
+    reg_slugs_raw = catalog_entry.get("regs") if catalog_entry else None
+    reg_slugs = [str(s) for s in (reg_slugs_raw or ["dlgs_81_08"])]
+    repo = KnowledgeRepository(pool)
+    reg_ids = await repo.resolve_slugs_to_ids(reg_slugs)
+    region = str(row["region"] or "NAZIONALE")
+
+    chunks_by_voice, _all_chunks = await materialize_module_from_skeleton(
+        skeleton=sk_obj,
+        regulation_ids=reg_ids,
+        region=region,
+        repo=repo,
+        course_id=course_id,
+    )
+    voce_chunks = chunks_by_voice.get(voce_ord, [])
+    if not voce_chunks:
+        raise RuntimeError(
+            f"F4b: voce {voce_ord} '{voce_sub_topic[:40]}' senza chunks "
+            f"(pool vuoto post-B2/B3/B4). Rigenerazione impossibile per questa slide."
+        )
+
+    # ── 4. Prompt voce-aware + LLM call per 1 slide ──
+    from app.agents.prompts import build_content_system_prompt
+    from app.models.core import TargetType
+    target_type_str = str(row["target"] or "discente")
+    try:
+        target_type = TargetType(target_type_str)
+    except ValueError:
+        target_type = TargetType.DISCENTE
+    system_prompt = build_content_system_prompt(target_type)
+
+    # Distribuzione tipo: solo slide_type della slide target (1 slide)
+    dist_single = {slide_type: 1} if slide_type else {"CONTENT_TEXT": 1}
+
+    voce_prompt = build_voice_prompt(
+        module_index=mod_idx,
+        module_title=str(module_sk.get("title", f"Modulo {mod_idx}")),
+        voice_ordinal=voce_ord,
+        voice_sub_topic=voce_sub_topic,
+        voice_retrieval_query=voce_retrieval_query,
+        voice_chunks=voce_chunks,
+        slide_count_for_voice=1,
+        slide_distribution_for_voice=dist_single,
+        style_patterns=[],
+        previous_voices_summary=(
+            f"Sto rigenerando UNA singola slide di tipo {slide_type} per il sotto-tema "
+            f"\"{voce_sub_topic}\". La slide originale aveva titolo: "
+            f"\"{(target_slide.get('title') or '')[:80]}\". "
+            "Genera una versione MIGLIORATA della slide, coerente col sotto-tema."
+        ),
+        target=target_type,
+    )
+
+    chunks_text_voce = "\n\n".join(
+        f"[ID: {c.chunk_id}] Art. {c.article or '?'}: {c.body}"
+        for c in voce_chunks[:30]
+    )
+
+    voce_module_obj, voce_telemetry = await generate_module_structured(
+        system=system_prompt,
+        user_prompt=voce_prompt,
+        module_index=mod_idx,
+        module_title=f"REGEN slide {slide_index} - voce {voce_ord}",
+        expected_slides=1,
+        chunks_text=chunks_text_voce,
+        slide_distribution=dist_single,
+    )
+
+    if not voce_module_obj.slides:
+        raise RuntimeError(
+            f"F4b: LLM non ha generato la slide per voce {voce_ord} "
+            f"sub_topic '{voce_sub_topic[:40]}' (telemetry: {voce_telemetry.get('provider_used')})"
+        )
+
+    # ── 5. Sostituisci slide nel slide_contents_json + persisti + marca dirty ──
+    new_slide = voce_module_obj.slides[0]
+    # Preserva index originale + module_index (re-generated_slide ha index=0 dal batch)
+    new_slide.index = slide_index
+    new_slide.module_index = mod_idx
+    new_slide_dump = new_slide.model_dump() if hasattr(new_slide, "model_dump") else dict(new_slide)
+
+    slides[slide_index] = new_slide_dump
+
+    await pool.execute(
+        "UPDATE courses SET slide_contents_json = $1, dirty = true, updated_at = now() "
+        "WHERE id = $2",
+        _json.dumps(slides),
+        course_uuid,
+    )
+
+    logger.info(
+        "slide_regenerated_h8",
+        course_id=course_id,
+        slide_index=slide_index,
+        voce_ordinal=voce_ord,
+        voce_sub_topic=voce_sub_topic[:60],
+        provider=voce_telemetry.get("provider_used"),
+        old_title=(target_slide.get("title") or "")[:60],
+        new_title=(new_slide_dump.get("title") or "")[:60],
+    )
+
+    return {
+        "status": "regenerated",
+        "course_id": course_id,
+        "slide_index": slide_index,
+        "voce_ordinal_used": voce_ord,
+        "voce_sub_topic_used": voce_sub_topic,
+        "old_title": (target_slide.get("title") or "")[:120],
+        "new_title": (new_slide_dump.get("title") or "")[:120],
+        "provider": voce_telemetry.get("provider_used"),
+        "note": "Slide sostituita in slide_contents_json. Esegui /rebuild per ricostruire PPTX.",
+    }
+
+
 def parse_slides_json(raw: str) -> list[dict[str, object]] | None:
     """Robust JSON parsing con multi-shape support (BP §05.5 + FASE 0b vast-hopping).
 

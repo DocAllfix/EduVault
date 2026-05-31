@@ -903,3 +903,141 @@ async def rebuild_course(
     asyncio.create_task(do_rebuild(course_id, str(user["id"]), pool))
     return {"status": "rebuilding", "course_id": course_id}
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# F4 D9 Slide Quality Issues (analista sign-off 2026-05-31 post-H8b rollback)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@router.get("/{course_id}/quality-issues")
+async def get_quality_issues(
+    course_id: str,
+    user: dict[str, Any] = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Ritorna issue D9 per le slide del corso (badge UI Course Studio).
+
+    Compute on-the-fly via slide_quality_service.compute_slide_issues() da
+    slide_contents_json + course.regulation_ids. NON blocca download (decisione
+    D9 VAA-c: visibilita' si, coercizione no).
+
+    Output:
+      {
+        "course_id": str,
+        "total_issues": int,
+        "by_severity": {error: N, warning: N, info: N},
+        "by_type": {issue_type: count, ...},
+        "issues": [{slide_index, module_index, issue_type, severity, context}, ...]
+      }
+    """
+    pool = get_pool()
+    course = await _load_course_or_404(course_id, pool)
+    _enforce_ownership(course, user)
+
+    try:
+        slides = await studio_service.get_slides(course_id, pool)
+    except LookupError as exc:
+        raise HTTPException(404, "Corso non trovato") from exc
+    if not slides:
+        return {
+            "course_id": course_id,
+            "total_issues": 0,
+            "by_severity": {},
+            "by_type": {},
+            "issues": [],
+        }
+
+    # Resolve course.regulation_ids → regulation_slugs per bullet/title citation checks
+    from config.catalog_config import COURSE_CATALOG
+    catalog_entry = COURSE_CATALOG.get(course["course_type"], {})
+    regulation_slugs_raw = catalog_entry.get("regs") if catalog_entry else None
+    regulation_slugs = [str(s) for s in (regulation_slugs_raw or []) if s]
+
+    from app.services.slide_quality_service import compute_slide_issues
+    result = compute_slide_issues(
+        slides=slides,
+        course_regulation_ids=regulation_slugs,
+        expected_slides_per_module=70,
+    )
+    result["course_id"] = course_id
+    return result
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# F4b Rigenera singola slide (analista 2026-05-31, sinergia F4 quality badge)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@router.post("/{course_id}/slides/{idx}/regenerate")
+async def regenerate_single_slide(
+    course_id: str,
+    idx: int,
+    user: dict[str, Any] = Depends(require_role("admin", "reviewer")),
+) -> dict[str, Any]:
+    """F4b (analista 2026-05-31): rigenera SINGOLA slide via H8 voce-aware.
+
+    Workflow:
+      1. Carica slide_contents_json + module_skeletons_json da DB
+      2. Identifica voce skeleton "owner" della slide (heuristica keywords overlap
+         + fallback posizionale)
+      3. Materializza chunks della voce (B2+B3+B4 rerun, deterministico)
+      4. Genera UNA slide via generate_module_structured con prompt voce-aware
+      5. Sostituisce slide nel JSON + persiste + marca dirty=true (RebuildBanner
+         mostra al cliente "Esegui /rebuild per ricostruire PPTX")
+
+    Synchronous: il cliente attende il completion (15-30s tipico). Pattern
+    diverso da /rebuild fire-and-forget perche' qui il risultato e' immediato
+    e visibile a slide_index specifico.
+
+    Requirements:
+      - course.module_skeletons_json NON NULL (flag v2_skeleton_validation
+        deve essere stato ON al momento della generazione iniziale)
+      - slide_type NOT IN (MODULE_OPEN, MODULE_CLOSE, TITLE, CLOSING)
+        (bookends programmatici, no LLM gen)
+      - voce skeleton del modulo deve avere chunks non vuoti post-B2/B3/B4
+
+    Returns: dict con status, old_title, new_title, voce_used, provider.
+    404 se slide/course non trovato, 409 se prerequisiti mancanti.
+    """
+    pool = get_pool()
+    course = await _load_course_or_404(course_id, pool)
+    _enforce_ownership(course, user)
+
+    # Verifica esistenza slide
+    try:
+        slide = await studio_service.get_slide_by_idx(course_id, idx, pool)
+    except LookupError as exc:
+        raise HTTPException(404, f"Slide {idx} non trovata") from exc
+
+    # Verifica slide_type rigenerabile (no bookends)
+    slide_type = slide.get("slide_type", "")
+    if slide_type in ("MODULE_OPEN", "MODULE_CLOSE", "TITLE", "CLOSING"):
+        raise HTTPException(
+            409,
+            f"Slide {idx} di tipo {slide_type} e' bookend programmatico, non rigenerabile via LLM. "
+            "Edita manualmente via PATCH /slides/{idx} se necessario."
+        )
+
+    # Verifica prerequisito skeleton
+    if course.get("module_skeletons_json") is None:
+        raise HTTPException(
+            409,
+            "Corso senza module_skeletons_json: rigenerazione H8 richiede skeleton. "
+            "Genera il corso con flag v2_skeleton_validation=true."
+        )
+
+    from app.agents.content_agent import regenerate_single_slide_h8
+
+    try:
+        result = await regenerate_single_slide_h8(
+            course_id=course_id,
+            slide_index=idx,
+            pool=pool,
+        )
+    except RuntimeError as exc:
+        # Errori applicativi (voce non identificabile, chunks vuoti, LLM fallisce)
+        raise HTTPException(409, f"Rigenerazione fallita: {exc}") from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(500, f"Errore interno rigenerazione: {exc}") from exc
+
+    return result
+

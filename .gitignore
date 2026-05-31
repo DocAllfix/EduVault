@@ -64,6 +64,8 @@ scripts/backfill_accordo_2011.py
 scripts/backfill_external_reference.py
 scripts/e2e_ant_l1_b3b4_v1_5_full.py
 scripts/check_railway_deploy_marker.py
+scripts/apply_migration_010_via_proxy.py
+scripts/smoke_test_f4_quality_issues.py
 
 # === Claude Code runtime ===
 .claude/scheduled_tasks.lock
