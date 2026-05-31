@@ -142,6 +142,32 @@ export function Admin() {
           )}
         </section>
 
+        {/* F1 D8 — Catalog review entry point */}
+        <section className='mb-8'>
+          <h2 className='mb-3 text-lg font-semibold tracking-tight'>Catalogo corsi</h2>
+          <Card>
+            <CardHeader>
+              <CardTitle className='flex items-center gap-2 text-base'>
+                <Layers className='text-brand-primary size-4' aria-hidden='true' />
+                Tipologie di corso e approvazione
+              </CardTitle>
+              <CardDescription>
+                Lista delle tipologie di corso (course_type) registrate in DB.
+                Ogni entry deve essere approvata da un admin prima che diventi
+                disponibile nel wizard di generazione (gate VAA-c).
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <a
+                href='/admin/catalog'
+                className='bg-brand-primary text-primary-foreground hover:bg-brand-primary/90 inline-flex h-9 items-center gap-2 rounded-md px-4 text-sm font-medium transition-colors'
+              >
+                Apri catalogo →
+              </a>
+            </CardContent>
+          </Card>
+        </section>
+
         {/* Users — honest stub */}
         <section>
           <h2 className='mb-3 text-lg font-semibold tracking-tight'>Gestione utenti</h2>

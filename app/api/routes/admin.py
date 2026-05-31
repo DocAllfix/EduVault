@@ -215,3 +215,220 @@ async def get_catalog(
     Read-only snapshot — modifications require a code change + redeploy.
     """
     return COURSE_CATALOG
+
+
+# ─────────────── F1 — Admin catalog DB-driven CRUD (D8 vast-hopping) ───────────────
+# Sostituisce a regime ``GET /api/catalog`` (config-driven) quando flag
+# ``v2_catalog_from_db=true``. Gate VAA-c: solo entries con approved_at IS NOT
+# NULL sono disponibili per la generazione (pattern "sistema propone, umano
+# valida"). Default flag OFF -> coesistenza con config-driven path.
+
+
+class CatalogEntrySummary(BaseModel):
+    """Single catalog entry for the admin table (paginated list)."""
+
+    slug: str
+    title: str
+    hours: float
+    target: str
+    regulation_slugs: list[str]
+    regional: bool
+    source: str
+    source_url: str | None = None
+    scraped_at: str | None = None
+    approved_at: str | None = None
+    approved_by: str | None = None
+    created_at: str | None = None
+    updated_at: str | None = None
+    n_modules: int
+
+
+class CatalogListResponse(BaseModel):
+    entries: list[CatalogEntrySummary]
+    total: int
+    page: int
+    per_page: int
+
+
+class CatalogModule(BaseModel):
+    id: str
+    ordinal: int
+    title: str
+    normative_refs: list[str]
+    source: str
+    created_at: str | None = None
+
+
+class CatalogEntryDetail(CatalogEntrySummary):
+    modules: list[CatalogModule]
+
+
+class CatalogUpdateBody(BaseModel):
+    """PATCH body — tutti i campi opzionali, applicati solo se forniti."""
+
+    title: str | None = None
+    hours: float | None = None
+    target: str | None = None
+    regulation_slugs: list[str] | None = None
+    regional: bool | None = None
+
+
+class CatalogBulkApproveBody(BaseModel):
+    slugs: list[str]
+
+
+class CatalogSummaryByTarget(BaseModel):
+    target: str
+    n_total: int
+    n_approved: int
+
+
+class CatalogSummaryResponse(BaseModel):
+    total: int
+    approved: int
+    pending: int
+    by_target: list[CatalogSummaryByTarget]
+    snapshot_at: str
+
+
+@router.get("/api/admin/catalog/summary", response_model=CatalogSummaryResponse)
+async def admin_catalog_summary(
+    user: dict[str, Any] = Depends(require_role("admin")),
+) -> CatalogSummaryResponse:
+    """Aggregato per header pagina catalog-review: count totale + approved + per target."""
+    from app.services.catalog_service import get_catalog_summary
+
+    pool = get_pool()
+    data = await get_catalog_summary(pool)
+    return CatalogSummaryResponse(**data)
+
+
+@router.get("/api/admin/catalog", response_model=CatalogListResponse)
+async def admin_list_catalog(
+    page: int = Query(1, ge=1),
+    per_page: int = Query(50, ge=1, le=200),
+    approved_only: bool = Query(False),
+    target: str | None = Query(None),
+    search: str | None = Query(None),
+    user: dict[str, Any] = Depends(require_role("admin")),
+) -> CatalogListResponse:
+    """Lista paginata + filtri (target, approved, search)."""
+    from app.services.catalog_service import list_catalog_entries
+
+    pool = get_pool()
+    entries, total = await list_catalog_entries(
+        pool,
+        page=page,
+        per_page=per_page,
+        approved_only=approved_only,
+        target_filter=target,
+        search=search,
+    )
+    return CatalogListResponse(
+        entries=[CatalogEntrySummary(**e) for e in entries],
+        total=total,
+        page=page,
+        per_page=per_page,
+    )
+
+
+@router.get("/api/admin/catalog/{slug}", response_model=CatalogEntryDetail)
+async def admin_get_catalog_entry(
+    slug: str,
+    user: dict[str, Any] = Depends(require_role("admin")),
+) -> CatalogEntryDetail:
+    """Dettaglio entry + moduli (ordered by ordinal)."""
+    from fastapi import HTTPException
+
+    from app.services.catalog_service import get_catalog_entry
+
+    pool = get_pool()
+    data = await get_catalog_entry(pool, slug)
+    if data is None:
+        raise HTTPException(404, f"Catalog entry '{slug}' non trovata")
+    return CatalogEntryDetail(**data)
+
+
+@router.patch("/api/admin/catalog/{slug}", response_model=CatalogEntryDetail)
+async def admin_update_catalog_entry(
+    slug: str,
+    body: CatalogUpdateBody,
+    user: dict[str, Any] = Depends(require_role("admin")),
+) -> CatalogEntryDetail:
+    """PATCH parziale (solo campi forniti). Ritorna l'entry aggiornata."""
+    from fastapi import HTTPException
+
+    from app.services.catalog_service import get_catalog_entry, update_catalog_entry
+
+    pool = get_pool()
+    ok = await update_catalog_entry(
+        pool,
+        slug,
+        title=body.title,
+        hours=body.hours,
+        target=body.target,
+        regulation_slugs=body.regulation_slugs,
+        regional=body.regional,
+    )
+    if not ok:
+        raise HTTPException(404, f"Catalog entry '{slug}' non trovata")
+    data = await get_catalog_entry(pool, slug)
+    if data is None:
+        raise HTTPException(404, f"Catalog entry '{slug}' sparita post-update")
+    return CatalogEntryDetail(**data)
+
+
+@router.post("/api/admin/catalog/{slug}/approve", response_model=CatalogEntryDetail)
+async def admin_approve_catalog_entry(
+    slug: str,
+    user: dict[str, Any] = Depends(require_role("admin")),
+) -> CatalogEntryDetail:
+    """Gate VAA-c — stamp approved_at + approved_by, l'entry diventa disponibile
+    per la generazione quando flag v2_catalog_from_db=true."""
+    from fastapi import HTTPException
+
+    from app.services.catalog_service import approve_catalog_entry, get_catalog_entry
+
+    pool = get_pool()
+    ok = await approve_catalog_entry(pool, slug, approver_user_id=str(user["id"]))
+    if not ok:
+        raise HTTPException(404, f"Catalog entry '{slug}' non trovata")
+    data = await get_catalog_entry(pool, slug)
+    if data is None:
+        raise HTTPException(404, f"Catalog entry '{slug}' sparita post-approve")
+    return CatalogEntryDetail(**data)
+
+
+@router.post("/api/admin/catalog/{slug}/unapprove", response_model=CatalogEntryDetail)
+async def admin_unapprove_catalog_entry(
+    slug: str,
+    user: dict[str, Any] = Depends(require_role("admin")),
+) -> CatalogEntryDetail:
+    """Revoca approval — l'entry torna draft (non disponibile per generazione)."""
+    from fastapi import HTTPException
+
+    from app.services.catalog_service import get_catalog_entry, unapprove_catalog_entry
+
+    pool = get_pool()
+    ok = await unapprove_catalog_entry(pool, slug)
+    if not ok:
+        raise HTTPException(404, f"Catalog entry '{slug}' non trovata")
+    data = await get_catalog_entry(pool, slug)
+    if data is None:
+        raise HTTPException(404, f"Catalog entry '{slug}' sparita post-unapprove")
+    return CatalogEntryDetail(**data)
+
+
+@router.post("/api/admin/catalog/bulk-approve")
+async def admin_bulk_approve_catalog(
+    body: CatalogBulkApproveBody,
+    user: dict[str, Any] = Depends(require_role("admin")),
+) -> dict[str, int]:
+    """Approve in batch (UI tabella checkbox + bottone 'Approva selezionati')."""
+    from app.services.catalog_service import bulk_approve_catalog_entries
+
+    pool = get_pool()
+    n = await bulk_approve_catalog_entries(
+        pool, body.slugs, approver_user_id=str(user["id"])
+    )
+    return {"approved_count": n}

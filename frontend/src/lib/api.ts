@@ -813,6 +813,121 @@ async function getCatalog(): Promise<Catalog> {
   return request<Catalog>('/api/catalog')
 }
 
+// ─── F1 D8 — Admin catalog DB-driven CRUD (vast-hopping) ───
+// Coesiste con getCatalog() config-driven sopra. Quando flag v2_catalog_from_db
+// è true, il research_agent legge dal DB invece che da config; questi endpoint
+// sono il lato UI per la review/approval.
+
+export interface CatalogEntrySummary {
+  slug: string
+  title: string
+  hours: number
+  target: string
+  regulation_slugs: string[]
+  regional: boolean
+  source: string
+  source_url?: string | null
+  scraped_at?: string | null
+  approved_at?: string | null
+  approved_by?: string | null
+  created_at?: string | null
+  updated_at?: string | null
+  n_modules: number
+}
+
+export interface CatalogListResponse {
+  entries: CatalogEntrySummary[]
+  total: number
+  page: number
+  per_page: number
+}
+
+export interface CatalogModule {
+  id: string
+  ordinal: number
+  title: string
+  normative_refs: string[]
+  source: string
+  created_at?: string | null
+}
+
+export interface CatalogEntryDetail extends CatalogEntrySummary {
+  modules: CatalogModule[]
+}
+
+export interface CatalogUpdateBody {
+  title?: string
+  hours?: number
+  target?: string
+  regulation_slugs?: string[]
+  regional?: boolean
+}
+
+export interface CatalogSummaryByTarget {
+  target: string
+  n_total: number
+  n_approved: number
+}
+
+export interface CatalogSummaryResponse {
+  total: number
+  approved: number
+  pending: number
+  by_target: CatalogSummaryByTarget[]
+  snapshot_at: string
+}
+
+async function adminListCatalog(params: {
+  page?: number
+  per_page?: number
+  approved_only?: boolean
+  target?: string
+  search?: string
+} = {}): Promise<CatalogListResponse> {
+  return request<CatalogListResponse>('/api/admin/catalog', { query: params })
+}
+
+async function adminGetCatalogSummary(): Promise<CatalogSummaryResponse> {
+  return request<CatalogSummaryResponse>('/api/admin/catalog/summary')
+}
+
+async function adminGetCatalogEntry(slug: string): Promise<CatalogEntryDetail> {
+  return request<CatalogEntryDetail>(
+    `/api/admin/catalog/${encodeURIComponent(slug)}`,
+  )
+}
+
+async function adminUpdateCatalogEntry(
+  slug: string,
+  body: CatalogUpdateBody,
+): Promise<CatalogEntryDetail> {
+  return request<CatalogEntryDetail>(
+    `/api/admin/catalog/${encodeURIComponent(slug)}`,
+    { method: 'PATCH', json: body },
+  )
+}
+
+async function adminApproveCatalogEntry(slug: string): Promise<CatalogEntryDetail> {
+  return request<CatalogEntryDetail>(
+    `/api/admin/catalog/${encodeURIComponent(slug)}/approve`,
+    { method: 'POST' },
+  )
+}
+
+async function adminUnapproveCatalogEntry(slug: string): Promise<CatalogEntryDetail> {
+  return request<CatalogEntryDetail>(
+    `/api/admin/catalog/${encodeURIComponent(slug)}/unapprove`,
+    { method: 'POST' },
+  )
+}
+
+async function adminBulkApproveCatalog(slugs: string[]): Promise<{ approved_count: number }> {
+  return request<{ approved_count: number }>(
+    '/api/admin/catalog/bulk-approve',
+    { method: 'POST', json: { slugs } },
+  )
+}
+
 // ─────────────────────────── Public surface ────────────────────────────
 
 /**
@@ -872,6 +987,14 @@ export const api = {
   getDashboardStats,
   getBrandPresets,
   getCatalog,
+  // F1 catalog DB-driven admin CRUD
+  adminListCatalog,
+  adminGetCatalogSummary,
+  adminGetCatalogEntry,
+  adminUpdateCatalogEntry,
+  adminApproveCatalogEntry,
+  adminUnapproveCatalogEntry,
+  adminBulkApproveCatalog,
 } as const
 
 // Type-only re-export so consumers can refer to the OpenAPI schema directly.
