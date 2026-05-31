@@ -73,15 +73,17 @@ export function AudioPlayer({
           Narrazione disattivata
         </span>
       ) : hasError ? (
-        <span className='text-muted-foreground text-xs italic'>
-          Audio in elaborazione… (la generazione audio avviene in background
-          e può richiedere alcuni minuti dopo la creazione del corso)
+        <span
+          className='text-muted-foreground line-clamp-2 flex-1 text-xs leading-snug italic'
+          title='La generazione audio avviene in background e può richiedere alcuni minuti dopo la creazione del corso'
+        >
+          Audio in elaborazione… (può richiedere alcuni minuti)
         </span>
       ) : (
         <audio
           controls
           src={src}
-          className='h-8 flex-1'
+          className='h-8 min-w-0 flex-1'
           onError={() => setHasError(true)}
         >
           Il tuo browser non supporta l'audio HTML5.

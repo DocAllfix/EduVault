@@ -44,9 +44,14 @@ function SlideFrame({
     <div className="bg-card text-card-foreground border-border relative aspect-video w-full overflow-hidden rounded-lg border shadow-sm">
       {/* Brand bar */}
       <div className="bg-primary absolute inset-x-0 top-0 h-2" />
-      <div className="flex h-full flex-col p-8 pt-10">{children}</div>
+      {/* Padding scalato per non far overflow del contenuto sulla card aspect-video
+          quando il viewer e' in column centrale stretta (~520px). pt-8 lascia
+          spazio sotto la brand-bar; pb-10 spazio per il footer assoluto. */}
+      <div className="flex h-full min-h-0 flex-col px-6 pt-8 pb-10 sm:px-7">
+        {children}
+      </div>
       {footer && (
-        <div className="text-muted-foreground absolute inset-x-0 bottom-0 flex items-center justify-between px-8 py-2 text-xs">
+        <div className="text-muted-foreground border-border/40 absolute inset-x-0 bottom-0 flex items-center justify-between gap-2 border-t bg-card/60 px-6 py-1.5 text-[10px] backdrop-blur sm:px-7">
           {footer}
         </div>
       )}
@@ -132,12 +137,12 @@ export function SlideViewer({
     case 'TITLE':
       return (
         <SlideFrame>
-          <div className="flex flex-1 flex-col items-center justify-center text-center">
-            <h1 className="text-foreground text-4xl font-bold tracking-tight">
+          <div className="flex flex-1 flex-col items-center justify-center px-4 text-center">
+            <h1 className="text-foreground line-clamp-3 text-2xl font-bold leading-tight tracking-tight md:text-3xl">
               {slide.title}
             </h1>
             {slide.normative_ref && slide.normative_ref !== '—' && (
-              <p className="text-muted-foreground mt-4 text-lg">
+              <p className="text-muted-foreground mt-3 line-clamp-2 text-sm md:text-base">
                 {slide.normative_ref}
               </p>
             )}
@@ -150,18 +155,18 @@ export function SlideViewer({
       return (
         <SlideFrame footer={footer}>
           {slide.slide_type === 'RECAP' && (
-            <span className="bg-brand-secondary mb-2 inline-block w-fit rounded px-2 py-0.5 text-xs font-bold tracking-wide text-white uppercase">
+            <span className="bg-brand-secondary mb-2 inline-block w-fit rounded px-2 py-0.5 text-[10px] font-bold tracking-wide text-white uppercase">
               Riepilogo
             </span>
           )}
-          <h2 className="text-foreground mb-4 text-2xl font-semibold">
+          <h2 className="text-foreground mb-3 line-clamp-2 text-lg font-semibold leading-tight tracking-tight md:text-xl">
             {slide.title}
           </h2>
-          <ul className="text-foreground space-y-2 text-base">
-            {slideBulletText(slide).map((line, i) => (
+          <ul className="text-foreground min-h-0 flex-1 space-y-1.5 overflow-hidden text-sm leading-snug">
+            {slideBulletText(slide).slice(0, 6).map((line, i) => (
               <li key={i} className="flex gap-2">
-                <span className="text-primary">•</span>
-                <span>{line}</span>
+                <span className="text-primary mt-0.5 shrink-0">•</span>
+                <span className="line-clamp-2">{line}</span>
               </li>
             ))}
           </ul>
@@ -171,28 +176,28 @@ export function SlideViewer({
     case 'CONTENT_IMAGE':
       return (
         <SlideFrame footer={footer}>
-          <h2 className="text-foreground mb-4 text-2xl font-semibold">
+          <h2 className="text-foreground mb-3 line-clamp-2 text-lg font-semibold leading-tight tracking-tight md:text-xl">
             {slide.title}
           </h2>
-          <div className="flex flex-1 gap-6">
-            <ul className="text-foreground flex-[3] space-y-2 text-base">
-              {slideBulletText(slide).map((line, i) => (
+          <div className="flex min-h-0 flex-1 gap-4">
+            <ul className="text-foreground min-h-0 flex-[3] space-y-1.5 overflow-hidden text-sm leading-snug">
+              {slideBulletText(slide).slice(0, 6).map((line, i) => (
                 <li key={i} className="flex gap-2">
-                  <span className="text-primary">•</span>
-                  <span>{line}</span>
+                  <span className="text-primary mt-0.5 shrink-0">•</span>
+                  <span className="line-clamp-2">{line}</span>
                 </li>
               ))}
             </ul>
-            <div className="border-border bg-muted flex flex-[2] items-center justify-center rounded-lg border">
+            <div className="border-border bg-muted flex flex-[2] items-center justify-center overflow-hidden rounded-lg border">
               {slide.image.query_url ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
                   src={slide.image.query_url}
                   alt={slide.image.query ?? ''}
-                  className="h-full w-full rounded-lg object-contain"
+                  className="h-full w-full rounded-lg object-cover"
                 />
               ) : (
-                <span className="text-muted-foreground px-4 text-center text-sm">
+                <span className="text-muted-foreground px-3 text-center text-xs">
                   [ {slide.image.query ?? 'immagine'} ]
                 </span>
               )}
@@ -204,25 +209,21 @@ export function SlideViewer({
     case 'DIAGRAM':
       return (
         <SlideFrame footer={footer}>
-          <h2 className="text-foreground mb-2 text-xl font-semibold">
+          <h2 className="text-foreground mb-2 line-clamp-2 text-lg font-semibold leading-tight md:text-xl">
             {slide.title}
           </h2>
-          <div className="border-border bg-muted flex flex-1 items-center justify-center rounded-lg border">
+          <div className="border-border bg-muted flex min-h-0 flex-1 items-center justify-center rounded-lg border">
             {slide.image.diagram_code ? (
-              <div
-                className="h-full w-full p-4"
-                // SVG già sanitizzato lato server (sanitize_svg). In preview
-                // mostriamo il codice come testo per sicurezza XSS frontend.
-              >
+              <div className="h-full w-full p-3">
                 <span className="text-muted-foreground text-xs">
                   [ diagramma SVG generato — visibile nel PPTX ]
                 </span>
               </div>
             ) : (
-              <span className="text-muted-foreground text-sm">[ diagramma ]</span>
+              <span className="text-muted-foreground text-xs">[ diagramma ]</span>
             )}
           </div>
-          <p className="text-muted-foreground mt-2 text-center text-sm italic">
+          <p className="text-muted-foreground mt-2 line-clamp-1 text-center text-xs italic">
             {slideBulletText(slide)[0] ?? ''}
           </p>
         </SlideFrame>
@@ -231,27 +232,31 @@ export function SlideViewer({
     case 'QUIZ':
       return (
         <SlideFrame footer={footer}>
-          <h2 className="text-foreground mb-6 text-2xl font-semibold">
+          <h2 className="text-foreground mb-3 line-clamp-2 text-lg font-semibold leading-tight md:text-xl">
             {slide.title}
           </h2>
-          <div className="space-y-3">
-            {(slide.quiz_options ?? []).map((opt, i) => {
+          <div className="min-h-0 flex-1 space-y-1.5 overflow-hidden">
+            {(slide.quiz_options ?? []).slice(0, 4).map((opt, i) => {
               const letter = String.fromCharCode(65 + i)
               const correct = slide.quiz_correct === i
               return (
                 <div
                   key={i}
                   className={cn(
-                    'flex items-center gap-3 rounded-md border px-4 py-2',
+                    'flex items-start gap-2 rounded-md border px-3 py-1.5 text-sm leading-snug',
                     correct
                       ? 'border-brand-secondary bg-brand-secondary/10'
                       : 'border-border',
                   )}
                 >
-                  <span className="text-primary font-bold">{letter}.</span>
-                  <span className="text-foreground">{opt}</span>
+                  <span className="text-primary mt-0.5 shrink-0 font-bold">
+                    {letter}.
+                  </span>
+                  <span className="text-foreground line-clamp-2 flex-1">{opt}</span>
                   {correct && (
-                    <span className="text-brand-secondary ml-auto font-bold">✓</span>
+                    <span className="text-brand-secondary mt-0.5 shrink-0 font-bold">
+                      ✓
+                    </span>
                   )}
                 </div>
               )
@@ -265,22 +270,24 @@ export function SlideViewer({
       const labels = ['Situazione', 'Azione', 'Risultato']
       return (
         <SlideFrame footer={footer}>
-          <span className="bg-primary mb-2 inline-block w-fit rounded px-2 py-0.5 text-xs font-bold tracking-wide text-white uppercase">
+          <span className="bg-primary mb-1.5 inline-block w-fit rounded px-2 py-0.5 text-[10px] font-bold tracking-wide text-white uppercase">
             Caso Studio
           </span>
-          <h2 className="text-foreground mb-4 text-xl font-semibold">
+          <h2 className="text-foreground mb-3 line-clamp-2 text-lg font-semibold leading-tight md:text-xl">
             {slide.title}
           </h2>
-          <div className="grid flex-1 grid-cols-3 gap-4">
+          <div className="grid min-h-0 flex-1 grid-cols-3 gap-2.5">
             {labels.map((label, i) => (
               <div
                 key={label}
-                className="border-primary bg-muted rounded-md border-l-4 p-3"
+                className="border-primary bg-muted overflow-hidden rounded-md border-l-4 p-2.5"
               >
-                <p className="text-muted-foreground mb-1 text-xs font-bold uppercase">
+                <p className="text-muted-foreground mb-1 text-[10px] font-bold uppercase">
                   {label}
                 </p>
-                <p className="text-foreground text-sm">{sections[i] ?? ''}</p>
+                <p className="text-foreground line-clamp-6 text-xs leading-snug">
+                  {sections[i] ?? ''}
+                </p>
               </div>
             ))}
           </div>
@@ -292,7 +299,9 @@ export function SlideViewer({
       return (
         <SlideFrame>
           <div className="flex flex-1 flex-col items-center justify-center text-center">
-            <h1 className="text-foreground text-5xl font-bold">{slide.title}</h1>
+            <h1 className="text-foreground text-4xl font-bold leading-tight md:text-5xl">
+              {slide.title}
+            </h1>
             <p className="text-muted-foreground mt-4 text-base italic">
               Formazione Globale — C.F.P. Montessori
             </p>
@@ -303,8 +312,12 @@ export function SlideViewer({
     default:
       return (
         <SlideFrame footer={footer}>
-          <h2 className="text-foreground text-2xl font-semibold">{slide.title}</h2>
-          <p className="text-foreground mt-4">{slide.body ?? ''}</p>
+          <h2 className="text-foreground line-clamp-2 text-xl font-semibold leading-tight">
+            {slide.title}
+          </h2>
+          <p className="text-foreground mt-3 line-clamp-6 text-sm">
+            {slide.body ?? ''}
+          </p>
         </SlideFrame>
       )
   }

@@ -16,7 +16,14 @@
 
 import { useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { AlertCircle, AlertTriangle, Info, RefreshCw, Loader2 } from 'lucide-react'
+import {
+  AlertCircle,
+  AlertTriangle,
+  CheckCircle2,
+  Info,
+  Loader2,
+  RefreshCw,
+} from 'lucide-react'
 import { toast } from 'sonner'
 
 import { api, ApiError, type QualityIssue } from '@/lib/api'
@@ -156,10 +163,11 @@ export function QualityIssuesPanel({
 
   if (issues.length === 0 && !isBookend) {
     return (
-      <Card className="border-emerald-500/30 bg-emerald-500/5">
-        <CardContent className="pt-6 pb-4 text-center">
-          <p className="text-sm text-emerald-700 dark:text-emerald-400">
-            ✓ Slide pulita (nessuna issue rilevata)
+      <Card className="border-brand-secondary/30 bg-brand-secondary/5">
+        <CardContent className="flex items-center gap-2 px-4 py-3">
+          <CheckCircle2 className="text-brand-secondary size-4 shrink-0" />
+          <p className="text-brand-secondary text-sm font-medium">
+            Slide pulita
           </p>
         </CardContent>
       </Card>
@@ -174,12 +182,29 @@ export function QualityIssuesPanel({
     const sevIssues = issues.filter((i) => i.severity === sev)
     if (sevIssues.length > 0) grouped[sev] = sevIssues
   }
+  // Determina severita' massima per colore icona header (consistenza visual)
+  const maxSev = grouped.error
+    ? 'error'
+    : grouped.warning
+      ? 'warning'
+      : 'info'
+  const HeaderIcon = SEVERITY_STYLES[maxSev].icon
 
   return (
-    <Card className="border-amber-500/30">
+    <Card className={cn(
+      'border-l-4',
+      maxSev === 'error' && 'border-l-destructive border-destructive/30',
+      maxSev === 'warning' && 'border-l-amber-500 border-amber-500/30',
+      maxSev === 'info' && 'border-l-sky-500 border-sky-500/30',
+    )}>
       <CardHeader className="pb-2">
         <CardTitle className="flex items-center gap-2 text-sm">
-          <AlertTriangle className="size-4 text-amber-500" />
+          <HeaderIcon className={cn(
+            'size-4 shrink-0',
+            maxSev === 'error' && 'text-destructive',
+            maxSev === 'warning' && 'text-amber-500',
+            maxSev === 'info' && 'text-sky-500',
+          )} />
           Qualità slide
           <Badge variant="secondary" className="ml-auto">
             {issues.length}
@@ -188,7 +213,7 @@ export function QualityIssuesPanel({
       </CardHeader>
       <CardContent className="space-y-3 pt-0">
         <ScrollArea className="max-h-48 pr-2">
-          <ul className="space-y-2">
+          <ul className="space-y-1.5">
             {byOrder.flatMap((sev) =>
               (grouped[sev] ?? []).map((iss, idx) => {
                 const style = SEVERITY_STYLES[sev]
@@ -197,7 +222,7 @@ export function QualityIssuesPanel({
                   <li
                     key={`${sev}-${idx}-${iss.issue_type}`}
                     className={cn(
-                      'flex items-start gap-2 rounded-md border p-2 text-xs',
+                      'flex items-start gap-2 rounded-md border px-2 py-1.5 text-xs leading-snug',
                       style.badge,
                     )}
                   >
@@ -283,27 +308,33 @@ export function QualityIssuesSummary({
   const errors = data.by_severity.error ?? 0
   const warnings = data.by_severity.warning ?? 0
   const infos = data.by_severity.info ?? 0
+  // Conta slide UNICHE con almeno una issue (data.issues puo' avere multi-issue stessa slide)
+  const uniqueSlides = new Set(data.issues.map((i) => i.slide_index)).size
   return (
-    <div className="border-border bg-muted/30 mb-3 flex items-center justify-between gap-2 rounded-md border px-3 py-2 text-xs">
-      <div className="flex items-center gap-3">
+    <div className="border-border bg-muted/30 mb-3 flex flex-wrap items-center justify-between gap-3 rounded-md border px-3 py-2 text-xs">
+      <div className="flex flex-wrap items-center gap-2.5">
+        <AlertTriangle className="size-3.5 text-amber-500 shrink-0" />
         <span className="font-medium">
-          {data.total_issues} slide richiedono attenzione
+          {uniqueSlides} {uniqueSlides === 1 ? 'slide richiede' : 'slide richiedono'} attenzione
         </span>
+        <span className="text-muted-foreground">·</span>
+        <span className="text-muted-foreground">{data.total_issues} issue totali</span>
+        <span className="text-muted-foreground">·</span>
         {errors > 0 && (
-          <Badge variant="destructive" className="text-[10px]">
-            {errors} errori
+          <Badge variant="destructive" className="h-5 text-[10px]">
+            {errors} {errors === 1 ? 'errore' : 'errori'}
           </Badge>
         )}
         {warnings > 0 && (
           <Badge
             variant="secondary"
-            className="bg-amber-500/20 text-amber-700 text-[10px] dark:text-amber-300"
+            className="h-5 bg-amber-500/20 text-amber-700 text-[10px] dark:text-amber-300"
           >
             {warnings} warning
           </Badge>
         )}
         {infos > 0 && (
-          <Badge variant="outline" className="text-[10px]">
+          <Badge variant="outline" className="h-5 text-[10px]">
             {infos} info
           </Badge>
         )}

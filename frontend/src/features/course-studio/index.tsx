@@ -191,9 +191,15 @@ export function CourseStudio() {
               onFilterToggle={() => setFilterProblematic(!filterProblematic)}
             />
 
-            <div className="grid grid-cols-[220px_1fr_340px] gap-4">
+            {/* Grid 3-colonne: sidebar 240 (slide list + actions) /
+                center fluid (viewer + audio) /
+                right rail 400 (editor + quality + regen + image).
+                Layout calibrato per non troncare bottoni primary ("Rigenera
+                questa slide", "Rigenera con AI", "Salva modifiche") né
+                titoli slide nella sidebar. */}
+            <div className="grid grid-cols-[240px_1fr_400px] gap-4">
               {/* ─── Sidebar: toolbar azioni + lista slide ─── */}
-              <aside className="flex h-[calc(100vh-16rem)] flex-col">
+              <aside className="flex h-[calc(100vh-16rem)] flex-col gap-2">
                 <SlideActions
                   courseId={id}
                   selected={selected}
@@ -205,17 +211,20 @@ export function CourseStudio() {
                     key={s.index}
                     onClick={() => setSelectedIdx(s.index)}
                     className={cn(
-                      'flex w-full flex-col rounded-md px-3 py-2 text-left text-sm transition-colors',
+                      'flex w-full flex-col gap-0.5 rounded-md px-3 py-2 text-left transition-colors',
                       s.index === selectedIdx
-                        ? 'bg-primary/10 text-primary'
+                        ? 'bg-primary/10 text-primary ring-1 ring-primary/30'
                         : 'hover:bg-muted',
                     )}
                   >
-                    <span className="flex items-center gap-2 font-medium">
+                    <span className="flex items-center gap-2 text-sm font-medium leading-tight">
                       <QualityBadge data={qualityQ.data} slideIndex={s.index} />
-                      {s.index + 1}. {slideTypeLabel(s.slide_type)}
+                      <span className="tabular-nums text-xs opacity-70">
+                        {s.index + 1}
+                      </span>
+                      <span>{slideTypeLabel(s.slide_type)}</span>
                     </span>
-                    <span className="text-muted-foreground truncate text-xs">
+                    <span className="text-muted-foreground line-clamp-2 text-xs leading-snug">
                       {s.title}
                     </span>
                   </button>
@@ -224,8 +233,8 @@ export function CourseStudio() {
               </aside>
 
               {/* ─── Center: nav orizzontale + viewer + audio ─── */}
-              <section className="space-y-3">
-                <div className="flex items-center justify-between gap-2">
+              <section className="flex min-w-0 flex-col gap-3">
+                <div className="flex items-center justify-between gap-3">
                   <Button
                     variant="outline"
                     size="sm"
@@ -235,8 +244,8 @@ export function CourseStudio() {
                   >
                     <ChevronLeft className="mr-1 size-4" /> Precedente
                   </Button>
-                  <span className="text-muted-foreground text-sm tabular-nums">
-                    Slide {pos + 1} di {slides.length}
+                  <span className="text-muted-foreground shrink-0 whitespace-nowrap text-sm tabular-nums">
+                    Slide <span className="text-foreground font-semibold">{pos + 1}</span> di {slides.length}
                   </span>
                   <Button
                     variant="outline"
