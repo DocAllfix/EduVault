@@ -595,7 +595,76 @@ async function regenerateSlide(
 ): Promise<StudioSlide> {
   return request<StudioSlide>(
     `/api/courses/${encodeURIComponent(id)}/slides/${idx}/regenerate`,
-    { method: 'POST', json: { instruction } },
+    { method: 'POST', json: { instruction, use_h8: false } },
+  )
+}
+
+/**
+ * F4b (analista 2026-05-31): rigenera SINGOLA slide via H8 voce-aware.
+ * Backend identifica voce skeleton owner della slide + ri-genera con
+ * build_voice_prompt + chunks B2+B3+B4 della voce. Slide sostituita nel
+ * slide_contents_json + dirty=true (RebuildBanner mostra "esegui /rebuild").
+ *
+ * Synchronous: 15-30s tipico. Return: {status, old_title, new_title,
+ * voce_used, provider, note}. 409 se slide bookend o course senza skeleton.
+ */
+async function regenerateSlideH8(
+  id: string,
+  idx: number,
+): Promise<{
+  status: string
+  course_id: string
+  slide_index: number
+  voce_ordinal_used?: number
+  voce_sub_topic_used?: string
+  old_title?: string
+  new_title?: string
+  provider?: string
+  note?: string
+}> {
+  return request(
+    `/api/courses/${encodeURIComponent(id)}/slides/${idx}/regenerate`,
+    { method: 'POST', json: { instruction: '', use_h8: true } },
+  )
+}
+
+// F4 D9 Quality Issues (analista sign-off 2026-05-31)
+export interface QualityIssue {
+  slide_index: number
+  module_index: number | null
+  issue_type:
+    | 'image_placeholder'
+    | 'diagram_branded_fallback'
+    | 'quiz_no_options'
+    | 'notes_too_short'
+    | 'module_underpopulated'
+    | 'module_corpus_thin'
+    | 'image_overused_in_module'
+    | 'title_near_duplicate_in_module'
+    | 'bullet_citation_warning'
+    | 'bullet_citation_warning_as_object'
+    | 'title_citation_warning'
+  severity: 'info' | 'warning' | 'error'
+  context?: Record<string, unknown>
+}
+
+export interface QualityIssuesResponse {
+  course_id: string
+  total_issues: number
+  by_severity: Partial<Record<'info' | 'warning' | 'error', number>>
+  by_type: Partial<Record<string, number>>
+  issues: QualityIssue[]
+}
+
+/**
+ * F4: compute quality issues per il corso (badge UI Course Studio).
+ * Aggrega 9 sensori D9 (image_placeholder, diagram_fallback, quiz_no_options,
+ * notes_too_short, module_underpopulated, image_overused, title_duplicate,
+ * bullet_citation_warning, title_citation_warning). NON blocca download.
+ */
+async function getQualityIssues(courseId: string): Promise<QualityIssuesResponse> {
+  return request<QualityIssuesResponse>(
+    `/api/courses/${encodeURIComponent(courseId)}/quality-issues`,
   )
 }
 
@@ -698,6 +767,8 @@ export const api = {
   slideAudioUrl,
   slidePreviewUrl,
   regenerateSlide,
+  regenerateSlideH8,
+  getQualityIssues,
   rebuildCourse,
   addSlide,
   moveSlide,

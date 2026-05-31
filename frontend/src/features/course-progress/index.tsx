@@ -141,7 +141,23 @@ export function CourseProgress() {
     }
 
     function redirectToDetail() {
-      // Give the user a beat to see "Completato" before redirecting.
+      // F4 D9 (analista 2026-05-31): fire toast notifica fine produzione PRIMA del
+      // redirect. CTA "Apri in Course Studio" porta direttamente alla review delle
+      // slide. Quality issue badge si auto-fetch nel Course Studio via useQualityChecks.
+      toast.success('Corso generato', {
+        description: 'Apri in Course Studio per verificare slide e qualità.',
+        duration: 5000,
+        action: {
+          label: 'Course Studio',
+          onClick: () => {
+            navigate({
+              to: '/courses/$id/studio',
+              params: { id: courseId },
+            })
+          },
+        },
+      })
+      // Give the user a beat to see "Completato" before redirecting to detail page.
       window.setTimeout(() => {
         if (!cancelled) {
           navigate({

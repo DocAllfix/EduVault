@@ -32,6 +32,12 @@ import { RegenerateDialog } from './components/regenerate-dialog'
 import { RebuildBanner } from './components/rebuild-banner'
 import { SlideActions } from './components/slide-actions'
 import { SkeletonReview } from './components/skeleton-review'
+import {
+  QualityBadge,
+  QualityIssuesPanel,
+  QualityIssuesSummary,
+} from './components/quality-badge'
+import { useQualityChecks, getSlideMaxSeverity } from '@/hooks/use-quality-checks'
 
 function slideTypeLabel(t: string): string {
   const map: Record<string, string> = {
@@ -51,6 +57,8 @@ export function CourseStudio() {
   const { id } = useParams({ from: '/_authenticated/courses/$id_/studio' })
   const navigate = useNavigate()
   const [selectedIdx, setSelectedIdx] = useState(0)
+  // F4 D9: stato filtro sidebar (mostra solo slide con issue)
+  const [filterProblematic, setFilterProblematic] = useState(false)
 
   // D3: a course in `skeleton_pending` has no slides yet — it shows the
   // skeleton review gate instead of the slide IDE. Cheap status query first.
@@ -66,8 +74,15 @@ export function CourseStudio() {
     enabled: !isSkeletonPending, // don't 409 on a skeleton-pending course
   })
 
-  const slides: StudioSlide[] = slidesQ.data?.slides ?? []
-  const selected = slides.find((s) => s.index === selectedIdx) ?? slides[0]
+  // F4: quality issues lookup (compute on-the-fly via backend slide_quality_service)
+  const qualityQ = useQualityChecks(id, !isSkeletonPending && !slidesQ.isLoading)
+
+  const allSlides: StudioSlide[] = slidesQ.data?.slides ?? []
+  // Apply filter problematic if enabled
+  const slides: StudioSlide[] = filterProblematic
+    ? allSlides.filter((s) => getSlideMaxSeverity(qualityQ.data, s.index) !== null)
+    : allSlides
+  const selected = slides.find((s) => s.index === selectedIdx) ?? slides[0] ?? allSlides[0]
   const pos = selected ? slides.findIndex((s) => s.index === selected.index) : -1
   const goPrev = () => {
     if (pos > 0) setSelectedIdx(slides[pos - 1].index)
@@ -169,7 +184,14 @@ export function CourseStudio() {
               <RebuildBanner courseId={id} />
             </div>
 
-            <div className="grid grid-cols-[200px_1fr_340px] gap-4">
+            {/* F4 D9 summary issue: visibile solo se ci sono issue */}
+            <QualityIssuesSummary
+              data={qualityQ.data}
+              filterActive={filterProblematic}
+              onFilterToggle={() => setFilterProblematic(!filterProblematic)}
+            />
+
+            <div className="grid grid-cols-[220px_1fr_340px] gap-4">
               {/* ─── Sidebar: toolbar azioni + lista slide ─── */}
               <aside className="flex h-[calc(100vh-16rem)] flex-col">
                 <SlideActions
@@ -189,7 +211,8 @@ export function CourseStudio() {
                         : 'hover:bg-muted',
                     )}
                   >
-                    <span className="font-medium">
+                    <span className="flex items-center gap-2 font-medium">
+                      <QualityBadge data={qualityQ.data} slideIndex={s.index} />
                       {s.index + 1}. {slideTypeLabel(s.slide_type)}
                     </span>
                     <span className="text-muted-foreground truncate text-xs">
@@ -234,12 +257,19 @@ export function CourseStudio() {
                 <AudioPlayer courseId={id} slideIndex={selected.index} />
               </section>
 
-              {/* ─── Right rail: editor + AI regen + image picker ─── */}
+              {/* ─── Right rail: editor + quality panel + AI regen + image picker ─── */}
               <aside className="border-border h-[calc(100vh-16rem)] space-y-4 overflow-y-auto rounded-lg border p-4">
                 <h2 className="text-sm font-semibold tracking-wide uppercase">
                   Modifica slide {selected.index + 1}
                 </h2>
                 <SlideEditor courseId={id} slide={selected} />
+                {/* F4 D9 quality panel + F4b H8 regenerate button (sinergia visiva) */}
+                <QualityIssuesPanel
+                  courseId={id}
+                  slideIndex={selected.index}
+                  data={qualityQ.data}
+                  slideType={selected.slide_type}
+                />
                 <div className="border-border space-y-2 border-t pt-4">
                   <RegenerateDialog courseId={id} slide={selected} />
                   {(selected.slide_type === 'CONTENT_IMAGE' ||
