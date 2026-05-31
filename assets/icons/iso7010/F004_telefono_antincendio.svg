@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+  <rect width="256" height="256" fill="#C8102E"/>
+  <g fill="#FFFFFF" stroke="#FFFFFF"><rect x="50" y="80" width="90" height="60" rx="8"/><circle cx="80" cy="110" r="8"/><circle cx="110" cy="110" r="8"/><rect x="140" y="100" width="60" height="20" rx="4"/><path d="M170 60 L175 80 L165 80 Z"/></g>
+  <text x="10" y="245" font-family="sans-serif" font-size="14" fill="#FFFFFF">F004</text>
+</svg>

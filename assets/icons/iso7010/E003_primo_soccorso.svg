@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+  <rect width="256" height="256" fill="#009639"/>
+  <g fill="#FFFFFF" stroke="#FFFFFF"><rect x="100" y="60" width="56" height="136" rx="6"/><rect x="60" y="100" width="136" height="56" rx="6"/></g>
+  <text x="10" y="245" font-family="sans-serif" font-size="14" fill="#FFFFFF">E003</text>
+</svg>

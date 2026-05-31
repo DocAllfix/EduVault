@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+  <rect width="256" height="256" fill="#009639"/>
+  <g fill="#FFFFFF" stroke="#FFFFFF"><path d="M80 80 Q80 60 100 60 L120 60 Q130 60 130 70 L140 100 Q140 110 130 115 L115 125 Q130 155 165 170 L175 155 Q180 145 190 145 L210 155 Q220 155 220 165 L220 185 Q220 205 200 205 Q120 205 80 125 Z" stroke-width="0"/></g>
+  <text x="10" y="245" font-family="sans-serif" font-size="14" fill="#FFFFFF">E004</text>
+</svg>

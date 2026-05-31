@@ -1016,6 +1016,84 @@ async function adminBulkApproveCatalog(slugs: string[]): Promise<{ approved_coun
   )
 }
 
+// ─── Step B — Image Library admin (upload + audit + delete) ───
+export interface ImageLibraryAdminEntry {
+  id: string
+  file_path: string
+  tags: string[]
+  source: string
+  license: string | null
+  attribution: string | null
+  source_url: string | null
+  width: number | null
+  height: number | null
+  bytes: number | null
+  usage_count: number
+  created_at: string | null
+  updated_at: string | null
+}
+
+export interface ImageLibraryListResponse {
+  entries: ImageLibraryAdminEntry[]
+  total: number
+  page: number
+  per_page: number
+}
+
+async function adminListImages(params: {
+  page?: number
+  per_page?: number
+  source?: string
+} = {}): Promise<ImageLibraryListResponse> {
+  return request<ImageLibraryListResponse>('/api/admin/images/library', { query: params })
+}
+
+async function adminUploadImage(args: {
+  file: File
+  tags: string
+  source?: string
+  license?: string
+  attribution?: string
+  source_url?: string
+}): Promise<{ id: string; file_path: string }> {
+  const fd = new FormData()
+  fd.append('file', args.file)
+  fd.append('tags', args.tags)
+  if (args.source) fd.append('source', args.source)
+  if (args.license) fd.append('license', args.license)
+  if (args.attribution) fd.append('attribution', args.attribution)
+  if (args.source_url) fd.append('source_url', args.source_url)
+  return request<{ id: string; file_path: string }>(
+    '/api/admin/images/library',
+    { method: 'POST', formData: fd },
+  )
+}
+
+async function adminDeleteImage(imageId: string): Promise<{ status: string }> {
+  return request<{ status: string }>(
+    `/api/admin/images/library/${encodeURIComponent(imageId)}`,
+    { method: 'DELETE' },
+  )
+}
+
+// ─── Step C — Diagram catalog admin viewer ───
+export interface DiagramSlotInfo {
+  name: string
+  max_chars: number
+}
+
+export interface DiagramTemplateInfo {
+  name: string
+  description: string
+  slots: DiagramSlotInfo[]
+  usage_count: number
+  svg_available: boolean
+}
+
+async function adminDiagramsCatalog(): Promise<DiagramTemplateInfo[]> {
+  return request<DiagramTemplateInfo[]>('/api/admin/diagrams/catalog')
+}
+
 // ─────────────────────────── Public surface ────────────────────────────
 
 /**
@@ -1090,6 +1168,12 @@ export const api = {
   adminApproveCatalogEntry,
   adminUnapproveCatalogEntry,
   adminBulkApproveCatalog,
+  // Step B — image library admin
+  adminListImages,
+  adminUploadImage,
+  adminDeleteImage,
+  // Step C — diagram catalog admin
+  adminDiagramsCatalog,
 } as const
 
 // Type-only re-export so consumers can refer to the OpenAPI schema directly.

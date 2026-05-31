@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1760 800">
+  <!-- Title -->
+  <text x="880" y="100" font-family="Inter, Segoe UI, sans-serif" font-size="36" fill="#1F1F1F" text-anchor="middle" font-weight="bold">{{title}}</text>
+  <!-- Horizontal timeline axis -->
+  <line x1="120" y1="450" x2="1640" y2="450" stroke="#769E2E" stroke-width="6"/>
+  <!-- Event 1 -->
+  <circle cx="200" cy="450" r="22" fill="#C82E6E"/>
+  <text x="200" y="380" font-family="Inter, Segoe UI, sans-serif" font-size="28" fill="#C82E6E" text-anchor="middle" font-weight="bold">{{date_1}}</text>
+  <text x="200" y="540" font-family="Inter, Segoe UI, sans-serif" font-size="26" fill="#1F1F1F" text-anchor="middle">{{event_1}}</text>
+  <!-- Event 2 -->
+  <circle cx="440" cy="450" r="22" fill="#C82E6E"/>
+  <text x="440" y="380" font-family="Inter, Segoe UI, sans-serif" font-size="28" fill="#C82E6E" text-anchor="middle" font-weight="bold">{{date_2}}</text>
+  <text x="440" y="540" font-family="Inter, Segoe UI, sans-serif" font-size="26" fill="#1F1F1F" text-anchor="middle">{{event_2}}</text>
+  <!-- Event 3 -->
+  <circle cx="680" cy="450" r="22" fill="#C82E6E"/>
+  <text x="680" y="380" font-family="Inter, Segoe UI, sans-serif" font-size="28" fill="#C82E6E" text-anchor="middle" font-weight="bold">{{date_3}}</text>
+  <text x="680" y="540" font-family="Inter, Segoe UI, sans-serif" font-size="26" fill="#1F1F1F" text-anchor="middle">{{event_3}}</text>
+  <!-- Event 4 -->
+  <circle cx="920" cy="450" r="22" fill="#C82E6E"/>
+  <text x="920" y="380" font-family="Inter, Segoe UI, sans-serif" font-size="28" fill="#C82E6E" text-anchor="middle" font-weight="bold">{{date_4}}</text>
+  <text x="920" y="540" font-family="Inter, Segoe UI, sans-serif" font-size="26" fill="#1F1F1F" text-anchor="middle">{{event_4}}</text>
+  <!-- Event 5 -->
+  <circle cx="1160" cy="450" r="22" fill="#C82E6E"/>
+  <text x="1160" y="380" font-family="Inter, Segoe UI, sans-serif" font-size="28" fill="#C82E6E" text-anchor="middle" font-weight="bold">{{date_5}}</text>
+  <text x="1160" y="540" font-family="Inter, Segoe UI, sans-serif" font-size="26" fill="#1F1F1F" text-anchor="middle">{{event_5}}</text>
+  <!-- Event 6 -->
+  <circle cx="1400" cy="450" r="22" fill="#C82E6E"/>
+  <text x="1400" y="380" font-family="Inter, Segoe UI, sans-serif" font-size="28" fill="#C82E6E" text-anchor="middle" font-weight="bold">{{date_6}}</text>
+  <text x="1400" y="540" font-family="Inter, Segoe UI, sans-serif" font-size="26" fill="#1F1F1F" text-anchor="middle">{{event_6}}</text>
+</svg>

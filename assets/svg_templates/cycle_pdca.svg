@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1760 800">
+  <defs>
+    <marker id="pdca_arrow" markerWidth="14" markerHeight="14" refX="12" refY="7" orient="auto" markerUnits="userSpaceOnUse">
+      <path d="M0,0 L12,7 L0,14 z" fill="#769E2E"/>
+    </marker>
+  </defs>
+  <!-- Center title -->
+  <text x="880" y="380" font-family="Inter, Segoe UI, sans-serif" font-size="32" fill="#1F1F1F" text-anchor="middle" font-weight="bold">{{title}}</text>
+  <text x="880" y="430" font-family="Inter, Segoe UI, sans-serif" font-size="24" fill="#769E2E" text-anchor="middle">CICLO PDCA</text>
+  <!-- Top-left: PLAN -->
+  <rect x="320" y="120" width="440" height="200" rx="20" fill="#FDE7EE" stroke="#C82E6E" stroke-width="4"/>
+  <text x="540" y="180" font-family="Inter, Segoe UI, sans-serif" font-size="28" fill="#C82E6E" text-anchor="middle" font-weight="bold">PLAN — PIANIFICA</text>
+  <text x="540" y="240" font-family="Inter, Segoe UI, sans-serif" font-size="24" fill="#1F1F1F" text-anchor="middle">{{plan}}</text>
+  <!-- Top-right: DO -->
+  <rect x="1000" y="120" width="440" height="200" rx="20" fill="#F4F8E8" stroke="#769E2E" stroke-width="4"/>
+  <text x="1220" y="180" font-family="Inter, Segoe UI, sans-serif" font-size="28" fill="#769E2E" text-anchor="middle" font-weight="bold">DO — ESEGUI</text>
+  <text x="1220" y="240" font-family="Inter, Segoe UI, sans-serif" font-size="24" fill="#1F1F1F" text-anchor="middle">{{do}}</text>
+  <!-- Bottom-right: CHECK -->
+  <rect x="1000" y="480" width="440" height="200" rx="20" fill="#FDE7EE" stroke="#C82E6E" stroke-width="4"/>
+  <text x="1220" y="540" font-family="Inter, Segoe UI, sans-serif" font-size="28" fill="#C82E6E" text-anchor="middle" font-weight="bold">CHECK — VERIFICA</text>
+  <text x="1220" y="600" font-family="Inter, Segoe UI, sans-serif" font-size="24" fill="#1F1F1F" text-anchor="middle">{{check}}</text>
+  <!-- Bottom-left: ACT -->
+  <rect x="320" y="480" width="440" height="200" rx="20" fill="#F4F8E8" stroke="#769E2E" stroke-width="4"/>
+  <text x="540" y="540" font-family="Inter, Segoe UI, sans-serif" font-size="28" fill="#769E2E" text-anchor="middle" font-weight="bold">ACT — AGISCI</text>
+  <text x="540" y="600" font-family="Inter, Segoe UI, sans-serif" font-size="24" fill="#1F1F1F" text-anchor="middle">{{act}}</text>
+  <!-- Arrows -->
+  <line x1="780" y1="220" x2="980" y2="220" stroke="#769E2E" stroke-width="6" marker-end="url(#pdca_arrow)"/>
+  <line x1="1220" y1="340" x2="1220" y2="460" stroke="#769E2E" stroke-width="6" marker-end="url(#pdca_arrow)"/>
+  <line x1="980" y1="580" x2="780" y2="580" stroke="#769E2E" stroke-width="6" marker-end="url(#pdca_arrow)"/>
+  <line x1="540" y1="460" x2="540" y2="340" stroke="#769E2E" stroke-width="6" marker-end="url(#pdca_arrow)"/>
+</svg>

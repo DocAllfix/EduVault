@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+  <circle cx="128" cy="128" r="120" fill="#005EB8"/>
+  <g fill="#FFFFFF" stroke="#FFFFFF"><path d="M85 80 L171 80 L186 110 L150 130 L150 200 L106 200 L106 130 L70 110 Z"/><line x1="106" y1="150" x2="150" y2="150" stroke="white" stroke-width="6"/><line x1="106" y1="170" x2="150" y2="170" stroke="white" stroke-width="6"/></g>
+  <text x="10" y="245" font-family="sans-serif" font-size="14" fill="#FFFFFF">M010</text>
+</svg>

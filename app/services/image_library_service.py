@@ -226,3 +226,57 @@ async def list_admin(
         for r in rows
     ]
     return entries, int(total or 0)
+
+
+async def insert_admin(
+    pool: Any,
+    *,
+    file_path: str,
+    tags: list[str],
+    embedding: list[float],
+    source: str,
+    license: str | None,
+    attribution: str | None,
+    source_url: str | None,
+    width: int | None,
+    height: int | None,
+    bytes_: int | None,
+) -> str:
+    """Insert row into image_library, returns new id.
+
+    Step B UI admin upload — chiamato dopo Pillow.verify + Voyage embed
+    server-side. file_path deve gia' esistere su disco (caller responsability).
+    """
+    row = await pool.fetchrow(
+        """
+        INSERT INTO image_library
+        (file_path, tags, embedding, source, license, attribution,
+         source_url, width, height, bytes)
+        VALUES ($1, $2, $3::vector, $4, $5, $6, $7, $8, $9, $10)
+        RETURNING id::text AS id
+        """,
+        file_path,
+        tags,
+        _to_pgvector(embedding),
+        source,
+        license,
+        attribution,
+        source_url,
+        width,
+        height,
+        bytes_,
+    )
+    return str(row["id"])
+
+
+async def delete_admin(pool: Any, image_id: str) -> bool:
+    """Delete image_library row by id. Returns True if deleted.
+
+    NOTE: does NOT delete the file on disk (admin responsability — may want
+    to re-import). The DB row is the source of truth for findability.
+    """
+    deleted = await pool.fetchval(
+        "DELETE FROM image_library WHERE id = $1::uuid RETURNING 1",
+        image_id,
+    )
+    return bool(deleted)

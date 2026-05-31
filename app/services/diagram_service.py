@@ -150,6 +150,163 @@ DIAGRAM_CATALOG: dict[str, DiagramTemplateDef] = {
             DiagramSlot(name="item_right_3", max_chars=36, font_size_default=26),
         ],
     ),
+    # ═══ STEP D (2026-05-31) — 8 nuovi template estesi dal vast-hopping F5/D5 ═══
+    "timeline": DiagramTemplateDef(
+        name="timeline",
+        description=(
+            "Cronologia 6 eventi su asse orizzontale. USA QUANDO presenti "
+            "evoluzione normativa o sequenza temporale di fatti datati "
+            "(es. evoluzione D.Lgs 81/08 dal 2008 al 2024)."
+        ),
+        template_path=SVG_TEMPLATES_DIR / "timeline.svg",
+        slots=[
+            DiagramSlot(name="title", max_chars=35, font_size_default=36),
+            DiagramSlot(name="date_1", max_chars=10, font_size_default=28),
+            DiagramSlot(name="event_1", max_chars=18, font_size_default=26),
+            DiagramSlot(name="date_2", max_chars=10, font_size_default=28),
+            DiagramSlot(name="event_2", max_chars=18, font_size_default=26),
+            DiagramSlot(name="date_3", max_chars=10, font_size_default=28),
+            DiagramSlot(name="event_3", max_chars=18, font_size_default=26),
+            DiagramSlot(name="date_4", max_chars=10, font_size_default=28),
+            DiagramSlot(name="event_4", max_chars=18, font_size_default=26),
+            DiagramSlot(name="date_5", max_chars=10, font_size_default=28),
+            DiagramSlot(name="event_5", max_chars=18, font_size_default=26),
+            DiagramSlot(name="date_6", max_chars=10, font_size_default=28),
+            DiagramSlot(name="event_6", max_chars=18, font_size_default=26),
+        ],
+    ),
+    "fishbone": DiagramTemplateDef(
+        name="fishbone",
+        description=(
+            "Diagramma a lisca di pesce (Ishikawa) con 6 cause -> 1 effetto. "
+            "USA QUANDO analizzi cause primarie/secondarie di infortunio, "
+            "non-conformita, evento avverso (es. cause incidente cantiere)."
+        ),
+        template_path=SVG_TEMPLATES_DIR / "fishbone.svg",
+        slots=[
+            DiagramSlot(name="effect", max_chars=20, font_size_default=26),
+            DiagramSlot(name="cause_1", max_chars=24, font_size_default=26),
+            DiagramSlot(name="cause_2", max_chars=24, font_size_default=26),
+            DiagramSlot(name="cause_3", max_chars=24, font_size_default=26),
+            DiagramSlot(name="cause_4", max_chars=24, font_size_default=26),
+            DiagramSlot(name="cause_5", max_chars=24, font_size_default=26),
+            DiagramSlot(name="cause_6", max_chars=24, font_size_default=26),
+        ],
+    ),
+    "cycle_pdca": DiagramTemplateDef(
+        name="cycle_pdca",
+        description=(
+            "Ciclo PDCA (Plan-Do-Check-Act) per miglioramento continuo. "
+            "USA QUANDO presenti processi iterativi di gestione (es. SGSL, "
+            "HACCP, valutazione rischi ricorrente)."
+        ),
+        template_path=SVG_TEMPLATES_DIR / "cycle_pdca.svg",
+        slots=[
+            DiagramSlot(name="title", max_chars=30, font_size_default=32),
+            DiagramSlot(name="plan", max_chars=28, font_size_default=24),
+            DiagramSlot(name="do", max_chars=28, font_size_default=24),
+            DiagramSlot(name="check", max_chars=28, font_size_default=24),
+            DiagramSlot(name="act", max_chars=28, font_size_default=24),
+        ],
+    ),
+    "venn_2set": DiagramTemplateDef(
+        name="venn_2set",
+        description=(
+            "Diagramma Venn a 2 insiemi con intersezione. USA QUANDO mostri "
+            "sovrapposizione tra 2 categorie (es. DPI obbligatori per rischio "
+            "A vs rischio B, normative concorrenti)."
+        ),
+        template_path=SVG_TEMPLATES_DIR / "venn_2set.svg",
+        slots=[
+            DiagramSlot(name="title", max_chars=35, font_size_default=32),
+            DiagramSlot(name="set_a", max_chars=20, font_size_default=30),
+            DiagramSlot(name="label_a", max_chars=24, font_size_default=22),
+            DiagramSlot(name="set_b", max_chars=20, font_size_default=30),
+            DiagramSlot(name="label_b", max_chars=24, font_size_default=22),
+            DiagramSlot(name="intersection", max_chars=22, font_size_default=26),
+            DiagramSlot(name="intersection_detail", max_chars=28, font_size_default=20),
+        ],
+    ),
+    "venn_3set": DiagramTemplateDef(
+        name="venn_3set",
+        description=(
+            "Diagramma Venn a 3 insiemi con intersezione centrale. USA QUANDO "
+            "mostri sovrapposizione fra 3 categorie (es. requisiti DPI per "
+            "3 ambienti diversi, normative tripla coincidenza)."
+        ),
+        template_path=SVG_TEMPLATES_DIR / "venn_3set.svg",
+        slots=[
+            DiagramSlot(name="title", max_chars=35, font_size_default=32),
+            DiagramSlot(name="set_a", max_chars=20, font_size_default=28),
+            DiagramSlot(name="set_b", max_chars=20, font_size_default=28),
+            DiagramSlot(name="set_c", max_chars=20, font_size_default=28),
+            DiagramSlot(name="intersection_all", max_chars=24, font_size_default=22),
+        ],
+    ),
+    "swimlane": DiagramTemplateDef(
+        name="swimlane",
+        description=(
+            "Diagramma swimlane a 4 corsie con flusso fra step. USA QUANDO "
+            "presenti responsabilita tra ruoli (es. datore/dirigente/preposto/"
+            "RSPP, flusso segnalazione near-miss)."
+        ),
+        template_path=SVG_TEMPLATES_DIR / "swimlane.svg",
+        slots=[
+            DiagramSlot(name="title", max_chars=40, font_size_default=28),
+            DiagramSlot(name="lane_1", max_chars=18, font_size_default=26),
+            DiagramSlot(name="lane_2", max_chars=18, font_size_default=26),
+            DiagramSlot(name="lane_3", max_chars=18, font_size_default=26),
+            DiagramSlot(name="lane_4", max_chars=18, font_size_default=26),
+            DiagramSlot(name="step_1_1", max_chars=20, font_size_default=22),
+            DiagramSlot(name="step_1_2", max_chars=20, font_size_default=22),
+            DiagramSlot(name="step_2_1", max_chars=20, font_size_default=22),
+            DiagramSlot(name="step_2_2", max_chars=20, font_size_default=22),
+            DiagramSlot(name="step_3_1", max_chars=20, font_size_default=22),
+            DiagramSlot(name="step_3_2", max_chars=20, font_size_default=22),
+            DiagramSlot(name="step_4_1", max_chars=20, font_size_default=22),
+        ],
+    ),
+    "decision_tree": DiagramTemplateDef(
+        name="decision_tree",
+        description=(
+            "Albero decisionale binario (SI/NO) con 2 esiti. USA QUANDO "
+            "presenti flusso decisionale chiaro (es. scelta DPI, gestione "
+            "emergenza, valutazione rischio gruppo A/B/C primo soccorso)."
+        ),
+        template_path=SVG_TEMPLATES_DIR / "decision_tree.svg",
+        slots=[
+            DiagramSlot(name="root_question", max_chars=30, font_size_default=22),
+            DiagramSlot(name="branch_yes", max_chars=30, font_size_default=22),
+            DiagramSlot(name="branch_no", max_chars=30, font_size_default=22),
+            DiagramSlot(name="outcome_yes", max_chars=30, font_size_default=22),
+            DiagramSlot(name="outcome_no", max_chars=30, font_size_default=22),
+        ],
+    ),
+    "gantt_mini": DiagramTemplateDef(
+        name="gantt_mini",
+        description=(
+            "Gantt semplificato 5 task x 3 periodi. USA QUANDO presenti "
+            "pianificazione temporale (es. piano formazione annuale, scadenze "
+            "DVR/sorveglianza, ciclo verifiche periodiche)."
+        ),
+        template_path=SVG_TEMPLATES_DIR / "gantt_mini.svg",
+        slots=[
+            DiagramSlot(name="title", max_chars=40, font_size_default=28),
+            DiagramSlot(name="period_1", max_chars=15, font_size_default=22),
+            DiagramSlot(name="period_2", max_chars=15, font_size_default=22),
+            DiagramSlot(name="period_3", max_chars=15, font_size_default=22),
+            DiagramSlot(name="task_1_label", max_chars=18, font_size_default=22),
+            DiagramSlot(name="task_1_detail", max_chars=22, font_size_default=20),
+            DiagramSlot(name="task_2_label", max_chars=18, font_size_default=22),
+            DiagramSlot(name="task_2_detail", max_chars=22, font_size_default=20),
+            DiagramSlot(name="task_3_label", max_chars=18, font_size_default=22),
+            DiagramSlot(name="task_3_detail", max_chars=22, font_size_default=20),
+            DiagramSlot(name="task_4_label", max_chars=18, font_size_default=22),
+            DiagramSlot(name="task_4_detail", max_chars=22, font_size_default=20),
+            DiagramSlot(name="task_5_label", max_chars=18, font_size_default=22),
+            DiagramSlot(name="task_5_detail", max_chars=22, font_size_default=20),
+        ],
+    ),
 }
 
 # Literal type per Pydantic (validato strict in DiagramFilling)
@@ -161,6 +318,15 @@ DiagramTemplateName = Literal[
     "causa_effetto",
     "org_tree_3level",
     "compare_2col",
+    # STEP D (2026-05-31): 8 nuovi template
+    "timeline",
+    "fishbone",
+    "cycle_pdca",
+    "venn_2set",
+    "venn_3set",
+    "swimlane",
+    "decision_tree",
+    "gantt_mini",
 ]
 
 

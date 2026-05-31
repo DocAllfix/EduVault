@@ -122,3 +122,7 @@ scripts/run_b3_strumentato.py
 scripts/e2e_ant_l1_b3_strumentato.py
 scripts/_d161_check_allegato_xli.py
 scripts/_check_top5_titoli.py
+
+# Step A — extract_images_from_demos: script con path Desktop hardcoded + 158MB PNGs
+scripts/extract_images_from_demos.py
+assets/seeds/demos/

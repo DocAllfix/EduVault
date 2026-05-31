@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+  <circle cx="128" cy="128" r="120" fill="#FFFFFF" stroke="#C8102E" stroke-width="32"/>
+  <g fill="#000000" stroke="#000000"><rect x="60" y="120" width="120" height="16" rx="2"/><line x1="120" y1="100" x2="120" y2="116" stroke-width="4"/><line x1="140" y1="100" x2="140" y2="116" stroke-width="4"/></g>
+  <line x1="42" y1="42" x2="214" y2="214" stroke="#C8102E" stroke-width="32" stroke-linecap="round"/>
+  <text x="10" y="245" font-family="sans-serif" font-size="14" fill="#C8102E">P002</text>
+</svg>

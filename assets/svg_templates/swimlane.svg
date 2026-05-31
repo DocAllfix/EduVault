@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1760 800">
+  <defs>
+    <marker id="sw_arrow" markerWidth="14" markerHeight="14" refX="12" refY="7" orient="auto" markerUnits="userSpaceOnUse">
+      <path d="M0,0 L12,7 L0,14 z" fill="#769E2E"/>
+    </marker>
+  </defs>
+  <!-- Title -->
+  <text x="880" y="60" font-family="Inter, Segoe UI, sans-serif" font-size="28" fill="#1F1F1F" text-anchor="middle" font-weight="bold">{{title}}</text>
+  <!-- 4 lanes (vertical, columns) -->
+  <!-- Lane 1 background -->
+  <rect x="40" y="100" width="420" height="680" fill="#FDE7EE" fill-opacity="0.4" stroke="#C82E6E" stroke-width="2"/>
+  <text x="250" y="150" font-family="Inter, Segoe UI, sans-serif" font-size="26" fill="#C82E6E" text-anchor="middle" font-weight="bold">{{lane_1}}</text>
+  <rect x="80" y="200" width="340" height="100" rx="12" fill="#FFFFFF" stroke="#C82E6E" stroke-width="3"/>
+  <text x="250" y="260" font-family="Inter, Segoe UI, sans-serif" font-size="22" fill="#1F1F1F" text-anchor="middle">{{step_1_1}}</text>
+  <rect x="80" y="340" width="340" height="100" rx="12" fill="#FFFFFF" stroke="#C82E6E" stroke-width="3"/>
+  <text x="250" y="400" font-family="Inter, Segoe UI, sans-serif" font-size="22" fill="#1F1F1F" text-anchor="middle">{{step_1_2}}</text>
+  <!-- Lane 2 -->
+  <rect x="460" y="100" width="420" height="680" fill="#F4F8E8" fill-opacity="0.4" stroke="#769E2E" stroke-width="2"/>
+  <text x="670" y="150" font-family="Inter, Segoe UI, sans-serif" font-size="26" fill="#769E2E" text-anchor="middle" font-weight="bold">{{lane_2}}</text>
+  <rect x="500" y="340" width="340" height="100" rx="12" fill="#FFFFFF" stroke="#769E2E" stroke-width="3"/>
+  <text x="670" y="400" font-family="Inter, Segoe UI, sans-serif" font-size="22" fill="#1F1F1F" text-anchor="middle">{{step_2_1}}</text>
+  <rect x="500" y="480" width="340" height="100" rx="12" fill="#FFFFFF" stroke="#769E2E" stroke-width="3"/>
+  <text x="670" y="540" font-family="Inter, Segoe UI, sans-serif" font-size="22" fill="#1F1F1F" text-anchor="middle">{{step_2_2}}</text>
+  <!-- Lane 3 -->
+  <rect x="880" y="100" width="420" height="680" fill="#FDE7EE" fill-opacity="0.4" stroke="#C82E6E" stroke-width="2"/>
+  <text x="1090" y="150" font-family="Inter, Segoe UI, sans-serif" font-size="26" fill="#C82E6E" text-anchor="middle" font-weight="bold">{{lane_3}}</text>
+  <rect x="920" y="480" width="340" height="100" rx="12" fill="#FFFFFF" stroke="#C82E6E" stroke-width="3"/>
+  <text x="1090" y="540" font-family="Inter, Segoe UI, sans-serif" font-size="22" fill="#1F1F1F" text-anchor="middle">{{step_3_1}}</text>
+  <rect x="920" y="620" width="340" height="100" rx="12" fill="#FFFFFF" stroke="#C82E6E" stroke-width="3"/>
+  <text x="1090" y="680" font-family="Inter, Segoe UI, sans-serif" font-size="22" fill="#1F1F1F" text-anchor="middle">{{step_3_2}}</text>
+  <!-- Lane 4 -->
+  <rect x="1300" y="100" width="420" height="680" fill="#F4F8E8" fill-opacity="0.4" stroke="#769E2E" stroke-width="2"/>
+  <text x="1510" y="150" font-family="Inter, Segoe UI, sans-serif" font-size="26" fill="#769E2E" text-anchor="middle" font-weight="bold">{{lane_4}}</text>
+  <rect x="1340" y="620" width="340" height="100" rx="12" fill="#FFFFFF" stroke="#769E2E" stroke-width="3"/>
+  <text x="1510" y="680" font-family="Inter, Segoe UI, sans-serif" font-size="22" fill="#1F1F1F" text-anchor="middle">{{step_4_1}}</text>
+  <!-- Arrows between lanes (flow) -->
+  <line x1="420" y1="390" x2="500" y2="390" stroke="#769E2E" stroke-width="4" marker-end="url(#sw_arrow)"/>
+  <line x1="840" y1="530" x2="920" y2="530" stroke="#C82E6E" stroke-width="4" marker-end="url(#sw_arrow)"/>
+  <line x1="1260" y1="670" x2="1340" y2="670" stroke="#769E2E" stroke-width="4" marker-end="url(#sw_arrow)"/>
+</svg>

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+  <rect width="256" height="256" fill="#009639"/>
+  <g fill="#FFFFFF" stroke="#FFFFFF"><ellipse cx="128" cy="120" rx="60" ry="36"/><circle cx="128" cy="120" r="14" fill="none" stroke-width="4"/><path d="M68 156 L88 200 M188 156 L168 200" stroke-width="6"/></g>
+  <text x="10" y="245" font-family="sans-serif" font-size="14" fill="#FFFFFF">E009</text>
+</svg>

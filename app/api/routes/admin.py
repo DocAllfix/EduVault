@@ -18,7 +18,7 @@ import json
 from typing import Any
 
 import structlog
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from pydantic import BaseModel
 
 from app.api.dependencies import require_role
@@ -482,3 +482,163 @@ async def admin_list_image_library(
         page=page,
         per_page=per_page,
     )
+
+
+# ─────────────── Step B — Image library upload + delete ───────────────
+
+
+class ImageUploadResponse(BaseModel):
+    id: str
+    file_path: str
+
+
+@router.post("/api/admin/images/library", response_model=ImageUploadResponse)
+async def admin_upload_image(
+    file: UploadFile = File(...),
+    tags: str = Form(...),
+    source: str = Form("manual_upload"),
+    license: str | None = Form("Proprietary"),
+    attribution: str | None = Form(None),
+    source_url: str | None = Form(None),
+    user: dict[str, Any] = Depends(require_role("admin")),
+) -> ImageUploadResponse:
+    """Step B — admin upload PNG/JPG → embed Voyage → INSERT image_library.
+
+    Pillow.verify + size check + Voyage multimodal embed sync (server-side).
+    Idempotente su file_path UNIQUE constraint.
+    """
+    from pathlib import Path
+    import uuid
+
+    from PIL import Image
+
+    from app.services.embeddings import embed_image_multimodal
+    from app.services.image_library_service import insert_admin
+
+    # Validate ext + size
+    if file.content_type not in ("image/png", "image/jpeg"):
+        raise HTTPException(400, "only PNG/JPEG supported")
+    contents = await file.read()
+    if len(contents) > 5_000_000:
+        raise HTTPException(400, "file too large (max 5MB)")
+    if len(contents) < 1000:
+        raise HTTPException(400, "file too small")
+
+    # Persist to disk: assets/seeds/uploads/{uuid}.{ext}
+    ext = "png" if file.content_type == "image/png" else "jpg"
+    uid = str(uuid.uuid4())
+    rel_path = f"assets/seeds/uploads/{uid}.{ext}"
+    abs_path = Path(rel_path).resolve()
+    abs_path.parent.mkdir(parents=True, exist_ok=True)
+    abs_path.write_bytes(contents)
+
+    # Validate via Pillow
+    try:
+        with Image.open(abs_path) as im:
+            im.verify()
+        with Image.open(abs_path) as im2:
+            width, height = im2.size
+    except Exception as exc:
+        abs_path.unlink(missing_ok=True)
+        raise HTTPException(400, f"invalid image: {exc}")
+
+    # Parse tags (comma-separated -> lowercase normalized list)
+    tag_list = [t.strip().lower() for t in tags.split(",") if t.strip()]
+    if not tag_list:
+        raise HTTPException(400, "at least 1 tag required")
+
+    # Voyage embed (multimodal: image + tag string)
+    caption = " ".join(tag_list[:5]) if tag_list else None
+    embedding = await embed_image_multimodal(abs_path, caption=caption)
+
+    pool = get_pool()
+    new_id = await insert_admin(
+        pool,
+        file_path=rel_path,
+        tags=tag_list,
+        embedding=embedding,
+        source=source,
+        license=license,
+        attribution=attribution,
+        source_url=source_url,
+        width=width,
+        height=height,
+        bytes_=len(contents),
+    )
+    return ImageUploadResponse(id=new_id, file_path=rel_path)
+
+
+@router.delete("/api/admin/images/library/{image_id}")
+async def admin_delete_image(
+    image_id: str,
+    user: dict[str, Any] = Depends(require_role("admin")),
+) -> dict[str, str]:
+    """Step B — DELETE row from image_library by id. File on disk preserved."""
+    from app.services.image_library_service import delete_admin
+
+    pool = get_pool()
+    deleted = await delete_admin(pool, image_id)
+    if not deleted:
+        raise HTTPException(404, "image not found")
+    return {"status": "deleted"}
+
+
+# ─────────────── Step C — Diagrams catalog admin viewer ───────────────
+
+
+class DiagramSlotInfo(BaseModel):
+    name: str
+    max_chars: int
+
+
+class DiagramTemplateInfo(BaseModel):
+    name: str
+    description: str
+    slots: list[DiagramSlotInfo]
+    usage_count: int
+    svg_available: bool
+
+
+@router.get("/api/admin/diagrams/catalog", response_model=list[DiagramTemplateInfo])
+async def admin_diagrams_catalog(
+    user: dict[str, Any] = Depends(require_role("admin", "reviewer")),
+) -> list[DiagramTemplateInfo]:
+    """Step C — lista template diagram disponibili + usage count + slot info.
+
+    Read-only catalog viewer. SVG content NON serializzato per response size
+    (frontend lo richiedera' via path separato se necessario).
+    """
+    from app.services.diagram_service import DIAGRAM_CATALOG
+
+    pool = get_pool()
+    # Count usage from slide_contents_json LIKE '%"template_name":"{name}"%'
+    rows = await pool.fetch(
+        """
+        SELECT
+          regexp_matches(slide_contents_json::text, '"template_name"\\s*:\\s*"([^"]+)"', 'g')
+            AS m
+        FROM courses
+        WHERE slide_contents_json IS NOT NULL
+        """
+    )
+    from collections import Counter
+    usage_counter: Counter[str] = Counter()
+    for r in rows:
+        # m is regexp_matches group array
+        m = r["m"]
+        if m and len(m) > 0:
+            usage_counter[m[0]] += 1
+
+    out: list[DiagramTemplateInfo] = []
+    for tpl in DIAGRAM_CATALOG.values():
+        out.append(DiagramTemplateInfo(
+            name=tpl.name,
+            description=tpl.description,
+            slots=[
+                DiagramSlotInfo(name=s.name, max_chars=s.max_chars)
+                for s in tpl.slots
+            ],
+            usage_count=usage_counter.get(tpl.name, 0),
+            svg_available=tpl.template_path.exists(),
+        ))
+    return out

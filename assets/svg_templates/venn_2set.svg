@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1760 800">
+  <!-- Title -->
+  <text x="880" y="80" font-family="Inter, Segoe UI, sans-serif" font-size="32" fill="#1F1F1F" text-anchor="middle" font-weight="bold">{{title}}</text>
+  <!-- Set A (left circle) -->
+  <circle cx="680" cy="430" r="260" fill="#C82E6E" fill-opacity="0.40" stroke="#C82E6E" stroke-width="5"/>
+  <text x="500" y="420" font-family="Inter, Segoe UI, sans-serif" font-size="30" fill="#FFFFFF" text-anchor="middle" font-weight="bold">{{set_a}}</text>
+  <text x="500" y="475" font-family="Inter, Segoe UI, sans-serif" font-size="22" fill="#FFFFFF" text-anchor="middle">{{label_a}}</text>
+  <!-- Set B (right circle) -->
+  <circle cx="1080" cy="430" r="260" fill="#769E2E" fill-opacity="0.40" stroke="#769E2E" stroke-width="5"/>
+  <text x="1260" y="420" font-family="Inter, Segoe UI, sans-serif" font-size="30" fill="#FFFFFF" text-anchor="middle" font-weight="bold">{{set_b}}</text>
+  <text x="1260" y="475" font-family="Inter, Segoe UI, sans-serif" font-size="22" fill="#FFFFFF" text-anchor="middle">{{label_b}}</text>
+  <!-- Intersection label -->
+  <text x="880" y="420" font-family="Inter, Segoe UI, sans-serif" font-size="26" fill="#1F1F1F" text-anchor="middle" font-weight="bold">{{intersection}}</text>
+  <text x="880" y="465" font-family="Inter, Segoe UI, sans-serif" font-size="20" fill="#1F1F1F" text-anchor="middle">{{intersection_detail}}</text>
+</svg>

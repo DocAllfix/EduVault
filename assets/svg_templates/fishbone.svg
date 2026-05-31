@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1760 800">
+  <defs>
+    <marker id="fb_arrow" markerWidth="14" markerHeight="14" refX="12" refY="7" orient="auto" markerUnits="userSpaceOnUse">
+      <path d="M0,0 L12,7 L0,14 z" fill="#C82E6E"/>
+    </marker>
+  </defs>
+  <!-- Spine (horizontal main arrow) -->
+  <line x1="120" y1="400" x2="1380" y2="400" stroke="#769E2E" stroke-width="8" marker-end="url(#fb_arrow)"/>
+  <!-- Effect box (right) -->
+  <rect x="1420" y="320" width="280" height="160" rx="16" fill="#C82E6E"/>
+  <text x="1560" y="380" font-family="Inter, Segoe UI, sans-serif" font-size="22" fill="#FFFFFF" text-anchor="middle" font-weight="bold">EFFETTO</text>
+  <text x="1560" y="430" font-family="Inter, Segoe UI, sans-serif" font-size="26" fill="#FFFFFF" text-anchor="middle">{{effect}}</text>
+  <!-- Cause 1 (top-left bone) -->
+  <line x1="280" y1="180" x2="380" y2="400" stroke="#769E2E" stroke-width="4"/>
+  <text x="280" y="160" font-family="Inter, Segoe UI, sans-serif" font-size="26" fill="#1F1F1F" text-anchor="middle">{{cause_1}}</text>
+  <!-- Cause 2 (top-mid bone) -->
+  <line x1="580" y1="180" x2="680" y2="400" stroke="#769E2E" stroke-width="4"/>
+  <text x="580" y="160" font-family="Inter, Segoe UI, sans-serif" font-size="26" fill="#1F1F1F" text-anchor="middle">{{cause_2}}</text>
+  <!-- Cause 3 (top-right bone) -->
+  <line x1="880" y1="180" x2="980" y2="400" stroke="#769E2E" stroke-width="4"/>
+  <text x="880" y="160" font-family="Inter, Segoe UI, sans-serif" font-size="26" fill="#1F1F1F" text-anchor="middle">{{cause_3}}</text>
+  <!-- Cause 4 (bottom-left bone) -->
+  <line x1="280" y1="620" x2="380" y2="400" stroke="#769E2E" stroke-width="4"/>
+  <text x="280" y="680" font-family="Inter, Segoe UI, sans-serif" font-size="26" fill="#1F1F1F" text-anchor="middle">{{cause_4}}</text>
+  <!-- Cause 5 (bottom-mid bone) -->
+  <line x1="580" y1="620" x2="680" y2="400" stroke="#769E2E" stroke-width="4"/>
+  <text x="580" y="680" font-family="Inter, Segoe UI, sans-serif" font-size="26" fill="#1F1F1F" text-anchor="middle">{{cause_5}}</text>
+  <!-- Cause 6 (bottom-right bone) -->
+  <line x1="880" y1="620" x2="980" y2="400" stroke="#769E2E" stroke-width="4"/>
+  <text x="880" y="680" font-family="Inter, Segoe UI, sans-serif" font-size="26" fill="#1F1F1F" text-anchor="middle">{{cause_6}}</text>
+</svg>

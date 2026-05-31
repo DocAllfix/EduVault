@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+  <polygon points="128,16 240,240 16,240" fill="#F7B500" stroke="#000000" stroke-width="12" stroke-linejoin="round"/>
+  <g fill="#000000" stroke="#000000"><line x1="100" y1="100" x2="156" y2="100" stroke-width="8"/><line x1="128" y1="100" x2="128" y2="150" stroke-width="6"/><rect x="100" y="150" width="56" height="56"/></g>
+  <text x="100" y="252" font-family="sans-serif" font-size="14" fill="#000000">W015</text>
+</svg>

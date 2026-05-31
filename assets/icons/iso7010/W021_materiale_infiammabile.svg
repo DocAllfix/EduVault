@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+  <polygon points="128,16 240,240 16,240" fill="#F7B500" stroke="#000000" stroke-width="12" stroke-linejoin="round"/>
+  <g fill="#000000" stroke="#000000"><path d="M128 100 Q150 130 138 160 Q160 150 158 180 Q158 220 128 220 Q98 220 98 180 Q98 150 118 160 Q108 130 128 100 Z"/></g>
+  <text x="100" y="252" font-family="sans-serif" font-size="14" fill="#000000">W021</text>
+</svg>

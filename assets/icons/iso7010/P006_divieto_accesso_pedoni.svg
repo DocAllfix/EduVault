@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+  <circle cx="128" cy="128" r="120" fill="#FFFFFF" stroke="#C8102E" stroke-width="32"/>
+  <g fill="#000000" stroke="#000000"><circle cx="128" cy="100" r="18"/><path d="M115 125 L141 125 L150 175 L128 220 L106 175 Z"/></g>
+  <line x1="42" y1="42" x2="214" y2="214" stroke="#C8102E" stroke-width="32" stroke-linecap="round"/>
+  <text x="10" y="245" font-family="sans-serif" font-size="14" fill="#C8102E">P006</text>
+</svg>

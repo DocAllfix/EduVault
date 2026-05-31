@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+  <rect width="256" height="256" fill="#009639"/>
+  <g fill="#FFFFFF" stroke="#FFFFFF"><polygon points="196,128 146,80 146,108 106,108 106,148 146,148 146,176"/></g>
+  <text x="10" y="245" font-family="sans-serif" font-size="14" fill="#FFFFFF">E002</text>
+</svg>

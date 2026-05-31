@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1760 800">
+  <defs>
+    <marker id="dt_arrow" markerWidth="14" markerHeight="14" refX="12" refY="7" orient="auto" markerUnits="userSpaceOnUse">
+      <path d="M0,0 L12,7 L0,14 z" fill="#769E2E"/>
+    </marker>
+  </defs>
+  <!-- Root question (rhombus) -->
+  <polygon points="880,80 1080,200 880,320 680,200" fill="#FDE7EE" stroke="#C82E6E" stroke-width="4"/>
+  <text x="880" y="195" font-family="Inter, Segoe UI, sans-serif" font-size="22" fill="#C82E6E" text-anchor="middle" font-weight="bold">?</text>
+  <text x="880" y="235" font-family="Inter, Segoe UI, sans-serif" font-size="22" fill="#1F1F1F" text-anchor="middle">{{root_question}}</text>
+  <!-- SI / NO labels on edges -->
+  <text x="600" y="380" font-family="Inter, Segoe UI, sans-serif" font-size="22" fill="#769E2E" font-weight="bold">SI</text>
+  <text x="1160" y="380" font-family="Inter, Segoe UI, sans-serif" font-size="22" fill="#C82E6E" font-weight="bold">NO</text>
+  <!-- Left branch (SI) -->
+  <line x1="780" y1="290" x2="500" y2="400" stroke="#769E2E" stroke-width="4" marker-end="url(#dt_arrow)"/>
+  <rect x="280" y="400" width="440" height="160" rx="20" fill="#F4F8E8" stroke="#769E2E" stroke-width="4"/>
+  <text x="500" y="450" font-family="Inter, Segoe UI, sans-serif" font-size="22" fill="#769E2E" text-anchor="middle" font-weight="bold">RAMO SI</text>
+  <text x="500" y="500" font-family="Inter, Segoe UI, sans-serif" font-size="22" fill="#1F1F1F" text-anchor="middle">{{branch_yes}}</text>
+  <!-- Right branch (NO) -->
+  <line x1="980" y1="290" x2="1260" y2="400" stroke="#C82E6E" stroke-width="4" marker-end="url(#dt_arrow)"/>
+  <rect x="1040" y="400" width="440" height="160" rx="20" fill="#FDE7EE" stroke="#C82E6E" stroke-width="4"/>
+  <text x="1260" y="450" font-family="Inter, Segoe UI, sans-serif" font-size="22" fill="#C82E6E" text-anchor="middle" font-weight="bold">RAMO NO</text>
+  <text x="1260" y="500" font-family="Inter, Segoe UI, sans-serif" font-size="22" fill="#1F1F1F" text-anchor="middle">{{branch_no}}</text>
+  <!-- Outcomes below each branch -->
+  <line x1="500" y1="560" x2="500" y2="640" stroke="#769E2E" stroke-width="3" marker-end="url(#dt_arrow)"/>
+  <rect x="280" y="640" width="440" height="120" rx="16" fill="#FFFFFF" stroke="#1F1F1F" stroke-width="3"/>
+  <text x="500" y="710" font-family="Inter, Segoe UI, sans-serif" font-size="22" fill="#1F1F1F" text-anchor="middle">{{outcome_yes}}</text>
+  <line x1="1260" y1="560" x2="1260" y2="640" stroke="#C82E6E" stroke-width="3" marker-end="url(#dt_arrow)"/>
+  <rect x="1040" y="640" width="440" height="120" rx="16" fill="#FFFFFF" stroke="#1F1F1F" stroke-width="3"/>
+  <text x="1260" y="710" font-family="Inter, Segoe UI, sans-serif" font-size="22" fill="#1F1F1F" text-anchor="middle">{{outcome_no}}</text>
+</svg>

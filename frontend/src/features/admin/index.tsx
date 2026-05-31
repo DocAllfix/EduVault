@@ -142,30 +142,68 @@ export function Admin() {
           )}
         </section>
 
-        {/* F1 D8 — Catalog review entry point */}
+        {/* Asset bank & catalogo: 3 entry points */}
         <section className='mb-8'>
-          <h2 className='mb-3 text-lg font-semibold tracking-tight'>Catalogo corsi</h2>
-          <Card>
-            <CardHeader>
-              <CardTitle className='flex items-center gap-2 text-base'>
-                <Layers className='text-brand-primary size-4' aria-hidden='true' />
-                Tipologie di corso e approvazione
-              </CardTitle>
-              <CardDescription>
-                Lista delle tipologie di corso (course_type) registrate in DB.
-                Ogni entry deve essere approvata da un admin prima che diventi
-                disponibile nel wizard di generazione (gate VAA-c).
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <a
-                href='/admin/catalog'
-                className='bg-brand-primary text-primary-foreground hover:bg-brand-primary/90 inline-flex h-9 items-center gap-2 rounded-md px-4 text-sm font-medium transition-colors'
-              >
-                Apri catalogo →
-              </a>
-            </CardContent>
-          </Card>
+          <h2 className='mb-3 text-lg font-semibold tracking-tight'>Asset bank & catalogo</h2>
+          <div className='grid gap-4 sm:grid-cols-3'>
+            <Card>
+              <CardHeader>
+                <CardTitle className='flex items-center gap-2 text-base'>
+                  <Layers className='text-brand-primary size-4' aria-hidden='true' />
+                  Catalogo corsi
+                </CardTitle>
+                <CardDescription>
+                  Tipologie corso + approvazione gate.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <a
+                  href='/admin/catalog'
+                  className='bg-brand-primary text-primary-foreground hover:bg-brand-primary/90 inline-flex h-9 items-center gap-2 rounded-md px-4 text-sm font-medium transition-colors'
+                >
+                  Apri →
+                </a>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader>
+                <CardTitle className='flex items-center gap-2 text-base'>
+                  <ImageIcon className='text-brand-primary size-4' aria-hidden='true' />
+                  Image Library
+                </CardTitle>
+                <CardDescription>
+                  Asset visuali, upload, audit usage.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <a
+                  href='/admin/images'
+                  className='bg-brand-primary text-primary-foreground hover:bg-brand-primary/90 inline-flex h-9 items-center gap-2 rounded-md px-4 text-sm font-medium transition-colors'
+                >
+                  Apri →
+                </a>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader>
+                <CardTitle className='flex items-center gap-2 text-base'>
+                  <Layers className='text-brand-primary size-4' aria-hidden='true' />
+                  Diagrammi catalog
+                </CardTitle>
+                <CardDescription>
+                  Template SVG, slot, usage.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <a
+                  href='/admin/diagrams'
+                  className='bg-brand-primary text-primary-foreground hover:bg-brand-primary/90 inline-flex h-9 items-center gap-2 rounded-md px-4 text-sm font-medium transition-colors'
+                >
+                  Apri →
+                </a>
+              </CardContent>
+            </Card>
+          </div>
         </section>
 
         {/* Users — honest stub */}

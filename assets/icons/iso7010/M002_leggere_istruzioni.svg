@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+  <circle cx="128" cy="128" r="120" fill="#005EB8"/>
+  <g fill="#FFFFFF" stroke="#FFFFFF"><rect x="80" y="60" width="96" height="136" rx="6" fill="none" stroke="white" stroke-width="8"/><line x1="95" y1="90" x2="161" y2="90" stroke-width="6"/><line x1="95" y1="110" x2="161" y2="110" stroke-width="6"/><line x1="95" y1="130" x2="161" y2="130" stroke-width="6"/><line x1="95" y1="150" x2="135" y2="150" stroke-width="6"/></g>
+  <text x="10" y="245" font-family="sans-serif" font-size="14" fill="#FFFFFF">M002</text>
+</svg>
