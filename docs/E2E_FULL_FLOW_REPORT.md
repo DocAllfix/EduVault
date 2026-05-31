@@ -167,6 +167,57 @@
 
 ## Conclusione
 
-Steps A→D **completati end-to-end browser** con findability verificata. Step E **completato fino ad approve skeleton** con UX verificata su 4 interaction critiche (upload+stepper, wizard, skeleton AI edit, approve). Content phase pipeline backend in corso (>17 min vs media 10 min): probabile rallentamento LLM provider. Studio + library hit + diagram usage test bloccati su content completion: ripeti test quando corso `171998b0-e120-4984-958b-71a9a666776a` raggiunge status `completed`.
+### Iter completo E2E corso `c4693833-f05b-4a6e-817b-eed4840d2a4c` (post-fix totali)
 
-I 4 bug rilevati durante E2E sono stati fixati live (commits sopra).
+Dopo i 6 commit di fix (`b336887` → `66f4ae3`), creato **secondo corso E2E** Primo Soccorso B/C 8h via API:
+- **Research phase**: completata in 1 polling tick (skeleton generato veloce)
+- **Approve**: PASS, status `content`
+- **Content phase**: **completata in ~7 minuti** (vs media 10 min)
+- **Tot slide generate**: **642**
+
+### Verifica finale PPTX (24.8 MB scaricato)
+
+- **642 slide XML** → 100% generate
+- **70 immagini media PNG** nel PPTX
+- ✅ **0 branded fallback** (era 152/166 = 92% pre-fix → ora 0/70 = 0%)
+- ✅ **70 immagini reali** (Pexels + library + diagrammi)
+- ✅ **188 slide con query_url dalla library** (97% di 194 web_search totali)
+- ✅ **53 paths library unique** (mix demos + ISO 7010)
+- ✅ **Library DB usage_count**: demo_seed 492 + iso7010 106 → tracking funziona
+
+### Verifica visiva webapp Studio (Chrome DevTools MCP)
+
+- Studio aperto per corso `c4693833` → 642 slide nella sidebar
+- 112 slide richiedono attenzione (badge F4)
+- **Slide 5 M0 "Guanti sterili monouso nel primo soccorso"** verificata via API:
+  - Type: CONTENT_IMAGE
+  - Query: "guanti sterili monouso"
+  - **query_url = `assets/seeds/demos/generale/generale_slide080_4fd2935a.png`**
+  - Foto vera estratta dal PPTX "Formazione Generale Lavoratori 4h" cliente CFP Montessori review-13
+- Screenshot evidenza in `docs/screenshots/f-lib-diag-step-e/08-09-10-11`
+
+### Bug fixati totali (8 commit sessione)
+
+| Commit | Fix |
+|--------|-----|
+| `b336887` | Steps A+B+C+D feat (375 demos + 8 SVG + 44 ISO 7010 + admin UI) |
+| `3d9ff33` | UX upload stepper + GeneralError IT + skeleton_pending CourseProgress |
+| `0d62af6` | SVG admin/diagrams inline render + approve UX redirect |
+| `eafd688` | skeleton_pending removed da TERMINAL_STATES |
+| `38d22bc` | recover_interrupted_jobs sync courses.status (no piu' stuck content) |
+| `19600d8` | image_service path locale: library hit ora finiscono REALMENTE nel PPTX |
+| `b0726de` | 158MB demos PNG committed nel repo per disponibilità container Railway |
+| `66f4ae3` | Prompt diagrams esteso ai 15 template + regola HARD varieta' |
+
+### Risposta originaria all'utente
+
+**Domanda**: "7 MB significa che è senza immagini?"
+**Risposta finale**: NO, il PPTX vecchio aveva 152 branded fallback Pillow + 14 reali. **Dopo i fix**, il nuovo PPTX da 24.8 MB ha 70 immagini **TUTTE REALI** con 188 slide servite dalla library locale (97% coverage).
+
+### Lessons learned
+
+1. **Mai fare deploy mentre c'è una pipeline in volo** — `asyncio.create_task` fire-and-forget = killed at restart
+2. `recover_interrupted_jobs` deve sempre sincronizzare `courses.status` con `generation_jobs.status` (altrimenti stuck UI fake)
+3. Library tier-0 ritorna **file_path relativo al repo** — `_download_one_image` deve discriminare http:// vs path locale
+4. I file referenced come local path **devono essere committed nel repo** (no .gitignore) per essere disponibili nel container Railway
+5. Estendere il prompt content_agent ogni volta che si aggiunge un template al DIAGRAM_CATALOG (regola varieta')
