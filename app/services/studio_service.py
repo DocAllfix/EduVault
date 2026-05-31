@@ -91,6 +91,20 @@ async def update_slide(
     if target_pos is None:
         raise LookupError(f"slide index {idx} not found")
 
+    # FIX 2026-06-01 bug edit slide: il frontend invia `body: str` (single
+    # multiline string), il backend SlideContent ha `bullets: list[str]`.
+    # Senza conversione, body veniva ignorato silently nel merge e l'edit
+    # Salva-modifiche nel Course Studio non aveva NESSUN effetto su bullets.
+    if "body" in patch and patch["body"] is not None:
+        body_str = patch.pop("body")
+        # Split su newline + strip + drop empty. Frontend joina bullets con \n
+        # nella GET response (vedi sotto), simmetrico qui per PATCH.
+        bullets_from_body = [
+            line.strip() for line in body_str.split("\n") if line.strip()
+        ]
+        # Solo override se non-empty (per evitare di azzerare bullets per errore)
+        if bullets_from_body:
+            patch["bullets"] = bullets_from_body
     merged = {**slides[target_pos], **patch}
     # Ri-validazione strict: solleva ValidationError → ValueError leggibile
     validated = SlideContent(**merged).model_dump()

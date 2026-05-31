@@ -731,6 +731,24 @@ async def delete_course(
 # ─────────────── FASE 7 — Course Studio endpoints ───────────────
 
 
+def _enrich_slide_with_body(slide: dict[str, Any]) -> dict[str, Any]:
+    """FIX 2026-06-01 bug edit: frontend Studio si aspetta `body: str` ma il
+    backend SlideContent ha `bullets: list[str]`. Aggiungo `body` derivato
+    qui sul GET response cosi' il TextArea del slide-editor mostra i bullets
+    veri (era empty -> utente vedeva slide vuota e l'edit non aveva effetto).
+    """
+    bullets = slide.get("bullets") or []
+    sezioni = slide.get("sezioni") or []
+    # CASE_STUDY usa sezioni (3 elementi) invece di bullets. Per quel tipo
+    # joina sezioni nel body cosi' il textarea editor le mostra. Per tutti
+    # gli altri tipi joina bullets.
+    if slide.get("slide_type") == "CASE_STUDY" and sezioni:
+        slide["body"] = "\n".join(sezioni)
+    else:
+        slide["body"] = "\n".join(bullets) if bullets else ""
+    return slide
+
+
 @router.get("/{course_id}/slides")
 async def get_course_slides(
     course_id: str,
@@ -749,6 +767,7 @@ async def get_course_slides(
         raise HTTPException(404, "Corso non trovato") from exc
     if not slides:
         raise HTTPException(409, "Corso non editabile: nessuna slide generata")
+    slides = [_enrich_slide_with_body(s) for s in slides]
     return {"course_id": course_id, "total": len(slides), "slides": slides}
 
 
@@ -763,9 +782,10 @@ async def get_course_slide(
     course = await _load_course_or_404(course_id, pool)
     _enforce_ownership(course, user)
     try:
-        return await studio_service.get_slide_by_idx(course_id, idx, pool)
+        slide = await studio_service.get_slide_by_idx(course_id, idx, pool)
     except LookupError as exc:
         raise HTTPException(404, f"Slide {idx} non trovata") from exc
+    return _enrich_slide_with_body(slide)
 
 
 @router.patch("/{course_id}/slides/{idx}")
@@ -789,7 +809,7 @@ async def patch_course_slide(
         raise HTTPException(404, f"Slide {idx} non trovata") from exc
     except Exception as exc:  # Pydantic ValidationError → 422
         raise HTTPException(422, f"Slide non valida dopo modifica: {exc}") from exc
-    return updated
+    return _enrich_slide_with_body(updated)
 
 
 @router.patch("/{course_id}/slides/{idx}/image")
