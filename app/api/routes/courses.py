@@ -1316,12 +1316,16 @@ async def chat_send(
     if len(msg) > 2000:
         raise HTTPException(400, "Messaggio troppo lungo (max 2000 char)")
 
-    # Carica slide context
-    slides_raw = course.get("slide_contents_json") or []
-    if not isinstance(slides_raw, list):
+    # Carica slide context. BUG #3 fix: slide_contents_json può essere wrappato
+    # in struttura {completed_modules: [{slides: [...]}]} o {slides: [...]} o
+    # list flat. Riusa studio_service._deserialize_slides per normalizzare.
+    from app.services.studio_service import _deserialize_slides
+
+    slides_flat = _deserialize_slides(course.get("slide_contents_json"))
+    if not slides_flat:
         raise HTTPException(409, "Slide non disponibili (corso non generato)")
     target_slide = next(
-        (s for s in slides_raw if s.get("index") == body.slide_index), None
+        (s for s in slides_flat if s.get("index") == body.slide_index), None
     )
     if target_slide is None:
         raise HTTPException(404, f"Slide {body.slide_index} non trovata")
