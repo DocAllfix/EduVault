@@ -829,26 +829,38 @@ async def retrieve_chunks_per_module(
         r")\b",
         re.IGNORECASE,
     )
+    # F8 (vast-hopping post-MVP 2026-05-31): gate per-family. Quando flag
+    # `v2_drop_segnaletica_enabled=false` su Railway env, skip drop-list per
+    # quella famiglia → A/B comparison contro baseline. Tracciato in DEBT D-189.
+    from app.config import settings as _f8_settings
+
     segnaletica_modules = [
         m for m in pacing_plan.modules if m.title == "Segnaletica"
     ]
     drop_counts: dict[int, int] = {}
-    for sm in segnaletica_modules:
-        kept_chunks = []
-        dropped = 0
-        for c in result[sm.module_index]:
-            if _DROP_PATTERN_SEGNALETICA.search(c.body or ""):
-                dropped += 1
-                continue
-            kept_chunks.append(c)
-        if dropped > 0:
-            drop_counts[sm.module_index] = dropped
-            result[sm.module_index] = kept_chunks
-    if drop_counts:
+    if _f8_settings.v2_drop_segnaletica_enabled:
+        for sm in segnaletica_modules:
+            kept_chunks = []
+            dropped = 0
+            for c in result[sm.module_index]:
+                if _DROP_PATTERN_SEGNALETICA.search(c.body or ""):
+                    dropped += 1
+                    continue
+                kept_chunks.append(c)
+            if dropped > 0:
+                drop_counts[sm.module_index] = dropped
+                result[sm.module_index] = kept_chunks
+        if drop_counts:
+            logger.info(
+                "segnaletica_drop_list_applied",
+                chunks_dropped=drop_counts,
+                reason="off_topic_corpus_adjacency",
+            )
+    elif segnaletica_modules:
         logger.info(
-            "segnaletica_drop_list_applied",
-            chunks_dropped=drop_counts,
-            reason="off_topic_corpus_adjacency",
+            "segnaletica_drop_list_skipped_f8",
+            n_modules=len(segnaletica_modules),
+            reason="v2_drop_segnaletica_enabled=false (F8 A/B family promotion)",
         )
 
     # FIX #32 (2026-05-27, analista review 12): drop-list M1
@@ -889,22 +901,30 @@ async def retrieve_chunks_per_module(
         if m.title == "Prevenzione e protezione"
     ]
     drop_counts_m1: dict[int, int] = {}
-    for m1 in m1_modules:
-        kept_chunks = []
-        dropped = 0
-        for c in result[m1.module_index]:
-            if _DROP_PATTERN_M1_PREVENZIONE_GENERALE.search(c.body or ""):
-                dropped += 1
-                continue
-            kept_chunks.append(c)
-        if dropped > 0:
-            drop_counts_m1[m1.module_index] = dropped
-            result[m1.module_index] = kept_chunks
-    if drop_counts_m1:
+    # F8 gate per-family Lavoratori Generale.
+    if _f8_settings.v2_drop_prevenzione_generale_enabled:
+        for m1 in m1_modules:
+            kept_chunks = []
+            dropped = 0
+            for c in result[m1.module_index]:
+                if _DROP_PATTERN_M1_PREVENZIONE_GENERALE.search(c.body or ""):
+                    dropped += 1
+                    continue
+                kept_chunks.append(c)
+            if dropped > 0:
+                drop_counts_m1[m1.module_index] = dropped
+                result[m1.module_index] = kept_chunks
+        if drop_counts_m1:
+            logger.info(
+                "m1_prevenzione_drop_list_applied",
+                chunks_dropped=drop_counts_m1,
+                reason="medico_biologico_corpus_blur",
+            )
+    elif m1_modules:
         logger.info(
-            "m1_prevenzione_drop_list_applied",
-            chunks_dropped=drop_counts_m1,
-            reason="medico_biologico_corpus_blur",
+            "m1_prevenzione_drop_list_skipped_f8",
+            n_modules=len(m1_modules),
+            reason="v2_drop_prevenzione_generale_enabled=false (F8 A/B)",
         )
 
     # FIX #32 LEVA 2 (analista review 14): drop-list M3 "Incidenti e
@@ -949,22 +969,30 @@ async def retrieve_chunks_per_module(
         if m.title == "Incidenti e infortuni mancati"
     ]
     drop_counts_m3: dict[int, int] = {}
-    for m3 in m3_incidenti_modules:
-        kept_chunks = []
-        dropped = 0
-        for c in result[m3.module_index]:
-            if _DROP_PATTERN_M3_INCIDENTI_PREPOSTI.search(c.body or ""):
-                dropped += 1
-                continue
-            kept_chunks.append(c)
-        if dropped > 0:
-            drop_counts_m3[m3.module_index] = dropped
-            result[m3.module_index] = kept_chunks
-    if drop_counts_m3:
+    # F8 gate per-family Preposti.
+    if _f8_settings.v2_drop_incidenti_preposti_enabled:
+        for m3 in m3_incidenti_modules:
+            kept_chunks = []
+            dropped = 0
+            for c in result[m3.module_index]:
+                if _DROP_PATTERN_M3_INCIDENTI_PREPOSTI.search(c.body or ""):
+                    dropped += 1
+                    continue
+                kept_chunks.append(c)
+            if dropped > 0:
+                drop_counts_m3[m3.module_index] = dropped
+                result[m3.module_index] = kept_chunks
+        if drop_counts_m3:
+            logger.info(
+                "m3_incidenti_drop_list_applied",
+                chunks_dropped=drop_counts_m3,
+                reason="atex_cancerogeni_attrezzature_corpus_blur",
+            )
+    elif m3_incidenti_modules:
         logger.info(
-            "m3_incidenti_drop_list_applied",
-            chunks_dropped=drop_counts_m3,
-            reason="atex_cancerogeni_attrezzature_corpus_blur",
+            "m3_incidenti_drop_list_skipped_f8",
+            n_modules=len(m3_incidenti_modules),
+            reason="v2_drop_incidenti_preposti_enabled=false (F8 A/B)",
         )
 
     # 3. Log finale — cautela #1 analista review 2:

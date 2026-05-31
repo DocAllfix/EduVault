@@ -140,6 +140,18 @@ class Settings(BaseSettings):
     b4_min_chunks_per_voice: int = 3   # F2.14 B4: soglia n_chunks_per_regulation_per_voce. Se una regulation ha meno chunks di questa soglia nel pool finale post-B3 di una voce -> corpus thin per quella voce. Default start point analista 2026-05-30, calibrazione dai prossimi E2E.
     b4_corpus_thin_behavior: str = "block"  # F2.14 B4: "block" (default sicura) | "mark_only" (scappatoia). Block: warning visibile in generation_jobs.status, UI mostra all'operatore prima del replay. Mark_only: genera comunque + scrive low_corpus_confidence in metadata slide. Analista sign-off 2026-05-30: default block, mark_only solo se operatore esperto override.
 
+    # F8 — Cleanup A/B per famiglia (D10, vast-hopping §F8 post-MVP 2026-05-31).
+    # Ogni flag spegne il drop-list pattern di UNA famiglia di corsi. Default
+    # TRUE (drop attivi = pipeline v1 invariata, safety-net D10). Quando flag
+    # viene messo a FALSE su Railway env per una famiglia, quel drop-pattern e'
+    # disabilitato per quella famiglia → A/B comparison contro baseline.
+    # Promozione: famiglia "verde" (badge D9 = 0, qualita' >= analista review 10)
+    # → flag rimosso permanente in commit chirurgico + pattern eliminato dal codice.
+    # NO big-bang: 12 famiglie, 1 per volta.
+    v2_drop_segnaletica_enabled: bool = True       # corso Lavoratori Specifica, modulo "Segnaletica"
+    v2_drop_prevenzione_generale_enabled: bool = True  # corso Lavoratori Generale, modulo "Prevenzione e protezione"
+    v2_drop_incidenti_preposti_enabled: bool = True    # corso Preposti, modulo "Incidenti mancati"
+
     @property
     def v2_features(self) -> dict[str, bool]:
         """Vista aggregata dei flag v2 per logging/debug.
