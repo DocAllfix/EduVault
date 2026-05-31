@@ -59,9 +59,11 @@ export const TERMINAL_STATES: ReadonlySet<JobStatus> = new Set<JobStatus>([
   'failed',
   'cancelled',
   'archived',
-  // skeleton_pending: terminal from the JOB perspective (user must approve);
-  // CourseProgress UI shows a "Revisiona scheletro" CTA instead of spinner.
-  'skeleton_pending',
+  // NOTE: skeleton_pending is NOT terminal. The job that produced the
+  // skeleton finished, but the *course* still needs human approval -> next
+  // content phase. CourseProgress page detects skeleton_pending via the
+  // course detail polling (not WS), so polling layer keeps re-querying after
+  // approve to surface the new 'content' status.
 ])
 
 /** Reasons we exposed why a watcher closed. Useful for UI debugging. */
