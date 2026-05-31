@@ -46,12 +46,17 @@ export function AudioPlayer({
   }, [src])
 
   // F7.4 — fetch provider metadata per badge. Solo se enabled + no error.
+  // gcTime: 0 → cache invalidata su unmount per evitare query orphan attive
+  // su slide senza audio (404/CORS). throwOnError: false così errori non
+  // crashano il render (badge semplicemente non appare).
   const infoQ = useQuery({
     queryKey: ['audio-info', courseId, slideIndex] as const,
     queryFn: () => api.getSlideAudioInfo(courseId, slideIndex),
     enabled: enabled && !hasError,
     staleTime: 5 * 60_000,
+    gcTime: 0,
     retry: false,
+    throwOnError: false,
   })
 
   return (

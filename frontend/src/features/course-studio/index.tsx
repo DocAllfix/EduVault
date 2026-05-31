@@ -274,13 +274,13 @@ export function CourseStudio() {
               </section>
 
               {/* ─── Right rail: editor + Tabs (Quality | Chat) + AI regen + image picker ─── */}
-              <aside className="border-border flex h-[calc(100vh-16rem)] flex-col gap-3 overflow-hidden rounded-lg border p-4">
+              <aside className="border-border h-[calc(100vh-16rem)] space-y-4 overflow-y-auto rounded-lg border p-4">
                 <h2 className="text-sm font-semibold tracking-wide uppercase">
                   Modifica slide {selected.index + 1}
                 </h2>
                 <SlideEditor courseId={id} slide={selected} />
                 {/* F4+F6 Tabs Quality/Chat (vast-hopping post-MVP 2026-05-31) */}
-                <Tabs defaultValue="quality" className="flex min-h-0 flex-1 flex-col">
+                <Tabs defaultValue="quality">
                   <TabsList className="grid w-full grid-cols-2">
                     <TabsTrigger value="quality" className="gap-1.5 text-xs">
                       <ShieldCheck className="size-3.5" />
@@ -291,7 +291,7 @@ export function CourseStudio() {
                       Chat AI
                     </TabsTrigger>
                   </TabsList>
-                  <TabsContent value="quality" className="mt-3 flex-1 overflow-y-auto">
+                  <TabsContent value="quality" className="mt-3">
                     <QualityIssuesPanel
                       courseId={id}
                       slideIndex={selected.index}
@@ -299,7 +299,10 @@ export function CourseStudio() {
                       slideType={selected.slide_type}
                     />
                   </TabsContent>
-                  <TabsContent value="chat" className="mt-3 flex min-h-0 flex-1 flex-col">
+                  <TabsContent
+                    value="chat"
+                    className="mt-3 flex h-[480px] flex-col"
+                  >
                     <ChatPanel courseId={id} slideIndex={selected.index} />
                   </TabsContent>
                 </Tabs>
