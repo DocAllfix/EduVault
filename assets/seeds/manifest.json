@@ -1,0 +1,66 @@
+[
+  {
+    "file_path": "assets/seeds/iso7010/E001_emergency_exit.png",
+    "tags": ["segnaletica", "iso7010", "uscita_emergenza", "salvataggio", "verde"],
+    "source": "iso7010",
+    "license": "Public Domain",
+    "attribution": "ISO 7010:2020 (placeholder E001)",
+    "source_url": "https://www.iso.org/standard/72424.html"
+  },
+  {
+    "file_path": "assets/seeds/iso7010/E003_first_aid.png",
+    "tags": ["segnaletica", "iso7010", "primo_soccorso", "salvataggio", "verde"],
+    "source": "iso7010",
+    "license": "Public Domain",
+    "attribution": "ISO 7010:2020 (placeholder E003)",
+    "source_url": "https://www.iso.org/standard/72424.html"
+  },
+  {
+    "file_path": "assets/seeds/iso7010/F001_extinguisher.png",
+    "tags": ["segnaletica", "iso7010", "estintore", "antincendio", "rosso"],
+    "source": "iso7010",
+    "license": "Public Domain",
+    "attribution": "ISO 7010:2020 (placeholder F001)",
+    "source_url": "https://www.iso.org/standard/72424.html"
+  },
+  {
+    "file_path": "assets/seeds/iso7010/F002_fire_hose.png",
+    "tags": ["segnaletica", "iso7010", "idrante", "antincendio", "rosso"],
+    "source": "iso7010",
+    "license": "Public Domain",
+    "attribution": "ISO 7010:2020 (placeholder F002)",
+    "source_url": "https://www.iso.org/standard/72424.html"
+  },
+  {
+    "file_path": "assets/seeds/iso7010/M001_general_obligation.png",
+    "tags": ["segnaletica", "iso7010", "obbligo", "blu"],
+    "source": "iso7010",
+    "license": "Public Domain",
+    "attribution": "ISO 7010:2020 (placeholder M001)",
+    "source_url": "https://www.iso.org/standard/72424.html"
+  },
+  {
+    "file_path": "assets/seeds/iso7010/M004_helmet.png",
+    "tags": ["segnaletica", "iso7010", "casco", "dpi", "obbligo", "blu"],
+    "source": "iso7010",
+    "license": "Public Domain",
+    "attribution": "ISO 7010:2020 (placeholder M004)",
+    "source_url": "https://www.iso.org/standard/72424.html"
+  },
+  {
+    "file_path": "assets/seeds/iso7010/W001_general_warning.png",
+    "tags": ["segnaletica", "iso7010", "pericolo", "avvertimento", "giallo"],
+    "source": "iso7010",
+    "license": "Public Domain",
+    "attribution": "ISO 7010:2020 (placeholder W001)",
+    "source_url": "https://www.iso.org/standard/72424.html"
+  },
+  {
+    "file_path": "assets/seeds/iso7010/P002_no_smoking.png",
+    "tags": ["segnaletica", "iso7010", "divieto", "fumo", "rosso"],
+    "source": "iso7010",
+    "license": "Public Domain",
+    "attribution": "ISO 7010:2020 (placeholder P002)",
+    "source_url": "https://www.iso.org/standard/72424.html"
+  }
+]

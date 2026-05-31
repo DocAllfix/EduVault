@@ -78,6 +78,25 @@ async def startup() -> None:
     # voyageai has no py.typed; the construct works at runtime.
     set_voyage_client(voyageai.AsyncClient(api_key=settings.voyage_api_key))  # type: ignore[attr-defined]
 
+    # Migration auto-runner (E2E 2026-05-31 avvertenza #5): applica
+    # migrations pending in app/db/migrations/ idempotente. Risolve il
+    # problema deploy-time visto su mig 011/012 (provider column missing).
+    try:
+        from app.services.migration_runner import run_pending_migrations
+
+        mig_summary = await run_pending_migrations(pool)
+        logger.info(
+            "migrations_runner_done",
+            applied=len(mig_summary["applied"]),
+            errors=len(mig_summary["errors"]),
+        )
+    except Exception as exc:
+        logger.warning(
+            "migrations_runner_failed_startup",
+            error_class=type(exc).__name__,
+            error_msg=str(exc)[:200],
+        )
+
     # Lazy import: generation_service is still unwritten in PHASE 0.
     # Once PHASE 5 lands the module, this resolves at startup time.
     from app.services.generation_service import recover_interrupted_jobs
