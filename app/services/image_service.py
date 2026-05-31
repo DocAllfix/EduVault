@@ -380,9 +380,55 @@ async def _resolve_query_urls(slides: list[SlideContent]) -> None:
     # "stessa foto DPI 8 volte su 100 CONTENT_IMAGE" vista in E2E #18.
     seen_urls: dict[str, int] = {}
 
+    # F5.2 (vast-hopping 2026-05-31): tier-0 library lookup PRIMA del web search.
+    # Se la query matcha un asset in image_library con score >= 0.30
+    # (cosine_multimodal_voyage o tag GIN fallback), usiamo quello. Pexels et
+    # al. restano come tier-2 cascade per query non coperte dal seed.
+    # VAA-b provenance: la URL library punta a file_path locale, attribution
+    # tracciata in DB (UI license chip).
+    from app.services.dependencies import get_pool as _get_pool
+
+    try:
+        _pool = _get_pool()
+    except Exception:
+        _pool = None  # pool non inizializzato (test offline) → skip tier-0
+
+    async def _try_library(query: str) -> tuple[str, str] | None:
+        """Returns (url, image_id) per usage_count tracking."""
+        if _pool is None:
+            return None
+        try:
+            from app.services.image_library_service import search as library_search
+
+            hits = await library_search(query, _pool, k=1)
+            if hits and hits[0].score >= 0.30:
+                # file_path e' un path relativo al repo; lo serviamo via /assets/seeds/ static
+                # mount oppure file:// fallback. Per ora ritorniamo file_path tale e quale:
+                # il caller decide come servirlo (vedi prefetch flow).
+                return hits[0].file_path, hits[0].id
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("library_tier0_skip", error=str(exc))
+        return None
+
     async def _one(s: SlideContent) -> None:
+        q = s.image.query or ""
+        # Tier 0: library locale (multimodal + tag fallback)
+        lib = await _try_library(q)
+        if lib is not None:
+            url, image_id = lib
+            object.__setattr__(s.image, "query_url", url)
+            # Best-effort usage_count++ (fire-and-forget, non blocca pipeline)
+            try:
+                if _pool is not None:
+                    from app.services.image_library_service import increment_usage
+
+                    await increment_usage(_pool, image_id)
+            except Exception:
+                pass
+            return
+        # Tier 1+: cascata web esistente (Pexels → Pixabay → Openverse → Wikimedia)
         url = await search_image(
-            s.image.query or "",
+            q,
             orientation=s.image.aspect_hint,
             seen_urls=seen_urls,
         )

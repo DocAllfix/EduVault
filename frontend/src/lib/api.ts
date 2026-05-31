@@ -623,6 +623,32 @@ async function searchSlideImages(
   )
 }
 
+// F5.2 — Library tab (vast-hopping post-MVP 2026-05-31)
+export interface LibraryHit {
+  id: string
+  file_path: string
+  tags: string[]
+  source: string
+  license: string | null
+  attribution: string | null
+  source_url: string | null
+  width: number | null
+  height: number | null
+  usage_count: number
+  score: number
+}
+
+async function searchImageLibrary(
+  id: string,
+  q: string,
+  k: number = 8,
+): Promise<{ hits: LibraryHit[]; query: string }> {
+  return request<{ hits: LibraryHit[]; query: string }>(
+    `/api/courses/${encodeURIComponent(id)}/image/library/search`,
+    { query: { q, k } },
+  )
+}
+
 /** URL diretto del singolo MP3 di una slide (per <audio src>). */
 function slideAudioUrl(id: string, idx: number): string {
   return buildUrl(`/api/courses/${encodeURIComponent(id)}/audio/${idx}`)
@@ -958,6 +984,7 @@ export const api = {
   patchCourseSlide,
   patchSlideImage,
   searchSlideImages,
+  searchImageLibrary,
   slideAudioUrl,
   slidePreviewUrl,
   regenerateSlide,

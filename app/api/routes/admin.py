@@ -432,3 +432,53 @@ async def admin_bulk_approve_catalog(
         pool, body.slugs, approver_user_id=str(user["id"])
     )
     return {"approved_count": n}
+
+
+# ─────────────── F5.2 — Image library admin audit ───────────────
+
+
+class ImageLibraryEntry(BaseModel):
+    """Single image_library row for admin table."""
+
+    id: str
+    file_path: str
+    tags: list[str]
+    source: str
+    license: str | None = None
+    attribution: str | None = None
+    source_url: str | None = None
+    width: int | None = None
+    height: int | None = None
+    bytes: int | None = None
+    usage_count: int
+    created_at: str | None = None
+    updated_at: str | None = None
+
+
+class ImageLibraryListResponse(BaseModel):
+    entries: list[ImageLibraryEntry]
+    total: int
+    page: int
+    per_page: int
+
+
+@router.get("/api/admin/images/library", response_model=ImageLibraryListResponse)
+async def admin_list_image_library(
+    page: int = Query(1, ge=1),
+    per_page: int = Query(50, ge=1, le=200),
+    source: str | None = Query(None),
+    user: dict[str, Any] = Depends(require_role("admin")),
+) -> ImageLibraryListResponse:
+    """Lista paginata image_library + filtro source per UI admin audit (F5.2)."""
+    from app.services.image_library_service import list_admin
+
+    pool = get_pool()
+    entries, total = await list_admin(
+        pool, page=page, per_page=per_page, source_filter=source
+    )
+    return ImageLibraryListResponse(
+        entries=[ImageLibraryEntry(**e) for e in entries],
+        total=total,
+        page=page,
+        per_page=per_page,
+    )

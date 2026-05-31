@@ -899,6 +899,61 @@ async def search_slide_images(
     return ImageSearchResult(candidates=[url] if url else [])
 
 
+# ─────────────── F5.2 — Image library semantic search (tier 1 cascade) ───────────────
+
+
+class LibraryHitDTO(BaseModel):
+    """LibraryHit per UI Library tab. Mirror di
+    app.services.image_library_service.LibraryHit."""
+
+    id: str
+    file_path: str
+    tags: list[str]
+    source: str
+    license: str | None = None
+    attribution: str | None = None
+    source_url: str | None = None
+    width: int | None = None
+    height: int | None = None
+    usage_count: int
+    score: float
+
+
+class LibrarySearchResponse(BaseModel):
+    hits: list[LibraryHitDTO]
+    query: str
+
+
+@router.get(
+    "/{course_id}/image/library/search",
+    response_model=LibrarySearchResponse,
+)
+@limiter.limit("60/minute")
+async def search_image_library(
+    request: Request,
+    course_id: str,
+    q: str = Query(..., min_length=2),
+    k: int = Query(8, ge=1, le=24),
+    user: dict[str, Any] = Depends(require_role("admin", "reviewer")),
+) -> LibrarySearchResponse:
+    """F5.2 — Semantic search su image_library locale.
+
+    Riusa ``image_library_service.search`` (voyage-multimodal-3 cosine + GIN
+    tag fallback). Rate 60/min (search-side, ben sopra 30/min Pexels). Ritorna
+    fino a 24 hit con license/attribution per chip UI.
+    """
+    from app.services.image_library_service import search as library_search
+
+    pool = get_pool()
+    course = await _load_course_or_404(course_id, pool)
+    _enforce_ownership(course, user)
+    hits = await library_search(q, pool, k=k)
+    return LibrarySearchResponse(
+        hits=[LibraryHitDTO(**hit.model_dump()) for hit in hits],
+        query=q,
+    )
+
+
 # ─────────────── FASE 11 — Regenerate + Rebuild ───────────────
 
 
