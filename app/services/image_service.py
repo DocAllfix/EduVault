@@ -125,12 +125,51 @@ async def _download_one_image(
             )
             return (pos, cached["local_path"])
 
+        # FIX 2026-05-31: tier-0 library hit ritorna file_path RELATIVO al
+        # repo (es. "assets/seeds/demos/preposti/foo.png"), NON un URL HTTP.
+        # _resolve_query_urls setta query_url = file_path. Per usarla devo
+        # leggere il file da disco invece di httpx.get (che fallisce con
+        # "InvalidURL" / "ConnectError" → branded fallback su 152/166 PPTX).
+        assert slide.image.query_url is not None  # guarded by prefetch_images
+        qu = slide.image.query_url
+        if not qu.startswith(("http://", "https://")):
+            # Library hit local path
+            from pathlib import Path
+            local_src = Path(qu)
+            if not local_src.is_absolute():
+                # Path relativo al repo root: image_service vive in
+                # app/services/, repo root e' 2 livelli sopra.
+                local_src = Path(__file__).parent.parent.parent / qu
+            if local_src.exists():
+                try:
+                    img = Image.open(local_src)
+                    img.load()
+                    os.makedirs(IMAGES_DIR, exist_ok=True)
+                    local_path = f"{IMAGES_DIR}/{uuid.uuid4()}.png"
+                    img.convert("RGB").save(local_path, "PNG")
+                    return (pos, local_path)
+                except Exception as exc:
+                    logger.warning(
+                        "library_local_load_failed",
+                        slide=slide.index,
+                        path=str(local_src),
+                        error=str(exc),
+                    )
+                    # Fallthrough a branded fallback (return None)
+                    return (pos, None)
+            else:
+                logger.warning(
+                    "library_local_missing",
+                    slide=slide.index,
+                    path=str(local_src),
+                )
+                return (pos, None)
+
         # FIX #31 MOSSA 1 (2026-05-27): 1 try + 1 retry con jitter cattura
         # il glitch di rete transitorio (l'UNICO caso dove ritentare porta
         # informazione nuova: la rete cambia tra t0 e t0+jitter). Su 2
         # failure consecutivi → branded fallback. Niente backfill waves
         # a fine pipeline (sleep 20s × N tentativi cieco eliminato).
-        assert slide.image.query_url is not None  # guarded by prefetch_images
         for attempt in range(2):  # 1 try + 1 retry, max 2 chiamate
             try:
                 resp = await client.get(slide.image.query_url)

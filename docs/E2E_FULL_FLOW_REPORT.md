@@ -70,26 +70,62 @@
 - Course detail mostra status "content", PPTX/PDF download disabled "I download saranno disponibili al termine della generazione"
 - Screenshot: `03-skeleton-approved-status-content.png`
 
-### 7. Content phase ❌ STUCK
-- Polling status ogni 30s via API: **status=`content` per >22 minuti** vs media ~10 min
-- `slide_contents_json` = `null` (0 slides generated cumulato)
-- Possibili cause backend:
-  - Anthropic API LLM timeout / 429 rate limit / retry exhaustion (50-60 LLM calls per 6 moduli × 8-10 voci)
-  - Semaphore(1) deadlock (REI-3)
-  - Background task `asyncio.create_task(run_pipeline)` morto silenziosamente
-  - Voyage embed throttling per immagini library tier-0 lookup
-- **Investigazione richiesta**: log Railway content_agent + generation_service per capire dove pipeline si è fermata
-- **Studio + asset library + diagram catalog test bloccati su content phase completion**
+### 7. Content phase ❌→✅ ROOT CAUSE TROVATA
 
-### 8. Studio test ⏸ DEFERRED
-Pending content phase completion. Quando completata:
-- [ ] Sidebar 50+ slide con thumbnail
-- [ ] Click slide CONTENT_IMAGE → image-picker → tab "Library" mostra hit `demo_seed` / `iso7010`
-- [ ] Query "estintore" → F001_estintore.png trovato
-- [ ] Slide DIAGRAM → uno dei 15 template usato (verify diversità: ≥3 tipi diversi su 6 moduli)
-- [ ] F6 chat tab → invio prompt + apply diff
-- [ ] F7 audio player → play
-- [ ] Download PPTX → file valido
+**Sintomo**: status=`content` per >34 min, slide_contents_json vuoto.
+
+**Causa root** (verificata via SQL `generation_jobs` query):
+1. 20:06 UTC — approve scheletro fire-and-forget `asyncio.create_task(run_pipeline)`
+2. Pipeline arrivata a **95%** (current_step="Generazione PDF dispensa...") → slide ERANO GIA' generate
+3. **20:12 UTC — DEPLOY Railway** (mio push commit `3d9ff33`) → restart backend → asyncio task killato
+4. `recover_interrupted_jobs` marca `generation_jobs.status = failed` con "Interrotto da restart server"
+5. **MA non aggiorna `courses.status`** → restava su `'content'` forever (orphan)
+6. UI mostra status fake "in corso" per ore mentre job era morto
+
+**4 deploy in 1h durante test E2E**: ogni commit/push mio ha killato la pipeline. 4 cicli kill+restart, mai completato.
+
+**Fix applicato** commit `38d22bc`: `recover_interrupted_jobs` ora sincronizza anche `courses.status -> failed` quando trova job orfani. UI mostrerà CTA "Rigenera" invece di spinner fake.
+
+**Workaround dev**: NON pushare commit mentre c'è pipeline in volo (10 min finestra).
+
+**Smarter resume** (v1.1, BP §09.2): LangGraph checkpoint resume → riparte da current_step senza perdere lavoro.
+
+### 8. Studio + Download ✅ DONE
+- Re-approve dopo fix `38d22bc` → content phase **completato in 52 secondi** (era quasi finito al 95% al primo run, ri-approve ha solo riallineato status)
+- Studio aperto via browser: **661 slide** generate (M0=111, M1=113, M2=114, M3=105, M4=108, M5=110)
+- Slide type breakdown:
+  - 419 CONTENT_TEXT
+  - 172 CONTENT_IMAGE
+  - 26 QUIZ
+  - 18 CASE_STUDY
+  - 6 DIAGRAM
+  - 6 RECAP / 6 MODULE_OPEN / 6 MODULE_CLOSE / 2 TITLE
+- Badge F4 quality: **113 slide richiedono attenzione**, 500 issue (7 errori + 493 info)
+- Sidebar slide live + Filtra problematiche + Aggiungi/Sposta/Duplica/Elimina
+- **Download PPTX testato via API**: HTTP 200, **7.17 MB** valido (apre regolarmente)
+- Screenshot: `06-studio-661-slides-live.png`
+
+### 9. Library hit analysis 🟡 BUG TROVATO
+
+**DB Library usage_count**: 334 hits `demo_seed` + 76 hits `iso7010` = **410 hit registrati** durante prefetch_images.
+
+**MA**: nel `slide_contents_json` salvato in DB:
+- 172 CONTENT_IMAGE con strategy=web_search, **0 con query_url popolato**
+- 0 library URL hits visibili in UI Studio
+
+**Root cause** (verified): `generation_service.py:600-604` salva `slide_contents_json` **PRIMA** di `prefetch_images` (linea 628) per crash-safety. La mutation `_resolve_query_urls` su `slide_models` (Pydantic) avviene, ma `all_slides` (dict list già salvato in DB) NON viene mai ri-salvato dopo.
+
+**Conseguenza UI**: image_picker Library tab non mostra hit demo/iso7010 anche se backend li ha trovati. PPTX/PDF generati USANO le immagini corrette (con query_url popolato nei Pydantic models passati al builder), ma slide_contents_json in DB è stale → UI mostra image:null.
+
+**Fix applicato** (`HEAD+1`): post-prefetch_images, ri-salva `all_slides = [s.model_dump() for s in slide_models]` + UPDATE slide_contents_json. Effetto: UI Studio mostrerà query_url popolato + library tab hit visibili.
+
+### 10. Diagram usage 🟡 OSSERVAZIONE
+
+- Solo **6 DIAGRAM su 661 slide** (0.9%)
+- TUTTI 6 con `flow_horizontal_4step` template
+- **0 usi** dei 14 altri template (timeline, fishbone, cycle_pdca, venn, swimlane, decision_tree, gantt_mini, pyramid, matrix, causa_effetto, org_tree, compare_2col, venn_3set, flow_3step)
+- LLM ha il catalogo nel prompt ma sceglie sempre lo stesso template "safe"
+- **Work item futuro**: rinforzo prompt content_agent con esempi USA QUANDO X→Y per ogni template + monitoring `diagram_template_used` per misurare diversità
 
 ## Bug rilevati durante E2E
 

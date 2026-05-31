@@ -627,6 +627,19 @@ async def _run_pipeline_inner(
     slide_models = [SlideContent(**s) for s in all_slides]
     image_map = await prefetch_images(slide_models, db)
 
+    # FIX 2026-05-31: prefetch_images muta slide_models[i].image.query_url
+    # (tier-0 library hit / tier-1 web URL). all_slides salvato a riga 600 ha
+    # query_url=null per TUTTE le slide perche' il save e' PRIMA del prefetch
+    # (necessario per crash-safety: se prefetch crash, le slide sono almeno
+    # salvate). Risincronizziamo all_slides DOPO prefetch cosi' l'UI Studio
+    # mostra image.url popolato + image_picker Library tab puo' detect hit.
+    all_slides = [s.model_dump() for s in slide_models]
+    await db.execute(
+        "UPDATE courses SET slide_contents_json = $1 WHERE id = $2",
+        json.dumps(all_slides),
+        course_id,
+    )
+
     # ═══ PRODUCTION BUILD (PPTX + PDF — audio spostato in background, FIX #31 MOSSA 3) ═══
     builder = ProductionBuilder(brand_config=brand)
     pptx_path, pdf_path, _report = await builder.build(
