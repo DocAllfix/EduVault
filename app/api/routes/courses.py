@@ -421,6 +421,143 @@ async def approve_skeleton(
     return SkeletonApproveResponse(status="content", job_id=str(job_id))
 
 
+# ─────────────── F3.AI — LLM micro-actions on skeleton (richiesta cliente 2026-05-31) ───────────────
+
+
+class SkeletonAIEditVoiceBody(BaseModel):
+    """Body per /skeleton/ai-edit-voice — micro-azione LLM su 1 sotto-tema.
+
+    action:
+      - rephrase_subtopic: riformula sub_topic + retrieval_query mantenendo significato
+      - make_operational: trasforma il sotto-tema da teorico ad operativo/pratico
+      - suggest_alternatives: ritorna 3 alternative distinte (taglio diverso)
+    """
+
+    action: str  # "rephrase_subtopic" | "make_operational" | "suggest_alternatives"
+    module_index: int
+    voice_ordinal: int
+
+
+class SkeletonAIEditModuleBody(BaseModel):
+    """Body per /skeleton/ai-edit-module — free-text edit di un intero modulo."""
+
+    module_index: int
+    user_instruction: str
+
+
+@router.post("/{course_id}/skeleton/ai-edit-voice")
+@limiter.limit("20/minute")
+async def ai_edit_skeleton_voice(
+    request: Request,
+    course_id: str,
+    body: SkeletonAIEditVoiceBody,
+    user: dict[str, Any] = Depends(require_role("admin", "reviewer")),
+) -> dict[str, Any]:
+    """Apply an LLM micro-action to a single sub-topic. Returns proposal(s).
+
+    Pure proposal — no DB mutation. Caller applies via PUT /skeleton if accepted.
+    """
+    from app.services.skeleton_ai_edit_service import ai_edit_voice
+    from config.catalog_config import COURSE_CATALOG
+
+    if body.action not in ("rephrase_subtopic", "make_operational", "suggest_alternatives"):
+        raise HTTPException(400, f"Azione non valida: {body.action}")
+
+    pool = get_pool()
+    course = await _load_course_or_404(course_id, pool)
+    _enforce_ownership(course, user)
+    if course.get("status") != "skeleton_pending":
+        raise HTTPException(409, "Il corso non è in attesa di approvazione struttura")
+    raw = course.get("module_skeletons_json")
+    if raw is None:
+        raise HTTPException(409, "Nessuna struttura disponibile")
+
+    # raw è dict {"version", "modules": [...]}
+    modules_list = raw.get("modules", []) if isinstance(raw, dict) else []
+    target_module = next(
+        (m for m in modules_list if m.get("module_index") == body.module_index),
+        None,
+    )
+    if target_module is None:
+        raise HTTPException(404, f"Modulo {body.module_index} non trovato nella struttura")
+    target_item_raw = next(
+        (it for it in target_module.get("items", []) if it.get("ordinal") == body.voice_ordinal),
+        None,
+    )
+    if target_item_raw is None:
+        raise HTTPException(
+            404, f"Sotto-tema {body.voice_ordinal} non trovato nel modulo {body.module_index}"
+        )
+    target_item = ModuleSkeleton(**target_module).items[body.voice_ordinal - 1]
+
+    catalog_entry = COURSE_CATALOG.get(course["course_type"], {})
+    course_title_human = str(catalog_entry.get("title") or course["title"])
+
+    result = await ai_edit_voice(
+        action=body.action,  # type: ignore[arg-type]
+        current_item=target_item,
+        module_title=str(target_module.get("title", "")),
+        course_title=course_title_human,
+        course_id=course_id,
+    )
+    return result
+
+
+@router.post("/{course_id}/skeleton/ai-edit-module")
+@limiter.limit("10/minute")
+async def ai_edit_skeleton_module(
+    request: Request,
+    course_id: str,
+    body: SkeletonAIEditModuleBody,
+    user: dict[str, Any] = Depends(require_role("admin", "reviewer")),
+) -> dict[str, Any]:
+    """Apply a free-text user instruction to an entire module. Returns patch.items.
+
+    Pure proposal — no DB mutation. Caller applies via PUT /skeleton if accepted.
+    """
+    from app.services.skeleton_ai_edit_service import ai_edit_module
+    from config.catalog_config import COURSE_CATALOG
+
+    instr = (body.user_instruction or "").strip()
+    if len(instr) < 5:
+        raise HTTPException(400, "Istruzione troppo corta (min 5 caratteri)")
+    if len(instr) > 1000:
+        raise HTTPException(400, "Istruzione troppo lunga (max 1000 caratteri)")
+
+    pool = get_pool()
+    course = await _load_course_or_404(course_id, pool)
+    _enforce_ownership(course, user)
+    if course.get("status") != "skeleton_pending":
+        raise HTTPException(409, "Il corso non è in attesa di approvazione struttura")
+    raw = course.get("module_skeletons_json")
+    if raw is None:
+        raise HTTPException(409, "Nessuna struttura disponibile")
+
+    modules_list = raw.get("modules", []) if isinstance(raw, dict) else []
+    target_module = next(
+        (m for m in modules_list if m.get("module_index") == body.module_index),
+        None,
+    )
+    if target_module is None:
+        raise HTTPException(404, f"Modulo {body.module_index} non trovato nella struttura")
+
+    current_sk = ModuleSkeleton(**target_module)
+    sibling_titles = [
+        str(m.get("title", "")) for m in modules_list if m.get("module_index") != body.module_index
+    ]
+    catalog_entry = COURSE_CATALOG.get(course["course_type"], {})
+    course_title_human = str(catalog_entry.get("title") or course["title"])
+
+    result = await ai_edit_module(
+        current_skeleton=current_sk,
+        user_instruction=instr,
+        course_title=course_title_human,
+        sibling_module_titles=sibling_titles,
+        course_id=course_id,
+    )
+    return result
+
+
 # ─────────────── GET /api/courses/{id}/download/{format} ───────────────
 
 

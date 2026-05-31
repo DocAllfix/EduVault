@@ -544,6 +544,52 @@ async function approveCourseSkeleton(
   )
 }
 
+// ─── F3.AI — LLM micro-actions sulla struttura (2026-05-31) ───
+// Risposte tipizzate: pulsanti per-voce ritornano {proposal} oppure
+// {alternatives:[3]}; il free-edit per-modulo ritorna {patch:{items:[6-10]}}.
+
+export interface SubtopicProposal {
+  sub_topic: string
+  retrieval_query: string
+}
+
+export type SkeletonAIVoiceAction =
+  | 'rephrase_subtopic'
+  | 'make_operational'
+  | 'suggest_alternatives'
+
+export type SkeletonAIVoiceResponse =
+  | { proposal: SubtopicProposal }
+  | { alternatives: SubtopicProposal[] }
+
+export interface SkeletonAIModuleResponse {
+  patch: { items: SkeletonItem[] }
+}
+
+async function aiEditSkeletonVoice(
+  id: string,
+  body: {
+    action: SkeletonAIVoiceAction
+    module_index: number
+    voice_ordinal: number
+  },
+): Promise<SkeletonAIVoiceResponse> {
+  return request<SkeletonAIVoiceResponse>(
+    `/api/courses/${encodeURIComponent(id)}/skeleton/ai-edit-voice`,
+    { method: 'POST', json: body },
+  )
+}
+
+async function aiEditSkeletonModule(
+  id: string,
+  body: { module_index: number; user_instruction: string },
+): Promise<SkeletonAIModuleResponse> {
+  return request<SkeletonAIModuleResponse>(
+    `/api/courses/${encodeURIComponent(id)}/skeleton/ai-edit-module`,
+    { method: 'POST', json: body },
+  )
+}
+
 async function patchCourseSlide(
   id: string,
   idx: number,
@@ -812,6 +858,9 @@ export const api = {
   getCourseSkeleton,
   updateCourseSkeleton,
   approveCourseSkeleton,
+  // F3.AI micro-actions LLM sulla struttura
+  aiEditSkeletonVoice,
+  aiEditSkeletonModule,
   // Regulations
   uploadRegulation,
   getRegulations,

@@ -17,8 +17,15 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowDown, ArrowUp, Check, Loader2, Plus, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 
-import { api, ApiError, type ModuleSkeleton } from '@/lib/api'
+import {
+  api,
+  ApiError,
+  type ModuleSkeleton,
+  type SkeletonItem,
+  type SubtopicProposal,
+} from '@/lib/api'
 import { Button } from '@/components/ui/button'
+import { VoiceAiActions, ModuleAiPrompt } from './skeleton-ai-edit'
 import {
   Card,
   CardContent,
@@ -139,6 +146,35 @@ export function SkeletonReview({ courseId, onApproved }: Props) {
     patchModules(modules!.map((mm, idx) => (idx === mi ? { ...mm, items } : mm)))
   }
 
+  // F3.AI — applica proposal LLM su 1 voce (rephrase / operational / alternative)
+  function applyVoiceProposal(mi: number, ii: number, proposal: SubtopicProposal) {
+    const next = modules!.map((m, j) =>
+      j === mi
+        ? {
+            ...m,
+            items: m.items.map((it, k) =>
+              k === ii
+                ? {
+                    ...it,
+                    sub_topic: proposal.sub_topic,
+                    retrieval_query: proposal.retrieval_query,
+                  }
+                : it,
+            ),
+          }
+        : m,
+    )
+    patchModules(next)
+  }
+
+  // F3.AI — applica patch LLM su 1 intero modulo (sostituisce items, rinumera)
+  function applyModulePatch(mi: number, newItems: SkeletonItem[]) {
+    const renum = newItems.map((it, k) => ({ ...it, ordinal: k + 1 }))
+    patchModules(
+      modules!.map((mm, idx) => (idx === mi ? { ...mm, items: renum } : mm)),
+    )
+  }
+
   function removeItem(mi: number, ii: number) {
     const m = modules![mi]
     if (m.items.length <= MIN_ITEMS) {
@@ -156,10 +192,10 @@ export function SkeletonReview({ courseId, onApproved }: Props) {
     <div className='mx-auto max-w-4xl space-y-6 p-6'>
       <div className='flex items-start justify-between gap-4'>
         <div>
-          <h2 className='text-2xl font-semibold'>Revisione scheletro narrativo</h2>
+          <h2 className='text-2xl font-semibold'>Revisione struttura del corso</h2>
           <p className='text-muted-foreground text-sm'>
             {modules.length} moduli · {totalSubtopics} sotto-temi proposti.
-            Lo scheletro è una bozza generata dall'AI: rivedila, correggi, riordina,
+            La struttura è una bozza generata dall'AI: rivedila, correggi, riordina,
             poi approva. Le slide vengono generate solo dopo l'approvazione.
           </p>
         </div>
@@ -183,7 +219,7 @@ export function SkeletonReview({ courseId, onApproved }: Props) {
             ) : (
               <Check aria-hidden='true' />
             )}
-            Approva scheletro
+            Approva struttura
           </Button>
         </div>
       </div>
@@ -218,6 +254,12 @@ export function SkeletonReview({ courseId, onApproved }: Props) {
                     rows={2}
                     className='text-muted-foreground text-xs'
                     aria-label='Query di recupero'
+                  />
+                  <VoiceAiActions
+                    courseId={courseId}
+                    moduleIndex={m.module_index}
+                    item={it}
+                    onApply={(proposal) => applyVoiceProposal(mi, ii, proposal)}
                   />
                 </div>
                 <div className='flex shrink-0 flex-col gap-1'>
@@ -259,6 +301,12 @@ export function SkeletonReview({ courseId, onApproved }: Props) {
               <Plus className='size-4' aria-hidden='true' />
               Aggiungi sotto-tema
             </Button>
+            <ModuleAiPrompt
+              courseId={courseId}
+              moduleIndex={m.module_index}
+              moduleTitle={m.title}
+              onApplyModule={(newItems) => applyModulePatch(mi, newItems)}
+            />
           </CardContent>
         </Card>
       ))}
