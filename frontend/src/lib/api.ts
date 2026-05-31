@@ -668,6 +668,39 @@ async function getQualityIssues(courseId: string): Promise<QualityIssuesResponse
   )
 }
 
+// F9 Regulation→Courses Discovery types (analista sign-off 2026-05-31)
+export type CompatibleCoverage = 'generabile' | 'corpus_thin' | 'no_coverage'
+
+export interface CompatibleCourse {
+  slug: string
+  title: string
+  hours: number
+  regulation_slugs: string[]
+  overall_coverage: CompatibleCoverage
+  chunks_per_regulation: Record<string, number>
+  missing_regulations: string[]
+}
+
+export interface CompatibleCoursesResponse {
+  regulation_slug: string
+  n_courses_compatible: number
+  courses: CompatibleCourse[]
+  note?: string
+}
+
+/**
+ * F9: ritorna i course_type del catalog che usano questa regulation,
+ * con coverage score per badge UI (generabile/corpus_thin/no_coverage).
+ * Pensato per workflow "carica normativa → vedi quali corsi posso generare".
+ */
+async function getCompatibleCourses(
+  regulationSlug: string,
+): Promise<CompatibleCoursesResponse> {
+  return request<CompatibleCoursesResponse>(
+    `/api/regulations/${encodeURIComponent(regulationSlug)}/compatible-courses`,
+  )
+}
+
 async function rebuildCourse(
   id: string,
 ): Promise<{ status: string; course_id: string }> {
@@ -769,6 +802,7 @@ export const api = {
   regenerateSlide,
   regenerateSlideH8,
   getQualityIssues,
+  getCompatibleCourses,
   rebuildCourse,
   addSlide,
   moveSlide,

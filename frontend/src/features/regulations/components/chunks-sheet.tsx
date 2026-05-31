@@ -9,7 +9,16 @@
 
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { ArrowLeft, ArrowRight, BookOpen, ChevronDown, ChevronRight } from 'lucide-react'
+import { useNavigate } from '@tanstack/react-router'
+import {
+  ArrowLeft,
+  ArrowRight,
+  BookOpen,
+  ChevronDown,
+  ChevronRight,
+  Sparkles,
+  Wand2,
+} from 'lucide-react'
 
 import { api, type RegulationSummary } from '@/lib/api'
 import { Badge } from '@/components/ui/badge'
@@ -22,6 +31,7 @@ import {
   SheetTitle,
 } from '@/components/ui/sheet'
 import { Skeleton } from '@/components/ui/skeleton'
+import { cn } from '@/lib/utils'
 
 type ChunksSheetProps = {
   regulation: RegulationSummary | null
@@ -33,6 +43,10 @@ const PAGE_SIZE = 25
 export function ChunksSheet({ regulation, onOpenChange }: ChunksSheetProps) {
   const [page, setPage] = useState(1)
   const [linkedOpen, setLinkedOpen] = useState(true)
+  // F9: collapsible per discovery compatible-courses (config+coverage based).
+  // Default aperto: e' la feature richiesta esplicita cliente 2026-05-31.
+  const [compatibleOpen, setCompatibleOpen] = useState(true)
+  const navigate = useNavigate()
   const open = regulation !== null
 
   const chunksQ = useQuery({
@@ -48,6 +62,14 @@ export function ChunksSheet({ regulation, onOpenChange }: ChunksSheetProps) {
     queryFn: () =>
       api.getLinkedCourses(regulation?.slug ?? regulation!.id),
     enabled: open && !!regulation,
+  })
+
+  // F9 (analista 2026-05-31): lookup config-based + coverage chunks reale.
+  // Solo se la regulation ha slug (config-based key); skip se solo UUID.
+  const compatibleQ = useQuery({
+    queryKey: ['compatible-courses', regulation?.slug] as const,
+    queryFn: () => api.getCompatibleCourses(regulation!.slug!),
+    enabled: open && !!regulation?.slug,
   })
 
   const isLast = (chunksQ.data?.length ?? 0) < PAGE_SIZE
@@ -142,6 +164,116 @@ export function ChunksSheet({ regulation, onOpenChange }: ChunksSheetProps) {
                       </Badge>
                     </div>
                   ))
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* F9 (analista 2026-05-31, richiesta cliente): "Carico normativa →
+              vedo quali corsi posso generare". Lookup config-based + coverage
+              chunks reale dal DB per badge generabile / corpus_thin / no_coverage. */}
+          <div className='rounded-md border'>
+            <button
+              type='button'
+              onClick={() => setCompatibleOpen((o) => !o)}
+              className='hover:bg-muted/50 flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm transition-colors'
+              aria-expanded={compatibleOpen}
+            >
+              {compatibleOpen ? (
+                <ChevronDown className='size-4' aria-hidden='true' />
+              ) : (
+                <ChevronRight className='size-4' aria-hidden='true' />
+              )}
+              <Sparkles className='text-brand-primary size-4' aria-hidden='true' />
+              <span className='font-medium'>Corsi generabili da questa normativa</span>
+              <Badge variant='secondary' className='ms-auto'>
+                {compatibleQ.isLoading
+                  ? '…'
+                  : (compatibleQ.data?.n_courses_compatible ?? 0)}
+              </Badge>
+            </button>
+
+            {compatibleOpen && (
+              <div className='space-y-1.5 border-t px-3 py-2'>
+                {compatibleQ.isLoading ? (
+                  <Skeleton className='h-12 w-full' />
+                ) : compatibleQ.isError ? (
+                  <p className='text-destructive text-xs'>
+                    Impossibile caricare i corsi compatibili.
+                  </p>
+                ) : !compatibleQ.data?.courses?.length ? (
+                  <p className='text-muted-foreground text-xs'>
+                    {compatibleQ.data?.note ??
+                      'Nessun course_type del catalog usa questa normativa.'}
+                  </p>
+                ) : (
+                  compatibleQ.data.courses.map((cc) => {
+                    const coverageStyle = {
+                      generabile: {
+                        badge:
+                          'border-brand-secondary/40 bg-brand-secondary/10 text-brand-secondary',
+                        label: '✓ generabile',
+                      },
+                      corpus_thin: {
+                        badge:
+                          'border-amber-400/50 bg-amber-50/40 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300',
+                        label: '⚠ corpus thin',
+                      },
+                      no_coverage: {
+                        badge:
+                          'border-destructive/40 bg-destructive/10 text-destructive',
+                        label: '✗ no coverage',
+                      },
+                    }[cc.overall_coverage]
+                    return (
+                      <div
+                        key={cc.slug}
+                        className='flex items-start justify-between gap-2 rounded-sm py-1 text-sm'
+                      >
+                        <div className='min-w-0 flex-1'>
+                          <div className='truncate font-medium'>{cc.title}</div>
+                          <div className='text-muted-foreground mt-0.5 flex flex-wrap items-center gap-1.5 text-xs'>
+                            <span>{cc.hours}h</span>
+                            <span>·</span>
+                            <span className='font-mono'>{cc.slug}</span>
+                            {cc.missing_regulations.length > 0 && (
+                              <>
+                                <span>·</span>
+                                <span
+                                  className='text-destructive'
+                                  title={`Manca corpus: ${cc.missing_regulations.join(', ')}`}
+                                >
+                                  manca: {cc.missing_regulations.length} regs
+                                </span>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                        <div className='flex shrink-0 flex-col items-end gap-1'>
+                          <Badge variant='outline' className={cn('text-[10px]', coverageStyle.badge)}>
+                            {coverageStyle.label}
+                          </Badge>
+                          {cc.overall_coverage !== 'no_coverage' && (
+                            <Button
+                              size='sm'
+                              variant='ghost'
+                              className='h-6 px-2 text-[10px]'
+                              onClick={() => {
+                                navigate({
+                                  to: '/courses/new',
+                                  search: { course_type: cc.slug } as never,
+                                })
+                                onOpenChange(false)
+                              }}
+                            >
+                              <Wand2 className='mr-1 size-3' />
+                              Genera
+                            </Button>
+                          )}
+                        </div>
+                      </div>
+                    )
+                  })
                 )}
               </div>
             )}

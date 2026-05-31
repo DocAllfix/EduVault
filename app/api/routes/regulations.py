@@ -236,6 +236,41 @@ async def list_linked_courses(
     ]
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# F9 Regulation→Courses Discovery (analista sign-off 2026-05-31)
+# Lookup inverso config-based: data una regulation, quali course_type del
+# catalog la usano + coverage chunks reale per UI badge "generabile/thin/no".
+# Distinto da /linked-courses che legge regulation_course_type_links table
+# (F1 catalog DB-based, popolata via scraping/manuale admin).
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@router.get("/{regulation_slug}/compatible-courses")
+async def get_compatible_courses(
+    regulation_slug: str,
+    user: dict[str, Any] = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Ritorna i course_type del catalog che usano questa regulation + coverage.
+
+    Output per ogni course candidato:
+      - overall_coverage: "generabile" | "corpus_thin" | "no_coverage"
+      - chunks_per_regulation: count chunks reali per ogni reg richiesta
+      - missing_regulations: regs nel catalog ma NON in DB (0 chunks)
+
+    Pensato per la UI F9 'upload normativa → vedi corsi compatibili':
+    dopo che il cliente carica una nuova regulation via /upload, chiama
+    questo endpoint per vedere subito quali corsi puo' generare e con quale
+    qualita' di copertura corpus.
+
+    Accetta solo lo slug (non UUID); F9 UI lavora sempre con slug.
+    """
+    from app.services.regulation_discovery_service import compatible_courses
+
+    pool = get_pool()
+    result = await compatible_courses(regulation_slug, pool)
+    return result
+
+
 @router.delete("/{regulation_id}")
 async def delete_regulation(
     regulation_id: str,
