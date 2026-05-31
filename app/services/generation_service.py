@@ -727,15 +727,44 @@ async def _run_pipeline_inner(
 
 
 async def recover_interrupted_jobs(pool: asyncpg.Pool) -> None:
-    """v1.0: reset every job stuck mid-flight to 'failed'. The smarter
-    LangGraph-checkpoint resume lands in v1.1 (BP §09.2)."""
-    result = await pool.execute(
+    """v1.0: reset every job stuck mid-flight to 'failed' + sync course status.
+
+    Prima del fix 2026-05-31: solo generation_jobs aggiornato. Bug rilevato:
+    se backend restart durante content/building, courses.status restava su
+    'content' forever -> UI mostrava status fake "in corso" pero' il job
+    era failed da ore. Adesso anche courses.status sincronizzata a 'failed'
+    cosi' utente vede il vero stato e puo' archiviare/riprovare.
+
+    La smarter LangGraph-checkpoint resume lands in v1.1 (BP §09.2)."""
+    # 1. Trova jobs orfani prima di marcarli failed (per loggare corso owner)
+    orphan_courses = await pool.fetch(
+        "SELECT DISTINCT course_id FROM generation_jobs "
+        "WHERE status IN ('research', 'content', 'building')"
+    )
+    # 2. Marca jobs failed
+    result_jobs = await pool.execute(
         "UPDATE generation_jobs SET status='failed', "
         "error_message='Interrotto da restart server' "
         "WHERE status IN ('research', 'content', 'building')"
     )
-    if result != "UPDATE 0":
-        logger.warning("jobs_recovered_to_failed", result=result)
+    # 3. Sync courses.status: solo i courses con job failed
+    # (NON archiviati / NON completed). Status 'failed' fa apparire l'icona
+    # rossa nel CourseDetail + abilita "Rigenera" CTA.
+    if orphan_courses:
+        course_ids = [r["course_id"] for r in orphan_courses]
+        result_courses = await pool.execute(
+            "UPDATE courses SET status='failed' "
+            "WHERE id = ANY($1::uuid[]) "
+            "AND status IN ('research', 'content', 'building', 'skeleton_pending')",
+            course_ids,
+        )
+        if result_jobs != "UPDATE 0" or result_courses != "UPDATE 0":
+            logger.warning(
+                "jobs_recovered_to_failed",
+                jobs_result=result_jobs,
+                courses_result=result_courses,
+                n_orphan_courses=len(orphan_courses),
+            )
 
 
 __all__ = [
