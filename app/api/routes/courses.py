@@ -472,6 +472,14 @@ async def ai_edit_skeleton_voice(
     if raw is None:
         raise HTTPException(409, "Nessuna struttura disponibile")
 
+    # BUG #6 fix: asyncpg restituisce JSONB come str → decode a dict.
+    import json as _json_skel
+    if isinstance(raw, str):
+        try:
+            raw = _json_skel.loads(raw)
+        except Exception:
+            raise HTTPException(500, "Struttura corrotta (parse error)")
+
     # raw è dict {"version", "modules": [...]}
     modules_list = raw.get("modules", []) if isinstance(raw, dict) else []
     target_module = next(
@@ -532,6 +540,14 @@ async def ai_edit_skeleton_module(
     raw = course.get("module_skeletons_json")
     if raw is None:
         raise HTTPException(409, "Nessuna struttura disponibile")
+
+    # BUG #6 fix: asyncpg restituisce JSONB come str → decode a dict.
+    import json as _json_skel2
+    if isinstance(raw, str):
+        try:
+            raw = _json_skel2.loads(raw)
+        except Exception:
+            raise HTTPException(500, "Struttura corrotta (parse error)")
 
     modules_list = raw.get("modules", []) if isinstance(raw, dict) else []
     target_module = next(
