@@ -69,13 +69,23 @@ ESEMPI CONCRETI di trasformazione:
   ✓ label: "Uso DPI" (7 char) + caption che richiama art. 76
 
 CATALOGO DIAGRAM (image.diagram_filling = {template_name, slots, caption}):
-- flow_horizontal_3step: 3 step in sequenza (label_1, label_2, label_3 — max 20 char ciascuno)
-- flow_horizontal_4step: 4 step in sequenza (label_1..4 — max 18 char ciascuno)
-- pyramid_3level: piramide tronca quantitativa (label_1 vertice, label_2 mid, label_3 base — max 17/24/30 char). Usa quando hai un'idea di "pochi sopra, molti sotto" (es. pochi dirigenti, molti lavoratori). Per gerarchie di RUOLI puri preferisci org_tree_3level.
-- matrix_2x2: matrice 2×2 probabilità×gravità (axis_x/axis_y/quadrant_tl/tr/bl/br — max 26-30 char)
-- causa_effetto: catena causale (causa/processo/effetto — max 26 char)
-- org_tree_3level: organigramma (level_1 top, level_2a/b/c mid, level_3 base — max 22-40 char)
-- compare_2col: confronto 2 colonne (title_left/right, item_left_1/2/3, item_right_1/2/3 — max 22/36 char)
+- flow_horizontal_3step: 3 step in sequenza (label_1..3 — max 20 char ciascuno). USA per processo lineare a 3 fasi (es. valutazione→misure→controllo).
+- flow_horizontal_4step: 4 step in sequenza (label_1..4 — max 18 char ciascuno). USA per processo lineare a 4 fasi.
+- pyramid_3level: piramide quantitativa (label_1 vertice 17 char, label_2 mid 24, label_3 base 30). USA per "pochi sopra molti sotto" (es. pochi dirigenti, molti lavoratori). Per gerarchie di RUOLI puri preferisci org_tree_3level.
+- matrix_2x2: matrice 2×2 (axis_x/axis_y 30, quadrant_tl/tr/bl/br 26). USA per probabilità×gravità rischio, scelta vs impatto.
+- causa_effetto: catena causale (causa/processo/effetto 26 char). USA per "pericolo → evento → danno", catena infortunio.
+- org_tree_3level: organigramma (level_1 22, level_2a/b/c 22, level_3 40). USA per gerarchia ruoli (RSPP, RLS, medico, datore).
+- compare_2col: confronto 2 colonne (title_left/right 22, item_left/right_1/2/3 36). USA per DPI vs DPC, prima vs dopo.
+- timeline: cronologia 6 eventi su asse orizzontale (title 35, date_1..6 10, event_1..6 18). USA per evoluzione normativa, sequenza temporale fatti datati (es. evoluzione D.Lgs 81/08 dal 2008).
+- fishbone: lisca di pesce Ishikawa 6 cause→1 effetto (effect 20, cause_1..6 24 ciascuna). USA per analisi cause primarie/secondarie infortunio, non-conformita, evento avverso.
+- cycle_pdca: ciclo PDCA Plan-Do-Check-Act (title 30, plan/do/check/act 28). USA per miglioramento continuo, processi iterativi (SGSL, HACCP, valutazione rischi ricorrente).
+- venn_2set: Venn 2 insiemi + intersezione (title 35, set_a/b 20, label_a/b 24, intersection 22, intersection_detail 28). USA per sovrapposizione 2 categorie (DPI obbligatori per rischio A vs B, normative concorrenti).
+- venn_3set: Venn 3 insiemi (title 35, set_a/b/c 20, intersection_all 24). USA per sovrapposizione 3 categorie (es. requisiti DPI per 3 ambienti diversi).
+- swimlane: 4 corsie con flusso fra step (title 40, lane_1..4 18, step_N_1/2 20). USA per responsabilita tra ruoli (datore/dirigente/preposto/RSPP, flusso segnalazione near-miss).
+- decision_tree: albero decisionale binario SI/NO (root_question 30, branch_yes/no 30, outcome_yes/no 30). USA per flusso decisionale chiaro (scelta DPI, gestione emergenza, valutazione rischio gruppo A/B/C primo soccorso).
+- gantt_mini: gantt semplificato 5 task × 3 periodi (title 40, period_1..3 15, task_N_label 18, task_N_detail 22). USA per pianificazione temporale (piano formazione annuale, scadenze DVR/sorveglianza, ciclo verifiche periodiche).
+
+VARIETA' DIAGRAMMI (HARD): NON usare sempre lo stesso template. Per ogni modulo, alterna almeno 3-4 tipi diversi dal catalogo. Un corso con 6 DIAGRAM tutti flow_horizontal_4step e' un fallimento di varieta'.
 
 Esempio image per DIAGRAM:
   image.strategy = "diagram"
