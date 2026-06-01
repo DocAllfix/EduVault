@@ -22,16 +22,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     wget \
     && rm -rf /var/lib/apt/lists/*
 
-# F-AUDIO-FIX 2026-06-01: Azure Cognitive Services Speech SDK Python
-# linka libssl1.1 (NON libssl 3.x default Debian 12 Bookworm).
-# Senza libssl1.1, SpeechSynthesizer.speak_ssml() segfault al primo
-# dlopen(). Workaround documentato Microsoft:
-# https://learn.microsoft.com/en-us/azure/ai-services/speech-service/quickstarts/setup-platform
-# Scarico .deb da snapshot.debian.org (URL stabile) per Debian 11 Bullseye.
-RUN wget -q https://snapshot.debian.org/archive/debian/20240101T000000Z/pool/main/o/openssl/libssl1.1_1.1.1n-0%2Bdeb11u5_amd64.deb \
-    -O /tmp/libssl1.1.deb \
-    && dpkg -i /tmp/libssl1.1.deb \
-    && rm /tmp/libssl1.1.deb
+# F-AUDIO-FIX 2026-06-01 v3: simbolico libssl 3 -> libssl 1.1 path.
+# Azure Speech SDK 1.50 supporta libssl 3 ma cerca libssl.so.1.1 esplicito.
+# Crea symlink dal libssl.so.3 (disponibile) verso il path atteso libssl.so.1.1.
+RUN ln -sf /usr/lib/x86_64-linux-gnu/libssl.so.3 /usr/lib/x86_64-linux-gnu/libssl.so.1.1 \
+    && ln -sf /usr/lib/x86_64-linux-gnu/libcrypto.so.3 /usr/lib/x86_64-linux-gnu/libcrypto.so.1.1
 
 # Montserrat (non nei repo Debian — copia manuale da assets committati in git)
 COPY assets/fonts/Montserrat/ /usr/share/fonts/truetype/montserrat/
