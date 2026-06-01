@@ -122,12 +122,16 @@ class Settings(BaseSettings):
     voci_per_module_concurrency: int = 4  # F-PERF 2026-06-01 FASE 4: parallelizza loop voce-per-voce intra-modulo (D-201). Era sequenziale (n_voci × ~80s LLM call = 9min bottleneck). 4 voci/modulo concorrenti × 10 moduli = 40 LLM concorrenti picco × ~5K token = 200K TPM (~0.4% budget 46M). Ordine slide preservato via gather index-aligned.
 
     # === F-STUDIO-UX 2026-06-01 Step 0 (D-207): preview source PPTX-fedele ===
-    # "pptx" (default): preview.png = render LibreOffice headless del PPTX scaricabile
+    # "pptx": preview.png = render LibreOffice headless del PPTX scaricabile
     #   → utente vede in webapp ESATTAMENTE ciò che ha nel file finale (immagini,
-    #   diagrammi, layout python-pptx).
-    # "pdf_dispensa" (legacy): comportamento pre-D-207, render del PDF dispensa
-    #   Jinja2+WeasyPrint testo-only. Fallback rapido se LibreOffice fallisce.
-    preview_source: Literal["pptx", "pdf_dispensa"] = "pptx"
+    #   diagrammi, layout python-pptx). VERIFICATO IN PROD su corso af08e1d1:
+    #   soffice consumava troppa RAM su 342 slide → container OOM-killed (502
+    #   "Application failed to respond"). Disabilitato di default.
+    # "pdf_dispensa" (default, legacy stable): rendering del PDF dispensa
+    #   Jinja2+WeasyPrint testo-only. Non e` fedele al PPTX (no immagini) ma
+    #   non crasha. Per riabilitare "pptx" servirà strategia memory-safe
+    #   (es. extract single-slide via python-pptx + soffice page-range).
+    preview_source: Literal["pptx", "pdf_dispensa"] = "pdf_dispensa"
     tts_voice: str = "it-IT-DiegoNeural"
 
     # === v2 refactor — provider keys (Fase 0 piano vast-hopping-sketch v2) ===

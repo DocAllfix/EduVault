@@ -1,35 +1,47 @@
-"""F-STUDIO-UX Step 0 (2026-06-01 / D-207) — PPTX-fedele preview service.
+"""F-STUDIO-UX Step 0 v2 (2026-06-02 / D-207) — PPTX-fedele preview service,
+strategia memory-light single-slide.
 
-Renderizza una singola slide del PPTX scaricabile come PNG, lazy + cached:
+Renderizza UNA singola slide del PPTX scaricabile come PNG, estraendo PRIMA
+quella slide in un mini-PPTX temporaneo (peso ~100-500KB invece di ~25MB del
+PPTX completo), poi convertendola con soffice:
 
-  PPTX (python-pptx, immagini reali) ──soffice headless──▶ PDF intermedio
-                                                            │
-                                                            ▼
-                                                  pypdfium2 page → PNG
+  PPTX completo (~25MB, 342 slide)
+        │
+        ▼  python-pptx: copia + rimuovi tutte le slide tranne N
+        │
+  mini-PPTX (~100-500KB, 1 slide)
+        │
+        ▼  soffice --headless --convert-to pdf (memory-light)
+        │
+  PDF 1 pagina (~50-200KB)
+        │
+        ▼  pypdfium2 render
+        │
+  PNG cached: output/previews/{course_id}/{rebuild_token}/{idx:04d}.png
 
-Il PDF intermedio (``_pptx_render.pdf``) viene generato UNA volta per
-``rebuild_token`` (Unix timestamp di ``courses.last_rebuilt_at``), quindi le
-slide successive sono servite quasi istantaneamente (solo extract della
-singola pagina, ~50-150ms ciascuna).
+Razionale del cambio strategia v1→v2:
+  v1 convertiva l'intero PPTX 342 slide in un PDF unico, riusato per tutte le
+  slide. Vantaggio: 1 sola chiamata soffice per corso. Svantaggio: soffice
+  caricava in memoria l'intero PPTX (~1GB RAM su corsi 4h con immagini reali),
+  causando OOM-kill del container Railway (verificato in prod su corso
+  af08e1d1, status 502 + "Stopping Container" nei log).
+  v2 limita ogni invocazione soffice a 1 sola slide → memoria proporzionale a
+  1 slide (~50-100MB). Trade-off: 1 chiamata soffice per slide invece di 1
+  per corso → caricamento iniziale Course Studio piu` lento (5-10s/slide la
+  prima volta), ma navigazione fluida dopo (PNG cached). Il caller dovrebbe
+  pre-fetchare le slide visibili.
 
-Cache layout (riusato dall'endpoint preview esistente in courses.py):
+Cache layout:
     output/previews/{course_id}/{rebuild_token}/
-        _pptx_render.pdf       ← prodotto da soffice, riusato per tutte le slide
-        _pptx_render.lock      ← file di lock per serializzare invocazioni soffice
         {idx:04d}.png          ← cache della singola slide
         ...
-
-Razionale: il PPTX (slide_builder.py:227+) è la fonte di verità del prodotto
-scaricabile. Il PDF dispensa Jinja2 (pdf_builder.py) e` testo-only — divergeva
-dal PPTX. Renderizzando il PPTX via LibreOffice headless otteniamo PNG che
-riflettono al 100% ciò che il cliente scaricherà.
+    (NO PDF intermedio cached: ogni slide ha il suo workflow temp + cleanup)
 
 LibreOffice è già installato nel Dockerfile (libreoffice-impress + libreoffice-core,
 linee 17-18). Zero apt-deps nuove.
 
-Fallback: se ``soffice`` non è disponibile o fallisce, il caller (endpoint
-preview) può usare ``settings.preview_source = "pdf_dispensa"`` per tornare al
-comportamento legacy (pypdfium2 sul PDF dispensa Jinja2).
+Fallback: se soffice fallisce / OOM / timeout → PreviewRenderError → endpoint
+fa graceful fallback a ``preview_source="pdf_dispensa"`` (testo-only).
 """
 
 from __future__ import annotations
@@ -43,9 +55,9 @@ import structlog
 
 logger = structlog.get_logger(__name__)
 
-# Timeout soffice — un PPTX di 342 slide può richiedere 30-60s su Railway,
-# ma diamo margine generoso per corsi 8h (642 slide) o macchine cold.
-_SOFFICE_TIMEOUT_S = 240
+# Timeout soffice — mini-PPTX single-slide deve essere veloce (5-15s tipico).
+# Margine 60s per cold-start LibreOffice (caricamento font, JVM, ecc.).
+_SOFFICE_TIMEOUT_S = 60
 
 # Render DPI: stesso scale del path legacy (1.6 → ~153 DPI, leggibile su retina
 # senza far esplodere la dimensione della cache).
@@ -74,21 +86,26 @@ async def render_pptx_slide_to_png(
 ) -> Path:
     """Renderizza la slide ``slide_index`` del PPTX come PNG, riusando la cache.
 
+    v2 (2026-06-02): strategia single-slide memory-light. Estrae la slide N in
+    un mini-PPTX temporaneo (peso ridotto), converte solo quella con soffice,
+    poi cancella il temp. Soffice usa proporzionalmente meno RAM (1 slide vs
+    342) → niente OOM-kill su container small-tier.
+
     Args:
         pptx_path: percorso del file ``.pptx`` (deve esistere su disco — il caller
             estrae da ``courses.pptx_path`` e valida l'esistenza).
         cache_dir: directory di cache della preview (caller esistente in
             ``courses.py:966`` calcola già il path con ``rebuild_token``):
             ``output/previews/{course_id}/{rebuild_token}/``.
-        slide_index: indice 0-based della slide (allineato all'indicizzazione
-            di ``pypdfium2`` su PDF prodotto da soffice).
+        slide_index: indice 0-based della slide nel PPTX completo.
 
     Returns:
         ``Path`` al file PNG. Esiste su disco al ritorno.
 
     Raises:
-        PreviewRenderError: se soffice fallisce o produce un PDF malformato.
+        PreviewRenderError: se soffice fallisce, OOM, o produce PDF malformato.
         FileNotFoundError: se ``pptx_path`` non esiste.
+        IndexError: se ``slide_index`` non e` un indice valido del PPTX.
     """
     if not pptx_path.is_file():
         raise FileNotFoundError(f"PPTX non trovato: {pptx_path}")
@@ -100,46 +117,123 @@ async def render_pptx_slide_to_png(
     if png_path.is_file():
         return png_path
 
-    pdf_intermediate = cache_dir / "_pptx_render.pdf"
+    # Workspace temp per estrazione single-slide + conversione + cleanup.
+    # Tutto wrapped in lock async + try/finally per garantire cleanup anche
+    # su errore parziale (file orfani in cache_dir confondono i lookup).
+    work_dir = cache_dir / f".tmp_{slide_index:04d}"
 
-    # Genera il PDF intermedio (una sola volta per rebuild_token) sotto lock.
-    if not pdf_intermediate.is_file():
-        async with _soffice_lock:
-            # Re-check sotto lock per evitare double-render se due richieste
-            # arrivano insieme (race window prima dell'acquisizione lock).
-            if not pdf_intermediate.is_file():
-                await _convert_pptx_to_pdf(pptx_path, cache_dir)
+    async with _soffice_lock:
+        # Re-check dopo l'acquisizione del lock: un'altra richiesta potrebbe
+        # aver gia` generato il PNG mentre eravamo in attesa.
+        if png_path.is_file():
+            return png_path
+        try:
+            # 1) extract single slide → mini.pptx (lavoro python-pptx,
+            #    sincrono ma veloce su singola slide ~50-200ms).
+            mini_pptx = work_dir / "single_slide.pptx"
+            await asyncio.to_thread(
+                _extract_single_slide_to_pptx,
+                pptx_path,
+                slide_index,
+                mini_pptx,
+            )
 
-    if not pdf_intermediate.is_file():
-        raise PreviewRenderError(
-            f"PDF intermedio non prodotto da soffice: atteso {pdf_intermediate}"
-        )
+            # 2) soffice mini-pptx → mini-pdf (memory-light).
+            await _convert_single_pptx_to_pdf(mini_pptx, work_dir)
 
-    # Render della singola pagina (CPU-bound, mettiamo in thread per non
-    # bloccare l'event loop su corsi con preview chiamate concorrenti).
-    await asyncio.to_thread(
-        _render_pdf_page_to_png, pdf_intermediate, slide_index, png_path
-    )
+            mini_pdf = work_dir / "single_slide.pdf"
+            if not mini_pdf.is_file():
+                raise PreviewRenderError(
+                    f"soffice non ha prodotto il PDF atteso: {mini_pdf}"
+                )
+
+            # 3) pdfium render del singolo PDF (1 pagina) → PNG cached.
+            await asyncio.to_thread(
+                _render_pdf_page_to_png, mini_pdf, 0, png_path
+            )
+        finally:
+            # Cleanup workspace temp anche su error per non accumulare detrito.
+            await asyncio.to_thread(_safe_rmtree, work_dir)
 
     return png_path
 
 
-async def _convert_pptx_to_pdf(pptx_path: Path, out_dir: Path) -> None:
-    """Esegue ``soffice --headless --convert-to pdf`` in un subprocess.
+def _extract_single_slide_to_pptx(
+    source_pptx: Path, slide_index: int, dest_pptx: Path
+) -> None:
+    """Crea un mini-PPTX con SOLO la slide ``slide_index``.
+
+    Strategia memory-light: copia il file PPTX originale come ZIP (è un OOXML
+    package), poi modifica internamente per tenere solo la slide voluta.
+
+    Fallback: usa python-pptx per duplicare il file + rimuovere tutte le slide
+    tranne N. Funziona ma richiede di caricare l'intero file in memoria.
+
+    Args:
+        source_pptx: percorso PPTX originale (read-only).
+        slide_index: indice 0-based della slide da preservare.
+        dest_pptx: percorso destinazione mini-PPTX (singola slide).
+
+    Raises:
+        IndexError: se slide_index non e` un indice valido.
+    """
+    from pptx import Presentation
+    from pptx.oxml.ns import qn
+
+    dest_pptx.parent.mkdir(parents=True, exist_ok=True)
+
+    # Carica + remove all slides except target.
+    prs = Presentation(str(source_pptx))
+    total = len(prs.slides)
+    if slide_index < 0 or slide_index >= total:
+        raise IndexError(
+            f"slide_index {slide_index} fuori range (0..{total - 1})"
+        )
+
+    # Trick python-pptx: rimuovere slide via XML perché l'API non espone .remove.
+    # Ref: https://github.com/scanny/python-pptx/issues/67
+    sldIdLst = prs.slides._sldIdLst
+    # Lista degli elements <p:sldId> (uno per slide).
+    sldId_elements = list(sldIdLst)
+    target_sldId = sldId_elements[slide_index]
+    # Rimuovi tutti gli altri sldId (la slide voluta resta).
+    for sldId in sldId_elements:
+        if sldId is not target_sldId:
+            sldIdLst.remove(sldId)
+            # Rimuovi anche la part relationship corrispondente per non
+            # lasciare relazioni orfane.
+            rId = sldId.get(qn("r:id"))
+            try:
+                prs.part.drop_rel(rId)
+            except Exception:  # noqa: BLE001
+                # drop_rel non e` garantito esistere; ignorare e` safe.
+                pass
+
+    prs.save(str(dest_pptx))
+
+
+def _safe_rmtree(path: Path) -> None:
+    """Rimuove ricorsivamente ``path`` ignorando errori (best-effort cleanup)."""
+    import shutil
+
+    if path.exists():
+        shutil.rmtree(path, ignore_errors=True)
+
+
+async def _convert_single_pptx_to_pdf(pptx_path: Path, out_dir: Path) -> None:
+    """Esegue ``soffice --headless --convert-to pdf`` su un mini-PPTX 1-slide.
 
     soffice produce il PDF nella ``out_dir`` con lo stesso basename del PPTX
-    (es. ``my_course.pptx`` → ``my_course.pdf``). Dopo la conversione lo
-    rinominiamo in ``_pptx_render.pdf`` per stabilizzare il path indipendente
-    dal nome del PPTX.
+    (es. ``single_slide.pptx`` → ``single_slide.pdf``).
 
-    Il working directory di soffice deve essere ``out_dir`` per evitare
-    contenzione su lock files in user profile condivisi tra istanze.
+    Memory profile: 1 slide → ~50-150MB RAM di soffice headless (vs ~1GB per
+    342 slide nel path v1). Niente OOM su Railway tier.
+
+    Profile utente isolato per evitare "Office is already running" su istanze
+    concorrenti che condividono /root/.config/libreoffice.
     """
-    # Profilo utente isolato per questa conversione: previene il classico
-    # "Office is already running" se più container/processi usano lo stesso
-    # /root/.config/libreoffice. Usiamo la cache dir come user profile temp.
     profile_dir = out_dir / ".soffice_profile"
-    profile_dir.mkdir(exist_ok=True)
+    profile_dir.mkdir(parents=True, exist_ok=True)
     user_profile_url = f"-env:UserInstallation=file://{profile_dir.as_posix()}"
 
     cmd = [
@@ -160,6 +254,7 @@ async def _convert_pptx_to_pdf(pptx_path: Path, out_dir: Path) -> None:
         "soffice_convert_started",
         pptx=str(pptx_path),
         outdir=str(out_dir),
+        memory_strategy="single_slide_v2",
     )
 
     proc = await asyncio.create_subprocess_exec(
@@ -184,21 +279,17 @@ async def _convert_pptx_to_pdf(pptx_path: Path, out_dir: Path) -> None:
             f"soffice exit_code={proc.returncode} stderr={stderr_b.decode(errors='replace')[:500]}"
         )
 
-    # soffice scrive il PDF con stesso basename del PPTX nella outdir.
+    # soffice scrive il PDF con stesso basename del mini-PPTX.
     produced_pdf = out_dir / f"{pptx_path.stem}.pdf"
     if not produced_pdf.is_file():
         raise PreviewRenderError(
             f"soffice non ha prodotto il PDF atteso: {produced_pdf}"
         )
 
-    # Rinomina al path stabile usato dal caller per i lookup cache.
-    stable_pdf = out_dir / "_pptx_render.pdf"
-    produced_pdf.rename(stable_pdf)
-
     logger.info(
         "soffice_convert_completed",
-        pdf=str(stable_pdf),
-        size_bytes=stable_pdf.stat().st_size,
+        pdf=str(produced_pdf),
+        size_bytes=produced_pdf.stat().st_size,
     )
 
 

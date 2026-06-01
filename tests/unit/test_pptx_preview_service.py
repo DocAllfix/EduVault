@@ -1,11 +1,13 @@
-"""F-STUDIO-UX Step 0 (D-207) — unit test pptx_preview_service.
+"""F-STUDIO-UX Step 0 v2 (D-207) — unit test pptx_preview_service single-slide.
 
-Mocked: subprocess (soffice) + pypdfium2 (render PDF page).
+Mocked: _extract_single_slide_to_pptx (python-pptx), subprocess (soffice),
+_render_pdf_page_to_png (pypdfium2).
+
 Verifica:
-- fast path PNG cached → nessuna chiamata a soffice / pdfium
-- prima invocazione → soffice viene eseguito UNA volta, PDF intermedio renominato
-- seconda invocazione su stessa slide → cache hit
-- seconda invocazione su slide DIVERSA, stesso rebuild_token → soffice NON viene rieseguito (PDF intermedio gia` presente)
+- fast path PNG cached → nessuna chiamata a soffice / pdfium / extract
+- prima invocazione → extract + soffice + pdfium chiamati 1 volta ciascuno
+- cleanup workspace temp dopo successo (best-effort)
+- cleanup workspace temp dopo errore soffice
 - soffice timeout → solleva PreviewRenderError
 - soffice non zero exit → solleva PreviewRenderError
 - soffice non produce il PDF atteso → solleva PreviewRenderError
@@ -54,12 +56,15 @@ def _make_proc_mock(returncode: int = 0) -> MagicMock:
 async def test_fast_path_png_already_cached(
     fake_pptx: Path, cache_dir: Path
 ) -> None:
-    """PNG in cache → ritorno immediato senza toccare soffice/pdfium."""
+    """PNG in cache → ritorno immediato senza toccare extract/soffice/pdfium."""
     cache_dir.mkdir(parents=True)
     pre_existing = cache_dir / "0005.png"
     pre_existing.write_bytes(b"fake-png")
 
     with (
+        patch(
+            "app.services.pptx_preview_service._extract_single_slide_to_pptx"
+        ) as mock_extract,
         patch(
             "app.services.pptx_preview_service.asyncio.create_subprocess_exec"
         ) as mock_subproc,
@@ -72,30 +77,47 @@ async def test_fast_path_png_already_cached(
         )
 
     assert result == pre_existing
+    mock_extract.assert_not_called()
     mock_subproc.assert_not_called()
     mock_render.assert_not_called()
 
 
 @pytest.mark.asyncio
-async def test_first_invocation_runs_soffice_then_pdfium(
+async def test_first_invocation_runs_full_pipeline(
     fake_pptx: Path, cache_dir: Path
 ) -> None:
-    """Prima invocazione: soffice produce PDF + pdfium rende la slide."""
+    """Prima invocazione: extract → soffice → pdfium tutti chiamati 1 volta."""
     proc = _make_proc_mock(returncode=0)
 
+    extract_calls = 0
+    render_calls = 0
+
+    def fake_extract(
+        source: Path, idx: int, dest: Path
+    ) -> None:
+        nonlocal extract_calls
+        extract_calls += 1
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(b"mini-pptx")
+
     def fake_subproc_factory(*args: object, **kwargs: object) -> MagicMock:
-        # Simula soffice scrivendo course_X.pdf nella outdir.
-        # outdir e' uno degli args posizionali (--outdir <dir>).
+        # Simula soffice scrivendo single_slide.pdf in outdir.
         outdir_idx = args.index("--outdir") + 1
-        produced_pdf = Path(str(args[outdir_idx])) / f"{fake_pptx.stem}.pdf"
+        produced_pdf = Path(str(args[outdir_idx])) / "single_slide.pdf"
         produced_pdf.parent.mkdir(parents=True, exist_ok=True)
-        produced_pdf.write_bytes(b"fake-pdf-content")
+        produced_pdf.write_bytes(b"fake-pdf")
         return proc
 
     def fake_render(pdf_path: Path, page_index: int, png_out: Path) -> None:
+        nonlocal render_calls
+        render_calls += 1
         png_out.write_bytes(b"rendered-png")
 
     with (
+        patch(
+            "app.services.pptx_preview_service._extract_single_slide_to_pptx",
+            side_effect=fake_extract,
+        ),
         patch(
             "app.services.pptx_preview_service.asyncio.create_subprocess_exec",
             side_effect=lambda *a, **kw: fake_subproc_factory(*a, **kw),
@@ -111,92 +133,43 @@ async def test_first_invocation_runs_soffice_then_pdfium(
 
     assert result.is_file()
     assert result.name == "0003.png"
-    assert (cache_dir / "_pptx_render.pdf").is_file(), (
-        "PDF intermedio dovrebbe essere stato rinominato a _pptx_render.pdf"
+    assert extract_calls == 1, "extract chiamato 1 sola volta"
+    assert render_calls == 1, "pdfium render chiamato 1 sola volta"
+    # Cleanup workspace temp eseguito (best-effort): la dir .tmp_0003 non esiste piu`.
+    assert not (cache_dir / ".tmp_0003").exists()
+
+
+@pytest.mark.asyncio
+async def test_workspace_cleanup_after_soffice_error(
+    fake_pptx: Path, cache_dir: Path
+) -> None:
+    """Cleanup workspace temp esegue anche dopo errore soffice."""
+    proc = _make_proc_mock(returncode=1)
+    proc.communicate = AsyncMock(
+        return_value=(b"", b"libreoffice crash: missing font")
     )
 
-
-@pytest.mark.asyncio
-async def test_second_invocation_same_slide_uses_cache(
-    fake_pptx: Path, cache_dir: Path
-) -> None:
-    """Stesso slide_index due volte: solo la prima chiama soffice."""
-    proc = _make_proc_mock(returncode=0)
-    soffice_calls = 0
-
-    def fake_subproc_factory(*args: object, **kwargs: object) -> MagicMock:
-        nonlocal soffice_calls
-        soffice_calls += 1
-        outdir_idx = args.index("--outdir") + 1
-        (Path(str(args[outdir_idx])) / f"{fake_pptx.stem}.pdf").write_bytes(b"pdf")
-        return proc
-
-    render_calls = 0
-
-    def fake_render(pdf_path: Path, page_index: int, png_out: Path) -> None:
-        nonlocal render_calls
-        render_calls += 1
-        png_out.write_bytes(b"png")
+    def fake_extract(source: Path, idx: int, dest: Path) -> None:
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(b"mini-pptx")
 
     with (
         patch(
-            "app.services.pptx_preview_service.asyncio.create_subprocess_exec",
-            side_effect=lambda *a, **kw: fake_subproc_factory(*a, **kw),
+            "app.services.pptx_preview_service._extract_single_slide_to_pptx",
+            side_effect=fake_extract,
         ),
-        patch(
-            "app.services.pptx_preview_service._render_pdf_page_to_png",
-            side_effect=fake_render,
-        ),
-    ):
-        await render_pptx_slide_to_png(
-            pptx_path=fake_pptx, cache_dir=cache_dir, slide_index=7
-        )
-        await render_pptx_slide_to_png(
-            pptx_path=fake_pptx, cache_dir=cache_dir, slide_index=7
-        )
-
-    assert soffice_calls == 1, "soffice deve essere chiamato 1 sola volta"
-    assert render_calls == 1, "pdfium render deve essere chiamato 1 sola volta"
-
-
-@pytest.mark.asyncio
-async def test_different_slides_same_rebuild_token_reuse_pdf(
-    fake_pptx: Path, cache_dir: Path
-) -> None:
-    """Slide diverse, stesso rebuild_token: soffice 1 volta, pdfium 2 volte."""
-    proc = _make_proc_mock(returncode=0)
-    soffice_calls = 0
-
-    def fake_subproc_factory(*args: object, **kwargs: object) -> MagicMock:
-        nonlocal soffice_calls
-        soffice_calls += 1
-        outdir_idx = args.index("--outdir") + 1
-        (Path(str(args[outdir_idx])) / f"{fake_pptx.stem}.pdf").write_bytes(b"pdf")
-        return proc
-
-    def fake_render(pdf_path: Path, page_index: int, png_out: Path) -> None:
-        png_out.write_bytes(f"png-page-{page_index}".encode())
-
-    with (
         patch(
             "app.services.pptx_preview_service.asyncio.create_subprocess_exec",
-            side_effect=lambda *a, **kw: fake_subproc_factory(*a, **kw),
-        ),
-        patch(
-            "app.services.pptx_preview_service._render_pdf_page_to_png",
-            side_effect=fake_render,
+            return_value=proc,
         ),
     ):
-        await render_pptx_slide_to_png(
-            pptx_path=fake_pptx, cache_dir=cache_dir, slide_index=1
-        )
-        await render_pptx_slide_to_png(
-            pptx_path=fake_pptx, cache_dir=cache_dir, slide_index=42
-        )
+        with pytest.raises(PreviewRenderError, match="exit_code=1"):
+            await render_pptx_slide_to_png(
+                pptx_path=fake_pptx, cache_dir=cache_dir, slide_index=7
+            )
 
-    assert soffice_calls == 1, "PDF intermedio riusato → soffice 1 sola volta"
-    assert (cache_dir / "0001.png").is_file()
-    assert (cache_dir / "0042.png").is_file()
+    # Workspace temp cleanup eseguito anche su errore.
+    assert not (cache_dir / ".tmp_0007").exists()
 
 
 @pytest.mark.asyncio
@@ -209,9 +182,19 @@ async def test_soffice_timeout_raises_preview_render_error(
     proc.kill = MagicMock()
     proc.wait = AsyncMock()
 
-    with patch(
-        "app.services.pptx_preview_service.asyncio.create_subprocess_exec",
-        return_value=proc,
+    def fake_extract(source: Path, idx: int, dest: Path) -> None:
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(b"mini-pptx")
+
+    with (
+        patch(
+            "app.services.pptx_preview_service._extract_single_slide_to_pptx",
+            side_effect=fake_extract,
+        ),
+        patch(
+            "app.services.pptx_preview_service.asyncio.create_subprocess_exec",
+            return_value=proc,
+        ),
     ):
         with pytest.raises(PreviewRenderError, match="timeout"):
             await render_pptx_slide_to_png(
@@ -221,35 +204,27 @@ async def test_soffice_timeout_raises_preview_render_error(
 
 
 @pytest.mark.asyncio
-async def test_soffice_non_zero_exit_raises_preview_render_error(
-    fake_pptx: Path, cache_dir: Path
-) -> None:
-    """soffice exit_code != 0 → PreviewRenderError con stderr nel messaggio."""
-    proc = _make_proc_mock(returncode=1)
-    proc.communicate = AsyncMock(return_value=(b"", b"libreoffice crash: missing font"))
-
-    with patch(
-        "app.services.pptx_preview_service.asyncio.create_subprocess_exec",
-        return_value=proc,
-    ):
-        with pytest.raises(PreviewRenderError, match="exit_code=1"):
-            await render_pptx_slide_to_png(
-                pptx_path=fake_pptx, cache_dir=cache_dir, slide_index=0
-            )
-
-
-@pytest.mark.asyncio
 async def test_soffice_missing_output_pdf_raises_preview_render_error(
     fake_pptx: Path, cache_dir: Path
 ) -> None:
-    """soffice exit=0 ma PDF NON prodotto (edge case) → PreviewRenderError."""
+    """soffice exit=0 ma PDF NON prodotto → PreviewRenderError."""
     proc = _make_proc_mock(returncode=0)
 
-    with patch(
-        "app.services.pptx_preview_service.asyncio.create_subprocess_exec",
-        return_value=proc,
+    def fake_extract(source: Path, idx: int, dest: Path) -> None:
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(b"mini-pptx")
+
+    with (
+        patch(
+            "app.services.pptx_preview_service._extract_single_slide_to_pptx",
+            side_effect=fake_extract,
+        ),
+        patch(
+            "app.services.pptx_preview_service.asyncio.create_subprocess_exec",
+            return_value=proc,
+        ),
     ):
-        # NON scriviamo course_X.pdf nella outdir → PreviewRenderError.
+        # NON scriviamo single_slide.pdf nella outdir → PreviewRenderError.
         with pytest.raises(PreviewRenderError, match="non ha prodotto il PDF"):
             await render_pptx_slide_to_png(
                 pptx_path=fake_pptx, cache_dir=cache_dir, slide_index=0
