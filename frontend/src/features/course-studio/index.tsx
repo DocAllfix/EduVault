@@ -14,7 +14,7 @@
 import { useEffect, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useNavigate, useParams } from '@tanstack/react-router'
-import { ArrowLeft, ChevronLeft, ChevronRight } from 'lucide-react'
+import { ArrowLeft } from 'lucide-react'
 
 import { api, ApiError, type StudioSlide } from '@/lib/api'
 import { Button } from '@/components/ui/button'
@@ -26,16 +26,14 @@ import { ProfileDropdown } from '@/components/profile-dropdown'
 import { ThemeSwitch } from '@/components/theme-switch'
 import { SlideViewer } from './components/slide-viewer'
 import { SlideEditor } from './components/slide-editor'
-import { AudioPlayer } from './components/audio-player'
 import { ImagePicker } from './components/image-picker'
 import { RegenerateDialog } from './components/regenerate-dialog'
-import { RebuildBanner } from './components/rebuild-banner'
 import { SlideActions } from './components/slide-actions'
 import { SkeletonReview } from './components/skeleton-review'
+import { StudioTopBar } from './components/studio-topbar'
 import {
   QualityBadge,
   QualityIssuesPanel,
-  QualityIssuesSummary,
 } from './components/quality-badge'
 import { ChatPanel } from './components/chat-panel'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -145,23 +143,39 @@ export function CourseStudio() {
 
   return (
     <>
-      <Header>
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => navigate({ to: '/courses/$id', params: { id } })}
-        >
-          <ArrowLeft className="mr-2 h-4 w-4" /> Dettaglio corso
-        </Button>
-        <div className="ml-auto flex items-center gap-2">
-          <ThemeSwitch />
-          <ProfileDropdown />
-        </div>
-      </Header>
+      {/* F-STUDIO-UX Step 1 (2026-06-01): StudioTopBar 48px sostituisce Header
+          esterno + H1 "Course Studio" + RebuildBanner + QualityIssuesSummary.
+          Audio mini-controls integrati nella topbar (era box sotto preview). */}
+      {!slidesQ.isLoading && !slidesQ.isError && selected ? (
+        <StudioTopBar
+          courseId={id}
+          selected={selected}
+          pos={pos}
+          total={slides.length}
+          goPrev={goPrev}
+          goNext={goNext}
+          onBack={() => navigate({ to: '/courses/$id', params: { id } })}
+          qualityData={qualityQ.data}
+          filterActive={filterProblematic}
+          onFilterToggle={() => setFilterProblematic(!filterProblematic)}
+        />
+      ) : (
+        <Header>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => navigate({ to: '/courses/$id', params: { id } })}
+          >
+            <ArrowLeft className="mr-2 h-4 w-4" /> Dettaglio corso
+          </Button>
+          <div className="ml-auto flex items-center gap-2">
+            <ThemeSwitch />
+            <ProfileDropdown />
+          </div>
+        </Header>
+      )}
 
       <Main>
-        <h1 className="mb-4 text-2xl font-bold tracking-tight">Course Studio</h1>
-
         {slidesQ.isLoading && (
           <div className="space-y-3">
             <Skeleton className="h-8 w-48" />
@@ -181,19 +195,6 @@ export function CourseStudio() {
 
         {!slidesQ.isLoading && !slidesQ.isError && selected && (
           <>
-            {/* Banner rigenera + scarica (sempre visibile: l'utente rigenera
-                quando ha finito di modificare) */}
-            <div className="mb-4">
-              <RebuildBanner courseId={id} />
-            </div>
-
-            {/* F4 D9 summary issue: visibile solo se ci sono issue */}
-            <QualityIssuesSummary
-              data={qualityQ.data}
-              filterActive={filterProblematic}
-              onFilterToggle={() => setFilterProblematic(!filterProblematic)}
-            />
-
             {/* Grid 3-colonne responsive (analista 2026-05-31):
                 - Default (>=1280 xl): 220px / 1fr / 360px — center ampio, sidebar+
                   right comodi per i primary buttons (Rigenera/Salva).
@@ -239,41 +240,13 @@ export function CourseStudio() {
                 </div>
               </aside>
 
-              {/* ─── Center: nav orizzontale + viewer + audio ─── */}
+              {/* ─── Center: viewer (nav + audio sono nel TopBar) ─── */}
               <section className="flex min-w-0 flex-col gap-3">
-                <div className="flex items-center justify-between gap-3">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={goPrev}
-                    disabled={pos <= 0}
-                    aria-label="Slide precedente"
-                  >
-                    <ChevronLeft className="mr-1 size-4" /> Precedente
-                  </Button>
-                  <span className="text-muted-foreground shrink-0 whitespace-nowrap text-sm tabular-nums">
-                    Slide <span className="text-foreground font-semibold">{pos + 1}</span> di {slides.length}
-                  </span>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={goNext}
-                    disabled={pos < 0 || pos >= slides.length - 1}
-                    aria-label="Slide successiva"
-                  >
-                    Successiva <ChevronRight className="ml-1 size-4" />
-                  </Button>
-                </div>
                 <SlideViewer
                   slide={selected}
                   total={slides.length}
                   courseId={id}
                   key={`${id}-${selected.index}`}
-                />
-                <AudioPlayer
-                  courseId={id}
-                  slideIndex={selected.index}
-                  moduleIndex={selected.module_index}
                 />
               </section>
 
