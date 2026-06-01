@@ -383,10 +383,17 @@ export interface RegulationUploadMeta {
   source_url?: string
 }
 
+// Fix 2026-06-01 ingestion orphan dedup: UploadResponse esteso con 2 campi
+// opzionali backend-only (non ancora in OpenAPI generated). Override locale.
+export interface UploadResponseExt extends UploadResponse {
+  is_duplicate_pdf?: boolean
+  alias_of_slug?: string | null
+}
+
 async function uploadRegulation(
   file: File,
   meta: RegulationUploadMeta,
-): Promise<UploadResponse> {
+): Promise<UploadResponseExt> {
   const fd = new FormData()
   fd.append('file', file)
   fd.append('slug', meta.slug)
@@ -395,7 +402,7 @@ async function uploadRegulation(
   if (meta.region) fd.append('region', meta.region)
   if (meta.issuing_body) fd.append('issuing_body', meta.issuing_body)
   if (meta.source_url) fd.append('source_url', meta.source_url)
-  return request<UploadResponse>('/api/regulations/upload', {
+  return request<UploadResponseExt>('/api/regulations/upload', {
     method: 'POST',
     formData: fd,
   })

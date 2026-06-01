@@ -1215,7 +1215,7 @@ async def embed_query(text: str) -> list[float]:
     return response.embeddings[0]
 
 
-async def index_chunks(chunks: list[dict[str, object]], pool: object) -> None:
+async def index_chunks(chunks: list[dict[str, object]], pool: object) -> tuple[int, int]:
     """Index classified chunks with embeddings.
 
     Boost 2026-05-25: batch_size 50→500 (Voyage ammette 1000/batch, 500 è
@@ -1223,7 +1223,13 @@ async def index_chunks(chunks: list[dict[str, object]], pool: object) -> None:
     precedenti = ~10× faster sull'embed phase.
     Dedup via ``content_hash``: a chunk whose body already exists with
     ``is_current = true`` is skipped (BP §06.1.1 Stage 4).
+
+    Returns:
+        (inserted_count, deduped_count) — utile al caller per gestire
+        regulation fantasma (tutti i chunks dedup = stesso PDF gia' caricato).
     """
+    inserted_count = 0
+    deduped_count = 0
     # Cache short_title per regulation_id (lookup 1 volta sola, non per ogni
     # chunk). Serve a comporre citation_label deterministico — FIX #30.5a
     # + sessione 2026-05-28 (la migrazione 004 aveva aggiunto la colonna ma
@@ -1268,6 +1274,7 @@ async def index_chunks(chunks: list[dict[str, object]], pool: object) -> None:
             )
             if existing:
                 logger.info("chunk_deduplicated", hash=content_hash[:16])
+                deduped_count += 1
                 continue
 
             classification = chunk["classification"]
@@ -1319,6 +1326,7 @@ async def index_chunks(chunks: list[dict[str, object]], pool: object) -> None:
                     classification["tags"],
                     embedding_literal, content_hash, citation_label, top_section,
                 )
+                inserted_count += 1
             except Exception as exc:
                 # Skip THIS chunk only — don't abort the whole batch (REI: un
                 # singolo INSERT rotto NON deve uccidere l'ingest di 1831 chunks).
@@ -1331,6 +1339,7 @@ async def index_chunks(chunks: list[dict[str, object]], pool: object) -> None:
                     error=str(exc)[:200],
                 )
         logger.info("chunks_indexed", batch=i // batch_size + 1, count=len(batch))
+    return inserted_count, deduped_count
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -1351,9 +1360,18 @@ async def ingest_regulation_file(
     region: str,
     source_url: str | None,
     pool: object,
-) -> tuple[str, int]:
+) -> tuple[str, int, bool, str | None]:
     """Full ingestion of one regulation PDF: insert row → parse → chunk →
-    classify → embed → index. Returns (regulation_id, chunks_count).
+    classify → embed → index.
+
+    Returns:
+        (regulation_id, chunks_inserted, is_duplicate_pdf, alias_of_slug)
+
+    Se ``is_duplicate_pdf=True`` significa che TUTTI i chunks erano gia'
+    presenti in DB (PDF identico a una normativa precedente). In quel caso:
+    - regulation orphan auto-archiviata (status=ABROGATA) → non appare in
+      lista vigenti.
+    - alias_of_slug punta allo slug originale che gia' contiene i chunks.
     """
     regulation_id = str(
         await pool.fetchval(  # type: ignore[attr-defined]
@@ -1410,7 +1428,42 @@ async def ingest_regulation_file(
         sequential_estimate_min=round(len(classified) / 60, 1),
     )
 
-    await index_chunks(list(classified), pool)
+    inserted_count, deduped_count = await index_chunks(list(classified), pool)
+
+    # Fix 2026-06-01 ingestion orphan dedup: se TUTTI i chunks sono dedup
+    # (PDF identico a normativa precedente), il regulation row e' orphan
+    # (0 chunks visibili). Auto-cleanup + restituisci info al caller per
+    # toast chiaro UI: 'Documento gia' indicizzato come <alias_slug>'.
+    is_duplicate_pdf = inserted_count == 0 and deduped_count > 0
+    alias_of_slug: str | None = None
+    if is_duplicate_pdf:
+        # Trova lo slug originale che contiene i chunks gia indicizzati
+        # (qualunque dei chunks dedup, prendiamo il primo)
+        sample_hash = compute_content_hash(str(classified[0]["body"])) if classified else None
+        if sample_hash:
+            row = await pool.fetchrow(  # type: ignore[attr-defined]
+                "SELECT r.slug, r.title FROM regulation_chunks rc "
+                "JOIN regulations r ON r.id = rc.regulation_id "
+                "WHERE rc.content_hash = $1 AND rc.is_current = true "
+                "  AND r.id != $2::uuid "
+                "LIMIT 1",
+                sample_hash, regulation_id,
+            )
+            if row:
+                alias_of_slug = row["slug"]
+        # Auto-archive orphan regulation (status=ABROGATA) cosi' non appare
+        # in lista vigenti + non occupa slot UI
+        await pool.execute(  # type: ignore[attr-defined]
+            "UPDATE regulations SET status='ABROGATA' WHERE id = $1",
+            regulation_id,
+        )
+        logger.warning(
+            "ingestion_orphan_dedup_auto_archived",
+            regulation_id=regulation_id,
+            slug=slug,
+            alias_of=alias_of_slug,
+            deduped_count=deduped_count,
+        )
 
     # F2.6 (D1 piano v2): step POST-embed di edge extraction. Dietro flag
     # `v2_features.kg_traversal_enabled` (default OFF) per non aggiungere
@@ -1455,6 +1508,9 @@ async def ingest_regulation_file(
         "regulation_ingested",
         regulation_id=regulation_id,
         slug=slug,
-        chunks_count=len(classified),
+        chunks_count=inserted_count,
+        deduped_count=deduped_count,
+        is_duplicate_pdf=is_duplicate_pdf,
+        alias_of=alias_of_slug,
     )
-    return regulation_id, len(classified)
+    return regulation_id, inserted_count, is_duplicate_pdf, alias_of_slug

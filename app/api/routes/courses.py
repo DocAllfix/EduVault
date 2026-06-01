@@ -182,8 +182,8 @@ async def create_course(
 
     course_id = await pool.fetchval(
         "INSERT INTO courses (title, course_type, target, duration_hours, "
-        "region, brand_preset_id, created_by, status) "
-        "VALUES ($1, $2, $3, $4, $5, $6, $7, 'generating') RETURNING id",
+        "region, brand_preset_id, created_by, status, outputs) "
+        "VALUES ($1, $2, $3, $4, $5, $6, $7, 'generating', $8) RETURNING id",
         f"Corso {req.course_type}",  # placeholder title; UI can rename later
         req.course_type,
         req.target.value,
@@ -191,6 +191,7 @@ async def create_course(
         req.region,
         uuid_mod.UUID(req.brand_preset_id),
         uuid_mod.UUID(str(user["id"])),
+        req.outputs,  # F-BUG-AUDIO 2026-06-01: persistere outputs (era scartato)
     )
     job_id = await pool.fetchval(
         "INSERT INTO generation_jobs (course_id, status, progress_percent) "

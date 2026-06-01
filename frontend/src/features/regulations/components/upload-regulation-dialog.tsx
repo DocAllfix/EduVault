@@ -167,7 +167,20 @@ export function UploadRegulationDialog() {
     }
     try {
       const res = await api.uploadRegulation(file, { slug, title, reg_type: regType, region })
-      toast.success(`Normativa indicizzata: ${res.chunks_count} chunk.`)
+      // Fix 2026-06-01 orphan dedup: backend ritorna is_duplicate_pdf=true
+      // quando tutti i chunks sono gia' in DB (PDF identico a normativa
+      // precedente). In quel caso la regulation orphan e' auto-archiviata
+      // (ABROGATA). Toast diverso per chiarezza.
+      if (res.is_duplicate_pdf) {
+        toast.info(
+          res.alias_of_slug
+            ? `Documento gia' indicizzato come "${res.alias_of_slug}". Nessun nuovo chunk aggiunto.`
+            : "Documento gia' indicizzato. Nessun nuovo chunk aggiunto.",
+          { duration: 8000 },
+        )
+      } else {
+        toast.success(`Normativa indicizzata: ${res.chunks_count} chunk.`)
+      }
       await queryClient.invalidateQueries({ queryKey: ['regulations'] })
       setOpen(false)
       reset()

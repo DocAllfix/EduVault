@@ -32,6 +32,9 @@ router = APIRouter(prefix="/api/regulations", tags=["regulations"])
 class UploadResponse(BaseModel):
     regulation_id: str
     chunks_count: int
+    # Fix 2026-06-01 orphan dedup: campi opzionali per UI toast chiaro
+    is_duplicate_pdf: bool = False
+    alias_of_slug: str | None = None
 
 
 class RegulationSummary(BaseModel):
@@ -96,7 +99,7 @@ async def upload_regulation(
     try:
         with os.fdopen(tmp_fd, "wb") as fh:
             fh.write(raw)
-        regulation_id, chunks_count = await ingest_regulation_file(
+        regulation_id, chunks_count, is_duplicate_pdf, alias_of_slug = await ingest_regulation_file(
             tmp_path,
             slug=slug,
             title=title,
@@ -110,7 +113,12 @@ async def upload_regulation(
         if os.path.exists(tmp_path):
             os.remove(tmp_path)
 
-    return UploadResponse(regulation_id=regulation_id, chunks_count=chunks_count)
+    return UploadResponse(
+        regulation_id=regulation_id,
+        chunks_count=chunks_count,
+        is_duplicate_pdf=is_duplicate_pdf,
+        alias_of_slug=alias_of_slug,
+    )
 
 
 @router.get("", response_model=list[RegulationSummary])
