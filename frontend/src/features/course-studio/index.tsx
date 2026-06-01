@@ -230,7 +230,9 @@ export function CourseStudio() {
                   slide={selected}
                   total={slides.length}
                   courseId={id}
-                  key={`${id}-${selected.index}`}
+                  rebuildToken={courseQ.data?.last_rebuilt_at ?? null}
+                  globalSlideIndex={pos}
+                  key={`${id}-${selected.index}-${pos}`}
                 />
               </section>
 

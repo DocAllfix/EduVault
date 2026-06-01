@@ -13,6 +13,7 @@
 import { useState } from 'react'
 import { cn } from '@/lib/utils'
 import { api, type StudioSlide } from '@/lib/api'
+import { PptxCanvasRenderer } from './pptx-canvas-renderer'
 
 function bulletLines(body: string | null | undefined): string[] {
   // Backend may emit body=null with a separate `bullets: string[]` array
@@ -105,14 +106,46 @@ export function SlideViewer({
   slide,
   total,
   courseId,
+  rebuildToken,
+  globalSlideIndex,
 }: {
   slide: StudioSlide
   total: number
   courseId?: string
+  /** Token cache PPTX (last_rebuilt_at). F-STUDIO-UX Step 4. */
+  rebuildToken?: string | null
+  /**
+   * Posizione globale 0-based della slide nel deck completo (allineata
+   * all'indicizzazione PPTX). Diversa da `slide.index` che e` module-relative.
+   * F-STUDIO-UX Step 4 (2026-06-02).
+   */
+  globalSlideIndex?: number
 }) {
-  // Try the real PDF render first; only fall back to the schematic preview
-  // when the backend can't serve a PNG (no PDF on disk yet / load error).
+  // F-STUDIO-UX Step 4 (2026-06-02): try-order rendering.
+  //  1) PptxCanvasRenderer client-side (fedele al PPTX scaricabile)
+  //     -> usato se rebuildToken disponibile (corso rebuilt almeno una volta)
+  //  2) PdfPagePreview server PNG (legacy, PDF dispensa testo-only)
+  //  3) Schematic React fallback (se ne` PPTX ne` PDF disponibile)
+  const [pptxFailed, setPptxFailed] = useState(false)
   const [pdfFailed, setPdfFailed] = useState(false)
+
+  if (
+    courseId &&
+    rebuildToken &&
+    typeof globalSlideIndex === 'number' &&
+    globalSlideIndex >= 0 &&
+    !pptxFailed
+  ) {
+    return (
+      <PptxCanvasRenderer
+        courseId={courseId}
+        slideIndex={globalSlideIndex}
+        rebuildToken={rebuildToken}
+        onFallback={() => setPptxFailed(true)}
+      />
+    )
+  }
+
   if (courseId && !pdfFailed) {
     return (
       <PdfPagePreview

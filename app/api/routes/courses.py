@@ -74,6 +74,11 @@ class CourseDetail(BaseModel):
     audio_manifest_path: str | None = None
     normative_fingerprint: dict[str, Any] | None = None
     created_at: str
+    # F-STUDIO-UX Step 4 (2026-06-02): timestamp Unix dell'ultima rebuild.
+    # Usato dal frontend come cache key per il PPTX scaricato (IndexedDB).
+    # Quando il backend ricostruisce il PPTX, last_rebuilt_at cambia →
+    # cache invalidata automaticamente lato browser.
+    last_rebuilt_at: str | None = None
 
 
 class CertifyResponse(BaseModel):
@@ -288,6 +293,13 @@ async def get_course(
 
         fingerprint = json.loads(fingerprint)
 
+    last_rebuilt = course.get("last_rebuilt_at")
+    last_rebuilt_str = (
+        last_rebuilt.isoformat()
+        if last_rebuilt is not None and hasattr(last_rebuilt, "isoformat")
+        else None
+    )
+
     return CourseDetail(
         id=str(course["id"]),
         title=course["title"],
@@ -301,6 +313,7 @@ async def get_course(
         audio_manifest_path=course.get("audio_manifest_path"),
         normative_fingerprint=fingerprint,
         created_at=course["created_at"].isoformat(),
+        last_rebuilt_at=last_rebuilt_str,
     )
 
 

@@ -443,6 +443,8 @@ export interface components {
             } | null;
             /** Created At */
             created_at: string;
+            /** Last Rebuilt At — Unix timestamp ISO string (F-STUDIO-UX Step 4) */
+            last_rebuilt_at?: string | null;
         };
         /**
          * CourseRequest
