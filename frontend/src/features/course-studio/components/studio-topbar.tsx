@@ -54,10 +54,13 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog'
-import { api, tokenStorage, type StudioSlide } from '@/lib/api'
+import {
+  api,
+  tokenStorage,
+  type QualityIssuesResponse,
+  type StudioSlide,
+} from '@/lib/api'
 import { useAudioNarration } from '@/stores/audio-narration-store'
-
-import type { QualityIssuesResponse } from './quality-badge'
 
 export interface StudioTopBarProps {
   courseId: string
@@ -119,7 +122,11 @@ export function StudioTopBar({
   const warnings = qualityData?.by_severity.warning ?? 0
   const infos = qualityData?.by_severity.info ?? 0
   const uniqueProblematic = qualityData
-    ? new Set(qualityData.issues.map((i) => i.slide_index)).size
+    ? new Set(
+        qualityData.issues.map(
+          (i: { slide_index: number }) => i.slide_index,
+        ),
+      ).size
     : 0
   const hasQuality = (errors + warnings + infos) > 0
 
