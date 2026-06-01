@@ -36,6 +36,13 @@ SEARCH_THRESHOLD = 0.30
 # k default per UI grid 2x4 = 8 hit
 DEFAULT_K = 8
 
+# F-PERF 2026-06-01: max riusi della stessa immagine library intra-corso.
+# Sopra questo, _try_library scarta top-1 e usa top-2/top-3. Calibrato su
+# corso c4693833 (4 immagini coprono 46% delle 178 CONTENT_IMAGE: 2 usate
+# 30x, 2 usate 15x). Target ≥50 immagini diverse → soglia 3 max per
+# immagine. Tolleranza +1 per race condition asyncio.gather parallel.
+MAX_LIBRARY_REUSE = 3
+
 
 class LibraryHit(BaseModel):
     """Single image_library row exposed to caller (UI + cascade)."""
@@ -59,6 +66,7 @@ async def search(
     *,
     k: int = DEFAULT_K,
     threshold: float = SEARCH_THRESHOLD,
+    seen_url_counts: dict[str, int] | None = None,
 ) -> list[LibraryHit]:
     """k-NN cosine sul library + fallback GIN tag.
 
@@ -67,6 +75,11 @@ async def search(
         pool: asyncpg pool
         k: numero massimo hit (default 8 per UI grid 2x4)
         threshold: cosine_similarity minima (default 0.30)
+        seen_url_counts: F-PERF 2026-06-01. Dict opzionale {file_path: usi}
+            intra-corso. Quando valorizzato, filtra hits con
+            usage > MAX_LIBRARY_REUSE per evitare il pattern "stessa
+            immagine in 30 slide" del corso c4693833. La query SQL
+            recupera k*3 candidati per avere backup dopo il filtro.
 
     Returns:
         Lista LibraryHit ordinate per score desc. Vuota se nessun match
@@ -75,6 +88,10 @@ async def search(
     q = (query or "").strip()
     if not q:
         return []
+
+    # F-PERF dedup: se seen_url_counts attivo, recupera k*3 candidati per
+    # filtrare quelli già usati MAX_LIBRARY_REUSE volte e tornare k validi.
+    sql_limit = k * 3 if seen_url_counts is not None else k
 
     # Tier 1A: vector search via voyage multimodal text-query embedding
     try:
@@ -95,7 +112,7 @@ async def search(
             LIMIT $2
             """,
             _to_pgvector(emb),
-            k,
+            sql_limit,
         )
         hits = [
             LibraryHit(
@@ -114,6 +131,20 @@ async def search(
             for r in rows
             if float(r["score"]) >= threshold
         ]
+        # F-PERF dedup filter intra-corso
+        if seen_url_counts is not None and hits:
+            pre_count = len(hits)
+            hits = [
+                h for h in hits
+                if seen_url_counts.get(h.file_path, 0) < MAX_LIBRARY_REUSE
+            ][:k]
+            if pre_count != len(hits):
+                logger.info(
+                    "library_dedup_filtered",
+                    query=q,
+                    pre=pre_count,
+                    post=len(hits),
+                )
         if hits:
             logger.info(
                 "library_vector_search",
@@ -140,7 +171,7 @@ async def search(
         LIMIT $2
         """,
         tokens,
-        k,
+        sql_limit,
     )
     hits = [
         LibraryHit(
@@ -158,6 +189,20 @@ async def search(
         )
         for r in rows
     ]
+    # F-PERF dedup filter intra-corso anche per GIN fallback
+    if seen_url_counts is not None and hits:
+        pre_count = len(hits)
+        hits = [
+            h for h in hits
+            if seen_url_counts.get(h.file_path, 0) < MAX_LIBRARY_REUSE
+        ][:k]
+        if pre_count != len(hits):
+            logger.info(
+                "library_dedup_filtered_tag",
+                query=q,
+                pre=pre_count,
+                post=len(hits),
+            )
     logger.info("library_tag_search_fallback", query=q, tokens=tokens, n=len(hits))
     return hits
 

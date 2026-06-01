@@ -432,19 +432,35 @@ async def _resolve_query_urls(slides: list[SlideContent]) -> None:
     except Exception:
         _pool = None  # pool non inizializzato (test offline) → skip tier-0
 
+    # F-PERF 2026-06-01: dedup intra-corso library tier-0. Stesso dict
+    # `seen_urls` usato dalla cascata web e' condiviso con la library: cosi'
+    # un URL che ha gia' raggiunto budget MAX_LIBRARY_REUSE non viene piu'
+    # restituito dal library_search (filter Python-side), e search_image
+    # cascata web entra in azione → diversificazione automatica.
+    library_seen: dict[str, int] = {}
+
     async def _try_library(query: str) -> tuple[str, str] | None:
-        """Returns (url, image_id) per usage_count tracking."""
+        """Returns (url, image_id) per usage_count tracking.
+
+        F-PERF dedup: chiede k=5 candidati con filter seen_url_counts.
+        Se top-1 sopra threshold ma gia' usato MAX_LIBRARY_REUSE volte,
+        prende top-2 o top-3. Niente match valido → ritorna None →
+        cascata web.
+        """
         if _pool is None:
             return None
         try:
             from app.services.image_library_service import search as library_search
 
-            hits = await library_search(query, _pool, k=1)
+            hits = await library_search(
+                query, _pool, k=5, seen_url_counts=library_seen
+            )
             if hits and hits[0].score >= 0.30:
-                # file_path e' un path relativo al repo; lo serviamo via /assets/seeds/ static
-                # mount oppure file:// fallback. Per ora ritorniamo file_path tale e quale:
-                # il caller decide come servirlo (vedi prefetch flow).
-                return hits[0].file_path, hits[0].id
+                url = hits[0].file_path
+                # Mark used PRIMA del return (race condition tolerance:
+                # asyncio.gather parallel, GIL atomic dict mutation)
+                library_seen[url] = library_seen.get(url, 0) + 1
+                return url, hits[0].id
         except Exception as exc:  # noqa: BLE001
             logger.debug("library_tier0_skip", error=str(exc))
         return None
