@@ -620,12 +620,22 @@ def _instructor_client_for(provider: str, model: str):  # type: ignore[no-untype
 # ~300-350 token/slide, il tetto teorico è ~24 slide/chiamata; 7 dà 3× di margine sul
 # budget output. Risolve insieme cardinalità (no più tool-call troncato), profondità
 # (modello non raziona parole), latenza (payload più piccolo → meno timeout TPM).
-_BATCH_SIZE = 10  # FIX #29.6 velocizzazione: 7→10 (zero timeout su test E2E con
-                  # batch 7 → ampio headroom verso il tetto teorico ~18-24 slide/call
-                  # con max_tokens=8000. 4 batch/modulo → 3 batch/modulo, -25% chiamate.
+#
+# F-PERF SCENARIO E (2026-06-01): 10 → 15. Path instructor (primary) NON setta
+# max_tokens (linea 861 generate_module_structured), quindi usa default gpt-4.1-mini
+# (16k completion tokens). 15 slide × ~350 token/slide = ~5250 token output, ~33%
+# del tetto. Riduce ceil(N/15) batch sequenziali per modulo: corso 4h con moduli
+# di ~80 slide passa da 8 a 6 batch (−25% chiamate sequenziali intra-modulo →
+# −25% sul fattore tempo dominante). Trade-off:
+# - ZERO modifica logica (stesso fill loop sequenziale, stesse dipendenze
+#   already_titles + already_types + start_idx contigui)
+# - ZERO degrado qualità (i fix #31.3 anti-dup e #30.8 quota tipi restano attivi)
+# - Solo cambio parametro batch_size. Reversibile.
+# Atteso: corso 4h 8.5min → ~6-7min content (50% del path critico era batch loop).
+_BATCH_SIZE = 15
 # Soglia override: se il modulo ha N ≤ questo numero di slide, vai in 1 sola chiamata.
 # A 45s/slide il pacing produce ~26 slide/modulo, sotto 24+margine → spesso 1 batch basta.
-_SINGLE_CALL_THRESHOLD = 10
+_SINGLE_CALL_THRESHOLD = 15
 
 
 def _partition_chunks_for_batches(
