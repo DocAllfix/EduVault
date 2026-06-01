@@ -16,10 +16,11 @@ import { useQuery } from '@tanstack/react-query'
 import { useNavigate, useParams } from '@tanstack/react-router'
 import { ArrowLeft } from 'lucide-react'
 
+import { useSidebar } from '@/components/ui/sidebar'
+
 import { api, ApiError, type StudioSlide } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
-import { cn } from '@/lib/utils'
 import { Header } from '@/components/layout/header'
 import { Main } from '@/components/layout/main'
 import { ProfileDropdown } from '@/components/profile-dropdown'
@@ -28,31 +29,14 @@ import { SlideViewer } from './components/slide-viewer'
 import { SlideEditor } from './components/slide-editor'
 import { ImagePicker } from './components/image-picker'
 import { RegenerateDialog } from './components/regenerate-dialog'
-import { SlideActions } from './components/slide-actions'
 import { SkeletonReview } from './components/skeleton-review'
+import { SlideRail } from './components/slide-rail'
 import { StudioTopBar } from './components/studio-topbar'
-import {
-  QualityBadge,
-  QualityIssuesPanel,
-} from './components/quality-badge'
+import { QualityIssuesPanel } from './components/quality-badge'
 import { ChatPanel } from './components/chat-panel'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { MessageCircle, ShieldCheck } from 'lucide-react'
 import { useQualityChecks, getSlideMaxSeverity } from '@/hooks/use-quality-checks'
-
-function slideTypeLabel(t: string): string {
-  const map: Record<string, string> = {
-    TITLE: 'Titolo',
-    CONTENT_TEXT: 'Contenuto',
-    CONTENT_IMAGE: 'Immagine',
-    DIAGRAM: 'Diagramma',
-    QUIZ: 'Quiz',
-    CASE_STUDY: 'Caso',
-    RECAP: 'Riepilogo',
-    CLOSING: 'Chiusura',
-  }
-  return map[t] ?? t
-}
 
 export function CourseStudio() {
   const { id } = useParams({ from: '/_authenticated/courses/$id_/studio' })
@@ -60,6 +44,21 @@ export function CourseStudio() {
   const [selectedIdx, setSelectedIdx] = useState(0)
   // F4 D9: stato filtro sidebar (mostra solo slide con issue)
   const [filterProblematic, setFilterProblematic] = useState(false)
+
+  // F-STUDIO-UX Step 2 (2026-06-02): la sidebar globale (Dashboard / Normative
+  // / Admin) ruba 220px che il Course Studio puo` dedicare alla slide preview.
+  // Auto-collapse all'ingresso, ripristino stato all'uscita. Il bottone
+  // "Toggle Sidebar" nell'header shadcn-admin resta funzionante per overrride
+  // manuale.
+  const { setOpen, open: sidebarWasOpen } = useSidebar()
+  useEffect(() => {
+    const wasOpen = sidebarWasOpen
+    setOpen(false)
+    return () => {
+      if (wasOpen) setOpen(true)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // D3: a course in `skeleton_pending` has no slides yet — it shows the
   // skeleton review gate instead of the slide IDE. Cheap status query first.
@@ -205,40 +204,17 @@ export function CourseStudio() {
                   (editor in tab sotto), right rail in fondo.
                 Calibrato sulla viewport interna effettiva del Main (~726px su
                 screen 1040 con app sidebar 250px). */}
-            <div className="grid grid-cols-[180px_minmax(0,1fr)_320px] gap-3 xl:grid-cols-[220px_minmax(0,1fr)_360px] xl:gap-4">
-              {/* ─── Sidebar: toolbar azioni + lista slide ─── */}
-              <aside className="flex h-[calc(100vh-16rem)] min-w-0 flex-col gap-2">
-                <SlideActions
-                  courseId={id}
-                  selected={selected}
-                  onSelectIndex={setSelectedIdx}
-                />
-                <div className="border-border flex-1 space-y-1 overflow-y-auto rounded-lg border p-2">
-                {slides.map((s) => (
-                  <button
-                    key={s.index}
-                    onClick={() => setSelectedIdx(s.index)}
-                    className={cn(
-                      'flex w-full flex-col gap-0.5 rounded-md px-3 py-2 text-left transition-colors',
-                      s.index === selectedIdx
-                        ? 'bg-primary/10 text-primary ring-1 ring-primary/30'
-                        : 'hover:bg-muted',
-                    )}
-                  >
-                    <span className="flex items-center gap-2 text-sm font-medium leading-tight">
-                      <QualityBadge data={qualityQ.data} slideIndex={s.index} />
-                      <span className="tabular-nums text-xs opacity-70">
-                        {s.index + 1}
-                      </span>
-                      <span>{slideTypeLabel(s.slide_type)}</span>
-                    </span>
-                    <span className="text-muted-foreground line-clamp-2 text-xs leading-snug">
-                      {s.title}
-                    </span>
-                  </button>
-                ))}
-                </div>
-              </aside>
+            {/* F-STUDIO-UX Step 2 (2026-06-02): sidebar slim 56px (era 220px)
+                + auto-collapse sidebar globale per dare ~165px in piu` al canvas.
+                Pattern Tome/Pitch/Gamma: icon + numero + dot quality, info
+                completa via Tooltip hover. */}
+            <div className="grid grid-cols-[56px_minmax(0,1fr)_320px] gap-3 xl:grid-cols-[64px_minmax(0,1fr)_360px] xl:gap-4">
+              <SlideRail
+                slides={slides}
+                selectedIdx={selectedIdx}
+                onSelect={setSelectedIdx}
+                qualityData={qualityQ.data}
+              />
 
               {/* ─── Center: viewer (nav + audio sono nel TopBar) ─── */}
               <section className="flex min-w-0 flex-col gap-3">
