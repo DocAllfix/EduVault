@@ -940,24 +940,23 @@ async def get_slide_preview_png(
     idx: int,
     user: dict[str, Any] = Depends(get_current_user_streaming),
 ) -> FileResponse:
-    """Render of the actual PDF page as PNG so Course Studio shows what the
-    operator will get in the PPTX/PDF (real layout, real images, real diagrams).
+    """Render della slide come PNG: Course Studio mostra ESATTAMENTE cio` che
+    l'operatore scaricherà nel PPTX (immagini, diagrammi, layout reali).
 
-    Cached on disk under output/previews/{course_id}/{rebuild_token}/{idx}.png
-    so repeat opens of the same slide are instant; cache is keyed on the
-    course's `last_rebuilt_at` timestamp so a rebuild invalidates it
-    automatically without manual cleanup.
+    F-STUDIO-UX Step 0 (D-207, 2026-06-01): branch su ``settings.preview_source``:
+    - ``"pptx"`` (default): rendering del PPTX via LibreOffice headless → PDF
+      intermedio → pypdfium2 page extract. Fedeltà 1:1 col file scaricabile.
+    - ``"pdf_dispensa"`` (legacy/fallback): rendering del PDF dispensa Jinja2
+      testo-only (path pre-D-207). Usato se il PPTX manca o LibreOffice fallisce.
+
+    Cache on-disk: ``output/previews/{course_id}/{rebuild_token}/{idx}.png``,
+    keyed su ``courses.last_rebuilt_at`` → invalidata automaticamente al rebuild.
     """
+    from app.config import settings
+
     pool = get_pool()
     course = await _load_course_or_404(course_id, pool)
     _enforce_ownership(course, user)
-
-    pdf_path_str = course.get("pdf_path")
-    if not pdf_path_str:
-        raise HTTPException(404, "PDF non disponibile per questo corso (mai rigenerato).")
-    pdf_path = Path(pdf_path_str)
-    if not pdf_path.is_file():
-        raise HTTPException(404, "PDF mancante su disco — rigenera il corso.")
 
     # Cache token derived from the rebuild timestamp (or created_at fallback).
     ts = course.get("last_rebuilt_at") or course.get("created_at")
@@ -966,6 +965,57 @@ async def get_slide_preview_png(
     cache_dir = Path("output") / "previews" / str(course_id) / token
     cache_dir.mkdir(parents=True, exist_ok=True)
     png_path = cache_dir / f"{idx:04d}.png"
+
+    # Fast path: PNG già in cache (qualunque sia stato il source originale).
+    if png_path.is_file():
+        return FileResponse(
+            str(png_path),
+            media_type="image/png",
+            headers={"Cache-Control": "public, max-age=3600"},
+        )
+
+    # Source selection. Default "pptx" = fedele al file scaricabile.
+    use_pptx = settings.preview_source == "pptx"
+
+    if use_pptx:
+        pptx_path_str = course.get("pptx_path")
+        if pptx_path_str:
+            pptx_path = Path(pptx_path_str)
+            if pptx_path.is_file():
+                from app.services.pptx_preview_service import (
+                    PreviewRenderError,
+                    render_pptx_slide_to_png,
+                )
+
+                try:
+                    png_path = await render_pptx_slide_to_png(
+                        pptx_path=pptx_path,
+                        cache_dir=cache_dir,
+                        slide_index=idx,
+                    )
+                    return FileResponse(
+                        str(png_path),
+                        media_type="image/png",
+                        headers={"Cache-Control": "public, max-age=3600"},
+                    )
+                except PreviewRenderError as exc:
+                    # Fallback automatico al PDF dispensa se soffice fallisce
+                    # (es. PPTX corrotto, soffice timeout). Loghiamo e proviamo
+                    # comunque il path legacy invece di propagare 500.
+                    logger.warning(
+                        "preview_pptx_render_failed_fallback_pdf",
+                        course_id=course_id,
+                        slide_idx=idx,
+                        error=str(exc)[:200],
+                    )
+
+    # Legacy / fallback: render del PDF dispensa (Jinja2+WeasyPrint testo-only).
+    pdf_path_str = course.get("pdf_path")
+    if not pdf_path_str:
+        raise HTTPException(404, "PDF non disponibile per questo corso (mai rigenerato).")
+    pdf_path = Path(pdf_path_str)
+    if not pdf_path.is_file():
+        raise HTTPException(404, "PDF mancante su disco — rigenera il corso.")
 
     if not png_path.is_file():
         # Lazy import keeps cold-start cheap when nobody opens the preview.

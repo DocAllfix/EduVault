@@ -121,7 +121,13 @@ class Settings(BaseSettings):
     content_agent_concurrency: int = 50  # F-PERF 2026-06-01 FASE 3: era 20, alzato a 50 con quota Italy North 46M TPM (~7.5M TPM picco = 16% del budget). Corsi 8h hanno 24 moduli → tutti in volo simultaneamente con buffer retry. Qualita' invariata (no prompt/schema change).
     voci_per_module_concurrency: int = 4  # F-PERF 2026-06-01 FASE 4: parallelizza loop voce-per-voce intra-modulo (D-201). Era sequenziale (n_voci × ~80s LLM call = 9min bottleneck). 4 voci/modulo concorrenti × 10 moduli = 40 LLM concorrenti picco × ~5K token = 200K TPM (~0.4% budget 46M). Ordine slide preservato via gather index-aligned.
 
-    # === TTS — OPT-1: edge-tts, no API key required ===
+    # === F-STUDIO-UX 2026-06-01 Step 0 (D-207): preview source PPTX-fedele ===
+    # "pptx" (default): preview.png = render LibreOffice headless del PPTX scaricabile
+    #   → utente vede in webapp ESATTAMENTE ciò che ha nel file finale (immagini,
+    #   diagrammi, layout python-pptx).
+    # "pdf_dispensa" (legacy): comportamento pre-D-207, render del PDF dispensa
+    #   Jinja2+WeasyPrint testo-only. Fallback rapido se LibreOffice fallisce.
+    preview_source: Literal["pptx", "pdf_dispensa"] = "pptx"
     tts_voice: str = "it-IT-DiegoNeural"
 
     # === v2 refactor — provider keys (Fase 0 piano vast-hopping-sketch v2) ===
