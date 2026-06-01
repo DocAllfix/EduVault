@@ -20,7 +20,7 @@ from __future__ import annotations
 import uuid as uuid_mod
 from typing import Any, Callable, Coroutine
 
-from fastapi import Depends, HTTPException
+from fastapi import Depends, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from slowapi import Limiter
 from slowapi.util import get_remote_address
@@ -29,6 +29,10 @@ from app.services.auth_service import decode_token
 from app.services.dependencies import get_pool
 
 security = HTTPBearer()
+# Variant ``auto_error=False`` per endpoint che accettano ANCHE token in
+# query string (browser <audio>/<img> cross-origin non possono settare
+# header Authorization — vedi get_current_user_streaming).
+security_optional = HTTPBearer(auto_error=False)
 
 # Shared rate limiter, imported by both app.main (to wire app.state.limiter)
 # and by route modules (to apply per-endpoint @limiter.limit decorators).
@@ -36,21 +40,15 @@ security = HTTPBearer()
 limiter = Limiter(key_func=get_remote_address)
 
 
-async def get_current_user(
-    credentials: HTTPAuthorizationCredentials = Depends(security),
-) -> dict[str, Any]:
-    """Decode JWT, enforce access-type, enforce ``is_active`` (BP §08.2)."""
+async def _decode_and_load_user(token: str) -> dict[str, Any]:
+    """Shared helper: decode JWT + load+validate user. Solleva 401 se invalido."""
     try:
-        payload = decode_token(credentials.credentials)
+        payload = decode_token(token)
     except Exception:
         raise HTTPException(401, "Token non valido o scaduto")
-
-    # Token type check (BP §08.2)
     if payload.get("type") != "access":
         raise HTTPException(401, "Token type non valido — atteso access token")
-
     pool = get_pool()
-    # Explicit UUID conversion for asyncpg (BP §08.2)
     user = await pool.fetchrow(
         "SELECT id, email, role, is_active FROM users WHERE id = $1",
         uuid_mod.UUID(payload["sub"]),
@@ -58,6 +56,33 @@ async def get_current_user(
     if not user or not user["is_active"]:
         raise HTTPException(401, "Utente non autorizzato o disattivato")
     return dict(user)
+
+
+async def get_current_user(
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+) -> dict[str, Any]:
+    """Decode JWT, enforce access-type, enforce ``is_active`` (BP §08.2)."""
+    return await _decode_and_load_user(credentials.credentials)
+
+
+async def get_current_user_streaming(
+    request: Request,
+    credentials: HTTPAuthorizationCredentials | None = Depends(security_optional),
+) -> dict[str, Any]:
+    """Variant per endpoint ``<audio>``/``<img>`` cross-origin (audio MP3,
+    preview PNG): accetta JWT in ``Authorization: Bearer`` OPPURE in
+    ``?token=`` query string (stesso pattern WebSocket BP §08.8). Browser
+    cross-origin tag elements non possono settare custom headers, quindi
+    fallback obbligatorio sul query param.
+    """
+    token: str | None = None
+    if credentials is not None:
+        token = credentials.credentials
+    if not token:
+        token = request.query_params.get("token")
+    if not token:
+        raise HTTPException(401, "Token mancante")
+    return await _decode_and_load_user(token)
 
 
 def require_role(

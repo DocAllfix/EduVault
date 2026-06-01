@@ -27,7 +27,12 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Reques
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
-from app.api.dependencies import get_current_user, limiter, require_role
+from app.api.dependencies import (
+    get_current_user,
+    get_current_user_streaming,
+    limiter,
+    require_role,
+)
 from app.models.core import SlideDensity
 from app.models.pipeline import ModuleSkeleton
 from app.models.requests import CourseRequest, CourseResponse
@@ -840,7 +845,7 @@ async def get_course_slide_audio(
     course_id: str,
     idx: int,
     module_index: int | None = None,
-    user: dict[str, Any] = Depends(get_current_user),
+    user: dict[str, Any] = Depends(get_current_user_streaming),
 ) -> FileResponse:
     """Stream del singolo MP3 della slide (per AudioPlayer in-app FASE 10).
 
@@ -933,7 +938,7 @@ async def get_course_slide_audio_info(
 async def get_slide_preview_png(
     course_id: str,
     idx: int,
-    user: dict[str, Any] = Depends(get_current_user),
+    user: dict[str, Any] = Depends(get_current_user_streaming),
 ) -> FileResponse:
     """Render of the actual PDF page as PNG so Course Studio shows what the
     operator will get in the PPTX/PDF (real layout, real images, real diagrams).
