@@ -23,7 +23,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import structlog
 
@@ -469,84 +469,109 @@ async def _generate_module_h8(
             out["CASE_STUDY"] = case_total
         return out
 
-    # ── Loop voce-per-voce ──
+    # ── Loop voce-per-voce — F-PERF FASE 4 (D-201 fix): parallelo con Semaphore. ──
+    # Era sequenziale per `previous_voci_titles` cumulativo. Refactor: la voce N riceve
+    # SUMMARY di TUTTE le altre voci del modulo (escludendo se stessa), invece di solo
+    # quelle precedenti — informazione totale > parziale-progressiva, l'LLM riduce le
+    # ambiguita`. Ordine slide preservato via gather index-aligned.
     from app.agents.prompts import build_voice_prompt
 
-    all_content_slides = []
-    previous_voci_titles: list[str] = []  # per "voci precedenti summary"
+    # Pre-filter voci con pool non vuoto (preserve voce_idx originale per dist_voce)
+    voci_to_process: list[tuple[int, dict[str, Any]]] = []
     for voce_idx, voce in enumerate(voci_skeleton):
         ord_v = _ord(voce)
-        sub_topic = str(voce["sub_topic"])
-        retrieval_query = str(voce["retrieval_query"])
         voce_chunks = chunks_by_voce.get(ord_v, [])
         if not voce_chunks:
             logger.warning(
                 "h8_voce_pool_empty_skip",
                 module_index=mod_idx,
                 voce_ordinal=ord_v,
-                sub_topic=sub_topic[:60],
+                sub_topic=str(voce["sub_topic"])[:60],
             )
             continue
+        voci_to_process.append((voce_idx, voce))
 
-        n_slide_voce = slide_per_voce.get(ord_v, 2)
-        dist_voce = _split_distribution(mod_slide_distribution, n_slide_voce, voce_idx)
+    # Summary di TUTTE le altre voci del modulo (escludendo la corrente)
+    all_voci_titles = [str(v["sub_topic"]) for _, v in voci_to_process]
 
-        # Summary voci precedenti (compatto: solo titoli sub_topic gia` trattati)
-        prev_voci_summary = (
-            "Voci gia` generate in questo modulo:\n"
-            + "\n".join(f"- v{i + 1}: {t}" for i, t in enumerate(previous_voci_titles))
-        ) if previous_voci_titles else "Prima voce del modulo (nessun contesto precedente)."
+    sem_voci = asyncio.Semaphore(settings.voci_per_module_concurrency)
 
-        voce_prompt = build_voice_prompt(
-            module_index=mod_idx,
-            module_title=mod_title,
-            voice_ordinal=ord_v,
-            voice_sub_topic=sub_topic,
-            voice_retrieval_query=retrieval_query,
-            voice_chunks=voce_chunks,
-            slide_count_for_voice=n_slide_voce,
-            slide_distribution_for_voice=dist_voce,
-            style_patterns=style_patterns,
-            previous_voices_summary=prev_voci_summary,
-            target=target,
-        )
+    async def _generate_one_voce(local_idx: int, voce_idx: int, voce: dict[str, Any]) -> list[Any] | None:
+        async with sem_voci:
+            ord_v = _ord(voce)
+            sub_topic = str(voce["sub_topic"])
+            retrieval_query = str(voce["retrieval_query"])
+            voce_chunks = chunks_by_voce.get(ord_v, [])
+            n_slide_voce = slide_per_voce.get(ord_v, 2)
+            dist_voce = _split_distribution(mod_slide_distribution, n_slide_voce, voce_idx)
 
-        chunks_text_voce = "\n\n".join(
-            f"[ID: {c.chunk_id}] Art. {c.article or '?'}: {c.body}"
-            for c in voce_chunks[:30]
-        )
+            other_titles = [t for i, t in enumerate(all_voci_titles) if i != local_idx]
+            prev_voci_summary = (
+                "Altre voci del modulo (non duplicare contenuti):\n"
+                + "\n".join(f"- {t}" for t in other_titles)
+            ) if other_titles else "Unica voce del modulo (nessuna altra voce)."
 
-        try:
-            voce_module_obj, voce_telemetry = await generate_module_structured(
-                system=system_prompt,
-                user_prompt=voce_prompt,
+            voce_prompt = build_voice_prompt(
                 module_index=mod_idx,
-                module_title=f"{mod_title} - voce {ord_v}: {sub_topic[:40]}",
-                expected_slides=n_slide_voce,
-                chunks_text=chunks_text_voce,
-                slide_distribution=dist_voce,
+                module_title=mod_title,
+                voice_ordinal=ord_v,
+                voice_sub_topic=sub_topic,
+                voice_retrieval_query=retrieval_query,
+                voice_chunks=voce_chunks,
+                slide_count_for_voice=n_slide_voce,
+                slide_distribution_for_voice=dist_voce,
+                style_patterns=style_patterns,
+                previous_voices_summary=prev_voci_summary,
+                target=target,
             )
-            logger.info(
-                "h8_voce_generated",
-                module_index=mod_idx,
-                voce_ordinal=ord_v,
-                sub_topic=sub_topic[:60],
-                expected=n_slide_voce,
-                generated=len(voce_module_obj.slides),
-                provider=voce_telemetry.get("provider_used"),
+
+            chunks_text_voce = "\n\n".join(
+                f"[ID: {c.chunk_id}] Art. {c.article or '?'}: {c.body}"
+                for c in voce_chunks[:30]
             )
-            all_content_slides.extend(list(voce_module_obj.slides))
-            previous_voci_titles.append(sub_topic)
-        except Exception as exc:
-            logger.warning(
-                "h8_voce_failed_skipped",
-                module_index=mod_idx,
-                voce_ordinal=ord_v,
-                sub_topic=sub_topic[:60],
-                error_class=type(exc).__name__,
-                error=str(exc)[:200],
-            )
-            # Continue with next voce: parziale OK, non far cadere tutto il modulo.
+
+            try:
+                voce_module_obj, voce_telemetry = await generate_module_structured(
+                    system=system_prompt,
+                    user_prompt=voce_prompt,
+                    module_index=mod_idx,
+                    module_title=f"{mod_title} - voce {ord_v}: {sub_topic[:40]}",
+                    expected_slides=n_slide_voce,
+                    chunks_text=chunks_text_voce,
+                    slide_distribution=dist_voce,
+                )
+                logger.info(
+                    "h8_voce_generated",
+                    module_index=mod_idx,
+                    voce_ordinal=ord_v,
+                    sub_topic=sub_topic[:60],
+                    expected=n_slide_voce,
+                    generated=len(voce_module_obj.slides),
+                    provider=voce_telemetry.get("provider_used"),
+                )
+                return list(voce_module_obj.slides)
+            except Exception as exc:
+                logger.warning(
+                    "h8_voce_failed_skipped",
+                    module_index=mod_idx,
+                    voce_ordinal=ord_v,
+                    sub_topic=sub_topic[:60],
+                    error_class=type(exc).__name__,
+                    error=str(exc)[:200],
+                )
+                return None
+
+    # gather preserva l'ordine degli argomenti → all_content_slides resta in ordine voci
+    voce_results = await asyncio.gather(
+        *(_generate_one_voce(li, vi, v) for li, (vi, v) in enumerate(voci_to_process)),
+        return_exceptions=False,
+    )
+    all_content_slides: list[Any] = []
+    previous_voci_titles: list[str] = []
+    for (vi, v), result in zip(voci_to_process, voce_results):
+        if result is not None:
+            all_content_slides.extend(result)
+            previous_voci_titles.append(str(v["sub_topic"]))
 
     if not all_content_slides:
         raise RuntimeError(f"H8: tutte le voci fallite per modulo {mod_idx}, ZERO slide generate")

@@ -119,6 +119,7 @@ class Settings(BaseSettings):
     # parallele effettive in volo con margine ai retry instructor — dimensionato sui
     # token, non sui moduli (ogni batch da 7 slide ~8K token, vedi FIX #29.1).
     content_agent_concurrency: int = 50  # F-PERF 2026-06-01 FASE 3: era 20, alzato a 50 con quota Italy North 46M TPM (~7.5M TPM picco = 16% del budget). Corsi 8h hanno 24 moduli → tutti in volo simultaneamente con buffer retry. Qualita' invariata (no prompt/schema change).
+    voci_per_module_concurrency: int = 4  # F-PERF 2026-06-01 FASE 4: parallelizza loop voce-per-voce intra-modulo (D-201). Era sequenziale (n_voci × ~80s LLM call = 9min bottleneck). 4 voci/modulo concorrenti × 10 moduli = 40 LLM concorrenti picco × ~5K token = 200K TPM (~0.4% budget 46M). Ordine slide preservato via gather index-aligned.
 
     # === TTS — OPT-1: edge-tts, no API key required ===
     tts_voice: str = "it-IT-DiegoNeural"
