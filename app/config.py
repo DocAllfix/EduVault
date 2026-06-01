@@ -86,6 +86,25 @@ class Settings(BaseSettings):
     azure_openai_deployment_classify: str = "gpt-4.1-mini"  # classify_chunk
     azure_openai_deployment_premium: str = "gpt-4o"         # L1: fallback premium
 
+    # F-PERF 2026-06-01 FASE 3 — Tier Azure OpenAI gpt-4.1-mini.
+    # Italy North Global Standard: 46M TPM (era 200k, +230×).
+    # Concurrency cap derivato dal budget tokens-per-minute SENZA degradare
+    # qualita' (nessun cambio modello, deployment, prompts, retry interni):
+    # - classify_chunk (settings.classify_max_concurrent): chunk avg ~3500
+    #   tokens. 46M TPM / (3500 × 5s/60s) ≈ 157k RPS teorici. Cap 200
+    #   concurrent = ~84k TPM/sec picco → 5M TPM sustained, ~11% budget.
+    # - content_agent (settings.content_agent_concurrency, riga 125): cap 50
+    #   moduli simultaneamente. Calcolato a riga 125 docstring.
+    # Qualita': cap concurrency NON tocca prompt, instructor schema,
+    # retry interno fill_loop, structured output. Solo velocita'.
+    azure_openai_tpm: int = 46_000_000
+    classify_max_concurrent: int = 200
+
+    # F-PERF FASE 3 — Voyage embed batch boost
+    # Voyage v3 supporta batch 1024 (era 128). Triplica throughput embed
+    # senza degradare qualita' (stesso modello, stessa dimensione).
+    voyage_embed_batch_size: int = 512
+
     # === Anthropic (legacy + L2 fallback emergenza) ===
     # llm_classify_model / llm_content_model = nomi dei modelli Anthropic usati SOLO
     # quando llm_provider="anthropic" oppure quando il fallback raggiunge L2.
@@ -99,7 +118,7 @@ class Settings(BaseSettings):
     # espliciti (Azure mette in coda invece di rifiutare). 10 lascia ~6 chiamate
     # parallele effettive in volo con margine ai retry instructor — dimensionato sui
     # token, non sui moduli (ogni batch da 7 slide ~8K token, vedi FIX #29.1).
-    content_agent_concurrency: int = 20  # FIX #29.6 velocizzazione (era 10): test E2E ha mostrato zero saturazione TPM con 10 moduli paralleli, alziamo per -30% tempo totale.
+    content_agent_concurrency: int = 50  # F-PERF 2026-06-01 FASE 3: era 20, alzato a 50 con quota Italy North 46M TPM (~7.5M TPM picco = 16% del budget). Corsi 8h hanno 24 moduli → tutti in volo simultaneamente con buffer retry. Qualita' invariata (no prompt/schema change).
 
     # === TTS — OPT-1: edge-tts, no API key required ===
     tts_voice: str = "it-IT-DiegoNeural"

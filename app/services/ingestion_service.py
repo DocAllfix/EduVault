@@ -1357,11 +1357,15 @@ async def ingest_regulation_file(
     full_text = parse_regulation_pdf(pdf_path)
     chunks = chunk_regulation(full_text, regulation_id)
 
-    # Boost 2026-05-25: classify_chunk PARALLELIZZATO con Semaphore(50).
-    # DeepSeek V4 Flash ha 2500 concurrency limit (classify task usa Flash).
-    # D.Lgs 81 1831 chunks: 1831/50 = 37 wave × ~1s = ~40s vs 30 min sequenziale.
+    # Boost 2026-05-25: classify_chunk PARALLELIZZATO con Semaphore.
+    # F-PERF 2026-06-01 FASE 3: cap derivato da settings.classify_max_concurrent
+    # (default 30) per rispettare Azure OpenAI gpt-4.1-mini 200k TPM tier.
+    # Calcolo: chunk avg ~3500 tokens, 30 concurrent × 3500 / 5s avg = 21k TPM
+    # sustained → safe headroom su 200k. Era hardcoded 50 → causava burst 429
+    # in ingestioni lunghe (>500 chunks).
     import asyncio as _asyncio
-    sem = _asyncio.Semaphore(50)
+    from app.config import settings as _s_cfg
+    sem = _asyncio.Semaphore(_s_cfg.classify_max_concurrent)
 
     async def _classify_one(chunk: dict[str, object]) -> dict[str, object]:
         async with sem:
