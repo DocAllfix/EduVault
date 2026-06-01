@@ -1,25 +1,25 @@
 /**
- * SlideRail — F-STUDIO-UX Step 2 (2026-06-02).
+ * SlideRail — F-STUDIO-UX Step 6 (2026-06-02).
  *
  * ─── Design intent (frontend-design) ──────────────────────────────────────
- * Rail verticale slim 56px sulla sinistra del Course Studio. Sostituisce la
- * sidebar testuale 220px (numero + tipo + titolo line-clamp-2). Pattern di
- * riferimento: Tome, Pitch, Gamma — sidebar visual minimale, info ricca
- * on-hover via Tooltip.
+ * Rail verticale sulla sinistra del Course Studio, organizzato in ACCORDION:
+ *   1 modulo aperto alla volta. Click su un modulo → si apre con le sue slide,
+ *   gli altri si chiudono. Auto-open del modulo della slide corrente.
  *
- * Per ogni slide:
+ * Pattern Tome/Notion/Gamma: navigation per sezione, riduce cognitive load,
+ * niente infinite scroll su corsi 4h+ (80-100+ slide).
+ *
+ * Per ogni slide (dentro accordion content):
  *  - dot quality severity (verde / arancione / rosso) o vuoto
- *  - numero slide tabular-nums (1-based, posizionale)
+ *  - numero slide tabular-nums (posizionale globale)
  *  - icon Lucide del tipo (FileText, Image, ListChecks, ecc.)
- * On-hover Tooltip: "Slide N — TYPE_LABEL — Titolo intero" + eventuali issue.
+ *  - title line-clamp-1 (ora c'e` spazio dentro l'accordion content)
  *
- * Group divider tra moduli: sticky header "M1", "M2"... a 10px font-mono.
- * Filter problematic resta lato genitore (filterProblematic gia` applicato a
- * slides[] prima del rendering).
- *
- * Recupera ~165px larghezza per il canvas slide preview.
+ * Filter problematic (lato genitore) gia` applicato a `slides[]`: l'accordion
+ * mostrera` solo i moduli con slide problematiche residue.
  */
 
+import { useEffect, useState } from 'react'
 import {
   FileText,
   Image as ImageIcon,
@@ -34,11 +34,11 @@ import {
 import type { LucideIcon } from 'lucide-react'
 
 import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from '@/components/ui/tooltip'
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from '@/components/ui/accordion'
 import { cn } from '@/lib/utils'
 import type { QualityIssuesResponse, StudioSlide } from '@/lib/api'
 
@@ -74,7 +74,19 @@ export function SlideRail({
   onSelect,
   qualityData,
 }: SlideRailProps) {
-  // Costruzione gruppi per modulo: array di { moduleIndex, slides[] }
+  // Trova la slide selezionata + il suo modulo, per auto-open accordion.
+  const selectedSlide = slides.find((s) => s.index === selectedIdx)
+  const currentModuleId =
+    selectedSlide != null ? `m-${selectedSlide.module_index ?? 0}` : 'm-0'
+  const [openModuleId, setOpenModuleId] = useState<string>(currentModuleId)
+
+  // Auto-open: quando l'utente cambia slide (frecce, click TopBar prev/next)
+  // e attraversa un modulo, l'accordion segue.
+  useEffect(() => {
+    setOpenModuleId(currentModuleId)
+  }, [currentModuleId])
+
+  // Raggruppa le slide per modulo (preserva l'ordine).
   const groups: Array<{ moduleIndex: number; items: StudioSlide[] }> = []
   let currentGroup: { moduleIndex: number; items: StudioSlide[] } | null = null
   for (const s of slides) {
@@ -87,32 +99,61 @@ export function SlideRail({
   }
 
   return (
-    <TooltipProvider delayDuration={150}>
-      <aside className="border-border bg-card flex h-[calc(100vh-7rem)] w-14 flex-col items-stretch overflow-y-auto rounded-lg border">
-        {groups.map((g) => (
-          <div key={`mod-${g.moduleIndex}`} className="flex flex-col">
-            <div className="bg-muted/40 text-muted-foreground sticky top-0 z-10 mx-1 mt-1 rounded px-1.5 py-0.5 text-center font-mono text-[10px] font-semibold tabular-nums tracking-tight">
-              M{g.moduleIndex + 1}
-            </div>
-            <ul className="space-y-0.5 py-1">
-              {g.items.map((s, posLocal) => {
-                const isSelected = s.index === selectedIdx
-                const meta = getMeta(s.slide_type)
-                const Icon = meta.icon
-                // pos globale all'interno di `slides` per il numero
-                const posGlobal = slides.findIndex((x) => x.index === s.index)
-                const label = `Slide ${posGlobal + 1} — ${meta.label}${
-                  s.title ? ` — ${s.title}` : ''
-                }`
-                return (
-                  <li key={`${g.moduleIndex}-${s.index}-${posLocal}`}>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
+    <aside className="border-border bg-card flex h-[calc(100vh-7rem)] w-56 flex-col overflow-y-auto rounded-lg border p-1">
+      <Accordion
+        type="single"
+        collapsible
+        value={openModuleId}
+        onValueChange={(v) => setOpenModuleId(v || '')}
+        className="w-full"
+      >
+        {groups.map((g) => {
+          const moduleSlideCount = g.items.length
+          const moduleHasIssue = qualityData?.issues.some(
+            (i: { slide_index: number }) => {
+              const slideInGroup = g.items.find((s) => s.index === i.slide_index)
+              return slideInGroup != null
+            },
+          )
+          return (
+            <AccordionItem
+              key={`mod-${g.moduleIndex}`}
+              value={`m-${g.moduleIndex}`}
+              className="border-b-0"
+            >
+              <AccordionTrigger className="rounded-md px-2 py-2 text-xs font-semibold tracking-wide uppercase hover:bg-muted hover:no-underline data-[state=open]:bg-muted/60">
+                <span className="flex items-center gap-2">
+                  {moduleHasIssue && (
+                    <span
+                      className="bg-amber-500 inline-block size-1.5 rounded-full"
+                      aria-label="Modulo con slide problematiche"
+                    />
+                  )}
+                  <span className="tabular-nums">M{g.moduleIndex + 1}</span>
+                  <span className="text-muted-foreground font-normal normal-case">
+                    · {moduleSlideCount} slide
+                  </span>
+                </span>
+              </AccordionTrigger>
+              <AccordionContent className="pb-2 pt-1">
+                <ul className="space-y-0.5">
+                  {g.items.map((s) => {
+                    const isSelected = s.index === selectedIdx
+                    const meta = getMeta(s.slide_type)
+                    const Icon = meta.icon
+                    const posGlobal = slides.findIndex(
+                      (x) => x.index === s.index,
+                    )
+                    const label = `Slide ${posGlobal + 1} — ${meta.label}${
+                      s.title ? ` — ${s.title}` : ''
+                    }`
+                    return (
+                      <li key={`${g.moduleIndex}-${s.index}`}>
                         <button
                           type="button"
                           onClick={() => onSelect(s.index)}
                           className={cn(
-                            'group relative mx-auto flex size-11 flex-col items-center justify-center gap-0.5 rounded-md transition-colors',
+                            'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs transition-colors',
                             isSelected
                               ? 'bg-primary/15 text-primary ring-primary/40 ring-1'
                               : 'hover:bg-muted text-muted-foreground hover:text-foreground',
@@ -120,36 +161,27 @@ export function SlideRail({
                           aria-label={label}
                           aria-current={isSelected ? 'true' : undefined}
                         >
-                          <span className="absolute top-0.5 left-0.5">
-                            <QualityBadge
-                              data={qualityData}
-                              slideIndex={s.index}
-                            />
-                          </span>
-                          <span className="tabular-nums text-[10px] font-semibold leading-none">
+                          <QualityBadge
+                            data={qualityData}
+                            slideIndex={s.index}
+                          />
+                          <span className="tabular-nums text-[10px] font-semibold opacity-70 w-5 shrink-0">
                             {posGlobal + 1}
                           </span>
-                          <Icon className="size-3.5" aria-hidden="true" />
+                          <Icon className="size-3.5 shrink-0" aria-hidden="true" />
+                          <span className="line-clamp-1 flex-1">
+                            {s.title || meta.label}
+                          </span>
                         </button>
-                      </TooltipTrigger>
-                      <TooltipContent side="right" className="max-w-xs">
-                        <div className="text-xs font-medium">
-                          {meta.label} · Slide {posGlobal + 1}
-                        </div>
-                        {s.title && (
-                          <div className="text-muted-foreground mt-0.5 line-clamp-3 text-xs">
-                            {s.title}
-                          </div>
-                        )}
-                      </TooltipContent>
-                    </Tooltip>
-                  </li>
-                )
-              })}
-            </ul>
-          </div>
-        ))}
-      </aside>
-    </TooltipProvider>
+                      </li>
+                    )
+                  })}
+                </ul>
+              </AccordionContent>
+            </AccordionItem>
+          )
+        })}
+      </Accordion>
+    </aside>
   )
 }

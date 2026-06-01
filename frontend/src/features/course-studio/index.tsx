@@ -35,6 +35,7 @@ import { StudioTopBar } from './components/studio-topbar'
 import { QualityIssuesPanel } from './components/quality-badge'
 import { ChatPanel } from './components/chat-panel'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Separator } from '@/components/ui/separator'
 import { MessageCircle, ShieldCheck } from 'lucide-react'
 import { useQualityChecks, getSlideMaxSeverity } from '@/hooks/use-quality-checks'
 
@@ -216,7 +217,7 @@ export function CourseStudio() {
                 + auto-collapse sidebar globale per dare ~165px in piu` al canvas.
                 Pattern Tome/Pitch/Gamma: icon + numero + dot quality, info
                 completa via Tooltip hover. */}
-            <div className="grid grid-cols-[56px_minmax(0,1fr)_320px] gap-3 xl:grid-cols-[64px_minmax(0,1fr)_360px] xl:gap-4">
+            <div className="grid grid-cols-[224px_minmax(0,1fr)_320px] gap-3 xl:grid-cols-[240px_minmax(0,1fr)_360px] xl:gap-4">
               <SlideRail
                 slides={slides}
                 selectedIdx={selectedIdx}
@@ -236,46 +237,60 @@ export function CourseStudio() {
                 />
               </section>
 
-              {/* ─── Right rail: editor + Tabs (Quality | Chat) + AI regen + image picker ─── */}
-              <aside className="border-border h-[calc(100vh-16rem)] space-y-4 overflow-y-auto rounded-lg border p-4">
-                <h2 className="text-sm font-semibold tracking-wide uppercase">
-                  Modifica slide {selected.index + 1}
-                </h2>
-                <SlideEditor courseId={id} slide={selected} />
-                {/* F4+F6 Tabs Quality/Chat (vast-hopping post-MVP 2026-05-31) */}
-                <Tabs defaultValue="quality">
-                  <TabsList className="grid w-full grid-cols-2">
-                    <TabsTrigger value="quality" className="gap-1.5 text-xs">
-                      <ShieldCheck className="size-3.5" />
-                      Qualità
-                    </TabsTrigger>
-                    <TabsTrigger value="chat" className="gap-1.5 text-xs">
-                      <MessageCircle className="size-3.5" />
-                      Chat AI
-                    </TabsTrigger>
-                  </TabsList>
-                  <TabsContent value="quality" className="mt-3">
-                    <QualityIssuesPanel
-                      courseId={id}
-                      slideIndex={selected.index}
-                      data={qualityQ.data}
-                      slideType={selected.slide_type}
-                    />
-                  </TabsContent>
-                  <TabsContent
-                    value="chat"
-                    className="mt-3 flex h-[480px] flex-col"
-                  >
-                    <ChatPanel courseId={id} slideIndex={selected.index} />
-                  </TabsContent>
-                </Tabs>
-                <div className="border-border space-y-2 border-t pt-4">
-                  <RegenerateDialog courseId={id} slide={selected} />
-                  {(selected.slide_type === 'CONTENT_IMAGE' ||
-                    selected.slide_type === 'DIAGRAM') && (
-                    <ImagePicker courseId={id} slide={selected} />
-                  )}
-                </div>
+              {/* ─── Right rail (F-STUDIO-UX Step 5 2026-06-02): 2 sezioni
+                  distinte con Separator + label di sezione.
+                  - Sopra: "Contenuto slide" (editor testo puro)
+                  - Sotto: "Strumenti AI" (Tabs Quality/Chat + Regenerate + ImagePicker) */}
+              <aside className="border-border h-[calc(100vh-7rem)] overflow-y-auto rounded-lg border p-4">
+                {/* ─── Sezione 1: Contenuto slide (editor testo) ─── */}
+                <section aria-label="Contenuto slide">
+                  <h3 className="text-muted-foreground text-[11px] font-semibold uppercase tracking-wider mb-3">
+                    Contenuto slide #{(pos + 1)}
+                  </h3>
+                  <SlideEditor courseId={id} slide={selected} />
+                </section>
+
+                <Separator className="my-5" />
+
+                {/* ─── Sezione 2: Strumenti AI ─── */}
+                <section aria-label="Strumenti AI">
+                  <h3 className="text-muted-foreground text-[11px] font-semibold uppercase tracking-wider mb-3">
+                    Strumenti AI
+                  </h3>
+                  <Tabs defaultValue="quality">
+                    <TabsList className="grid w-full grid-cols-2">
+                      <TabsTrigger value="quality" className="gap-1.5 text-xs">
+                        <ShieldCheck className="size-3.5" />
+                        Qualità
+                      </TabsTrigger>
+                      <TabsTrigger value="chat" className="gap-1.5 text-xs">
+                        <MessageCircle className="size-3.5" />
+                        Chat AI
+                      </TabsTrigger>
+                    </TabsList>
+                    <TabsContent value="quality" className="mt-3">
+                      <QualityIssuesPanel
+                        courseId={id}
+                        slideIndex={selected.index}
+                        data={qualityQ.data}
+                        slideType={selected.slide_type}
+                      />
+                    </TabsContent>
+                    <TabsContent
+                      value="chat"
+                      className="mt-3 flex h-[420px] flex-col"
+                    >
+                      <ChatPanel courseId={id} slideIndex={selected.index} />
+                    </TabsContent>
+                  </Tabs>
+                  <div className="mt-4 space-y-2">
+                    <RegenerateDialog courseId={id} slide={selected} />
+                    {(selected.slide_type === 'CONTENT_IMAGE' ||
+                      selected.slide_type === 'DIAGRAM') && (
+                      <ImagePicker courseId={id} slide={selected} />
+                    )}
+                  </div>
+                </section>
               </aside>
             </div>
           </>
