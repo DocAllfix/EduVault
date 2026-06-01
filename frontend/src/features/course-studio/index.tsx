@@ -270,7 +270,11 @@ export function CourseStudio() {
                   courseId={id}
                   key={`${id}-${selected.index}`}
                 />
-                <AudioPlayer courseId={id} slideIndex={selected.index} />
+                <AudioPlayer
+                  courseId={id}
+                  slideIndex={selected.index}
+                  moduleIndex={selected.module_index}
+                />
               </section>
 
               {/* ─── Right rail: editor + Tabs (Quality | Chat) + AI regen + image picker ─── */}

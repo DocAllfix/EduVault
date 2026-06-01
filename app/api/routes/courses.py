@@ -839,17 +839,34 @@ async def patch_course_slide_image(
 async def get_course_slide_audio(
     course_id: str,
     idx: int,
+    module_index: int | None = None,
     user: dict[str, Any] = Depends(get_current_user),
 ) -> FileResponse:
-    """Stream del singolo MP3 della slide (per AudioPlayer in-app FASE 10)."""
+    """Stream del singolo MP3 della slide (per AudioPlayer in-app FASE 10).
+
+    F-AUDIO-FIX 2026-06-01: ``slide_index`` e' module-relative, quindi piu' moduli
+    condividono lo stesso valore. Se ``module_index`` arriva come query param, usalo
+    per identificare univocamente la riga; altrimenti usa fetchrow legacy come
+    fallback (compat per audio_tracks pre-migration 014 senza module_index).
+    """
     pool = get_pool()
     course = await _load_course_or_404(course_id, pool)
     _enforce_ownership(course, user)
-    row = await pool.fetchrow(
-        "SELECT audio_path FROM audio_tracks WHERE course_id = $1 AND slide_index = $2",
-        uuid_mod.UUID(course_id),
-        idx,
-    )
+    if module_index is not None:
+        row = await pool.fetchrow(
+            "SELECT audio_path FROM audio_tracks "
+            "WHERE course_id = $1 AND module_index = $2 AND slide_index = $3",
+            uuid_mod.UUID(course_id),
+            module_index,
+            idx,
+        )
+    else:
+        row = await pool.fetchrow(
+            "SELECT audio_path FROM audio_tracks "
+            "WHERE course_id = $1 AND slide_index = $2",
+            uuid_mod.UUID(course_id),
+            idx,
+        )
     if not row or not row["audio_path"]:
         raise HTTPException(404, f"Audio slide {idx} non trovato")
     audio_path = Path(row["audio_path"])
@@ -863,22 +880,35 @@ async def get_course_slide_audio(
 async def get_course_slide_audio_info(
     course_id: str,
     idx: int,
+    module_index: int | None = None,
     user: dict[str, Any] = Depends(get_current_user),
 ) -> dict[str, Any]:
     """F7.4 — Metadata audio track per UI badge (vast-hopping post-MVP 2026-05-31).
 
     Ritorna provider (edge | azure) + voice + duration. Usato da audio-player.tsx
     per mostrare badge "Azure" premium signal accanto al play button.
+
+    F-AUDIO-FIX 2026-06-01: query param opzionale ``module_index`` per dedup.
     """
     pool = get_pool()
     course = await _load_course_or_404(course_id, pool)
     _enforce_ownership(course, user)
-    row = await pool.fetchrow(
-        "SELECT provider, voice, duration_seconds "
-        "FROM audio_tracks WHERE course_id = $1 AND slide_index = $2",
-        uuid_mod.UUID(course_id),
-        idx,
-    )
+    if module_index is not None:
+        row = await pool.fetchrow(
+            "SELECT provider, voice, duration_seconds "
+            "FROM audio_tracks "
+            "WHERE course_id = $1 AND module_index = $2 AND slide_index = $3",
+            uuid_mod.UUID(course_id),
+            module_index,
+            idx,
+        )
+    else:
+        row = await pool.fetchrow(
+            "SELECT provider, voice, duration_seconds "
+            "FROM audio_tracks WHERE course_id = $1 AND slide_index = $2",
+            uuid_mod.UUID(course_id),
+            idx,
+        )
     if not row:
         raise HTTPException(404, f"Audio track slide {idx} non trovato")
     return {

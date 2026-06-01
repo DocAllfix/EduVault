@@ -705,9 +705,14 @@ function chatStreamUrl(id: string): string {
   return buildUrl(`/api/courses/${encodeURIComponent(id)}/chat`)
 }
 
-/** URL diretto del singolo MP3 di una slide (per <audio src>). */
-function slideAudioUrl(id: string, idx: number): string {
-  return buildUrl(`/api/courses/${encodeURIComponent(id)}/audio/${idx}`)
+/** URL diretto del singolo MP3 di una slide (per <audio src>).
+ *  F-AUDIO-FIX 2026-06-01: ``moduleIndex`` opzionale per dedup univoca su corsi
+ *  multi-modulo (slide.index e' module-relative, vedi migration 014). Omettendolo
+ *  si ottiene comportamento legacy (fetchrow random). */
+function slideAudioUrl(id: string, idx: number, moduleIndex?: number): string {
+  const base = `/api/courses/${encodeURIComponent(id)}/audio/${idx}`
+  if (moduleIndex === undefined || moduleIndex === null) return buildUrl(base)
+  return buildUrl(`${base}?module_index=${moduleIndex}`)
 }
 
 // F7.4 — audio track metadata per UI badge provider (post-MVP 2026-05-31).
@@ -717,9 +722,17 @@ export interface AudioInfo {
   duration_seconds: number | null
 }
 
-async function getSlideAudioInfo(id: string, idx: number): Promise<AudioInfo> {
+async function getSlideAudioInfo(
+  id: string,
+  idx: number,
+  moduleIndex?: number,
+): Promise<AudioInfo> {
+  const qs =
+    moduleIndex !== undefined && moduleIndex !== null
+      ? `?module_index=${moduleIndex}`
+      : ''
   return request<AudioInfo>(
-    `/api/courses/${encodeURIComponent(id)}/audio/${idx}/info`,
+    `/api/courses/${encodeURIComponent(id)}/audio/${idx}/info${qs}`,
   )
 }
 

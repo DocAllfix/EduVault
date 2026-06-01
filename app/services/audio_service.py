@@ -134,6 +134,7 @@ class AudioService:
                 off_target_count += 1
             tracks.append(
                 {
+                    "module_index": slide.module_index,
                     "slide_index": slide.index,
                     "audio_file": Path(audio_path_str).name,
                     "duration_seconds": round(duration_s, 2),
@@ -148,12 +149,16 @@ class AudioService:
                 if _s.v2_audio_provider_azure and _s.azure_speech_key
                 else "edge"
             )
+            # F-AUDIO-FIX 2026-06-01: include module_index per dedup univoca
+            # (slide.index e' module-relative; col solo slide_index collidono
+            # tutti i moduli sul medesimo slot — vedi migration 014).
             await pool.execute(
                 "INSERT INTO audio_tracks "
-                "(course_id, slide_index, narration_text, audio_path, "
+                "(course_id, module_index, slide_index, narration_text, audio_path, "
                 "duration_seconds, voice, off_target, provider) "
-                "VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+                "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
                 course_id,
+                slide.module_index,
                 slide.index,
                 narration,
                 audio_path_str,
@@ -217,7 +222,14 @@ class AudioService:
         narra troppo veloce/lento rispetto alla regola 30s/slide).
         """
         narration = (slide.speaker_notes or _slide_fallback_text(slide)).strip()
-        audio_path = course_audio_dir / f"slide_{slide.index:04d}.mp3"
+        # F-AUDIO-FIX 2026-06-01: filename include module_index, perche` slide.index
+        # e' module-relative (0..N per modulo). Senza prefisso modulo i moduli
+        # successivi sovrascrivono i file dei precedenti — bug osservato in prod:
+        # solo l'ultimo modulo aveva MP3 playable. Migration 014 + INSERT/SELECT.
+        audio_path = (
+            course_audio_dir
+            / f"mod_{slide.module_index:02d}_slide_{slide.index:04d}.mp3"
+        )
 
         try:
             async with self._semaphore:

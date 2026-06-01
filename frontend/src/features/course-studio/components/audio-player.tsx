@@ -27,17 +27,23 @@ import { Switch } from '@/components/ui/switch'
 export function AudioPlayer({
   courseId,
   slideIndex,
+  moduleIndex,
 }: {
   courseId: string
   slideIndex: number
+  moduleIndex?: number
 }) {
   const { enabled, toggle } = useAudioNarration()
 
   // Il backend FASE 7 protegge l'endpoint con Bearer; per <audio> nativo
   // passiamo il token in query string (stesso pattern del WebSocket BP §08.8).
+  // F-AUDIO-FIX 2026-06-01: module_index OBBLIGATORIO per dedup (slide.index e'
+  // module-relative, senza module_index la query trova riga random tra moduli).
   const token = tokenStorage.getAccess()
-  const baseUrl = api.slideAudioUrl(courseId, slideIndex)
-  const src = token ? `${baseUrl}?token=${encodeURIComponent(token)}` : baseUrl
+  const baseUrl = api.slideAudioUrl(courseId, slideIndex, moduleIndex)
+  const qsParts: string[] = []
+  if (token) qsParts.push(`token=${encodeURIComponent(token)}`)
+  const src = qsParts.length ? `${baseUrl}${baseUrl.includes('?') ? '&' : '?'}${qsParts.join('&')}` : baseUrl
 
   // FIX #32: reset stato error quando cambia slide (src change).
   const [hasError, setHasError] = useState(false)
@@ -50,8 +56,8 @@ export function AudioPlayer({
   // su slide senza audio (404/CORS). throwOnError: false così errori non
   // crashano il render (badge semplicemente non appare).
   const infoQ = useQuery({
-    queryKey: ['audio-info', courseId, slideIndex] as const,
-    queryFn: () => api.getSlideAudioInfo(courseId, slideIndex),
+    queryKey: ['audio-info', courseId, moduleIndex ?? 'legacy', slideIndex] as const,
+    queryFn: () => api.getSlideAudioInfo(courseId, slideIndex, moduleIndex),
     enabled: enabled && !hasError,
     staleTime: 5 * 60_000,
     gcTime: 0,
