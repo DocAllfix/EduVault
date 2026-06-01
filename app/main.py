@@ -48,11 +48,17 @@ app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)  # type: ignore[arg-type]
 
 # ═══ CORS — explicit origin, NEVER wildcard (REI-10, BP §02.5) ═══
+# BUG FIX 2026-06-01: aggiunto PATCH a allow_methods. Il backend espone diversi
+# endpoint PATCH (slides edit, slide image edit, catalog update, skeleton edit,
+# slide-quality ack) tutti chiamati dalla webapp via cross-origin. Senza PATCH
+# qui, il browser blocca tutte le PATCH per CORS preflight (Access-Control-
+# Allow-Methods senza PATCH → ogni edit Course Studio fallisce silently con
+# 'Failed to fetch' nella console + slide non si salva.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[settings.frontend_url],
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
     allow_headers=["Authorization", "Content-Type"],
 )
 
