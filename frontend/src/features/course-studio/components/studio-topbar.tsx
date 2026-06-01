@@ -393,6 +393,17 @@ function TopbarAudioControls({
     }
   }
 
+  // F-STUDIO-UX Step 3 (2026-06-02): listener spacebar globale (vedi
+  // course-studio/index.tsx). L'evento custom 'studio-audio-toggle' viene
+  // dispatchato quando l'utente preme Space fuori da un input editabile.
+  useEffect(() => {
+    if (!enabled || hasError) return
+    const onToggle = () => togglePlay()
+    window.addEventListener('studio-audio-toggle', onToggle)
+    return () => window.removeEventListener('studio-audio-toggle', onToggle)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [enabled, hasError, playing])
+
   return (
     <div className="border-border flex h-8 items-center gap-1 rounded-md border px-1.5">
       <Tooltip>

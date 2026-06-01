@@ -106,6 +106,14 @@ export function CourseStudio() {
         return
       if (e.key === 'ArrowLeft') goPrev()
       else if (e.key === 'ArrowRight') goNext()
+      else if (e.key === ' ' || e.code === 'Space') {
+        // F-STUDIO-UX Step 3 (2026-06-02): spacebar = play/pause audio
+        // della slide corrente. Emette evento custom intercettato da
+        // TopbarAudioControls (StudioTopBar) per togglare l'<audio>.
+        // preventDefault evita lo scroll-down default del browser.
+        e.preventDefault()
+        window.dispatchEvent(new CustomEvent('studio-audio-toggle'))
+      }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
