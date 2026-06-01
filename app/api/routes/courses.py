@@ -872,8 +872,17 @@ async def get_course_slide_audio(
     audio_path = Path(row["audio_path"])
     if not audio_path.is_file():
         raise HTTPException(404, "File audio mancante su disco")
-    return FileResponse(str(audio_path), media_type="audio/mpeg",
-                        filename=f"slide_{idx:04d}.mp3")
+    # F-AUDIO-FIX 2026-06-01: NO `filename=` keyword → FastAPI imposta
+    # `Content-Disposition: attachment; filename=...`, Chrome ORB blocca
+    # cross-origin attachment dentro <audio> element con ERR_BLOCKED_BY_ORB.
+    # Header espliciti: inline + filename in parametro non-required.
+    return FileResponse(
+        str(audio_path),
+        media_type="audio/mpeg",
+        headers={
+            "Content-Disposition": f'inline; filename="slide_{idx:04d}.mp3"',
+        },
+    )
 
 
 @router.get("/{course_id}/audio/{idx}/info")
