@@ -421,20 +421,22 @@ function RegulationCard({
 
   return (
     <Card
+      onClick={onOpen}
       className={cn(
-        'group relative flex flex-col gap-3 overflow-hidden border-border/70 p-5 transition-all',
+        'group relative flex cursor-pointer flex-col gap-3 overflow-hidden border-border/70 p-5 transition-all',
         'hover:-translate-y-0.5 hover:border-brand-primary/40 hover:shadow-md',
         isAbrogata && 'opacity-70',
       )}
+      role='button'
+      tabIndex={0}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          onOpen()
+        }
+      }}
+      aria-label={`Apri dettaglio normativa ${reg.title}`}
     >
-      {/* Click sull'intera card apre i chunks (button accessibile per a11y) */}
-      <button
-        type='button'
-        onClick={onOpen}
-        className='absolute inset-0 z-0 cursor-pointer'
-        aria-label={`Apri dettaglio normativa ${reg.title}`}
-      />
-
       {/* Top row: icona type + status badge */}
       <div className='relative z-10 flex items-start justify-between gap-3'>
         <div
