@@ -21,7 +21,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ImageIcon, Library, Loader2, Search } from 'lucide-react'
 import { toast } from 'sonner'
 
-import { api, type LibraryHit, type StudioSlide } from '@/lib/api'
+import { api, API_BASE, type LibraryHit, type StudioSlide } from '@/lib/api'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -265,11 +265,10 @@ interface LibraryCardProps {
 
 function LibraryCard({ hit, onChoose, disabled }: LibraryCardProps) {
   // file_path è relativo al repo (es. assets/seeds/iso7010/...).
-  // Per ora il path serve come identificatore — il backend lo userà come
-  // chiave PATCH (strategy=library), e la pipeline image_service caricherà
-  // l'asset dal filesystem. La preview UI usa solo lo stesso path che dovrà
-  // essere mounted via static.
-  const previewSrc = `/static/${hit.file_path}`
+  // F-STUDIO-UX 2026-06-02 bug-fix: la preview deve puntare al backend Railway
+  // (StaticFiles mount /static/assets), non al frontend Vercel. Prima la URL
+  // relativa `/static/...` colpiva Vercel → 404 e thumbnail invisibili.
+  const previewSrc = `${API_BASE}/static/${hit.file_path}`
   return (
     <Tooltip>
       <TooltipTrigger asChild>

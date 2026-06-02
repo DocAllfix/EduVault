@@ -74,6 +74,27 @@ app.include_router(courses_routes.router)
 app.include_router(admin_routes.router)
 app.include_router(websocket_routes.router)
 
+# ═══ STATIC FILES (F-STUDIO-UX 2026-06-02) ═══
+# Image library + ISO 7010 icons + branded fallbacks: file_path delle entries
+# image_library e` relativo al repo (es. "assets/seeds/iso7010/F001_extintor.png").
+# Il frontend (image-picker.tsx LibraryCard) usa `/static/${hit.file_path}` come
+# preview thumbnail. Senza questo mount la thumbnail e` 404 → solo metadati
+# visibili nella UI.
+# Path "assets/" e` montato come "/static/assets/" (URL prefix coerente col
+# pattern frontend). Mount registrato DOPO i routers per non eclissare
+# eventuali endpoint /static/* delle API.
+from pathlib import Path as _Path  # noqa: E402
+
+from fastapi.staticfiles import StaticFiles  # noqa: E402
+
+_ASSETS_ROOT = _Path(__file__).resolve().parent.parent / "assets"
+if _ASSETS_ROOT.is_dir():
+    app.mount(
+        "/static/assets",
+        StaticFiles(directory=str(_ASSETS_ROOT), check_dir=False),
+        name="static_assets",
+    )
+
 
 @app.on_event("startup")
 async def startup() -> None:
