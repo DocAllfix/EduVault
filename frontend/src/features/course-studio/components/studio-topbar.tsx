@@ -61,6 +61,7 @@ import {
   type StudioSlide,
 } from '@/lib/api'
 import { useAudioNarration } from '@/stores/audio-narration-store'
+import { usePptxPrecache } from '@/hooks/use-pptx-precache'
 
 export interface StudioTopBarProps {
   courseId: string
@@ -89,6 +90,12 @@ export function StudioTopBar({
 }: StudioTopBarProps) {
   const qc = useQueryClient()
 
+  // F-NEXT Fase 2 (2026-06-02): pre-cache PPTX in background dopo Rigenera.
+  // Hook polling che attende cambio `last_rebuilt_at` e scarica il PPTX nuovo,
+  // salvandolo in IndexedDB. Cosi` quando l'utente naviga a una slide subito
+  // dopo il rebuild, PptxCanvasRenderer trova il blob in cache → zero loading.
+  const precache = usePptxPrecache(courseId)
+
   // ─── Rebuild + Download mutations ──────────────────────────────────────
   const rebuildMut = useMutation({
     mutationFn: () => api.rebuildCourse(courseId),
@@ -96,6 +103,13 @@ export function StudioTopBar({
       toast.success(
         'Rigenerazione avviata. PPTX e PDF pronti a breve; la narrazione vocale viene rigenerata in background (2-10 min).',
       )
+      // Snapshot del token PRIMA del rebuild → il hook polla per cambio token.
+      const previousToken =
+        qc.getQueryData<{ last_rebuilt_at?: string | null }>([
+          'course-detail',
+          courseId,
+        ])?.last_rebuilt_at ?? null
+      precache.triggerPrecache(previousToken)
       qc.invalidateQueries({ queryKey: ['course-slides', courseId] })
       qc.invalidateQueries({ queryKey: ['course', courseId] })
       qc.invalidateQueries({ queryKey: ['courses'] })
