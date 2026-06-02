@@ -30,7 +30,11 @@ export function AppSidebar() {
   }, [role])
 
   return (
-    <Sidebar collapsible={collapsible} variant={variant}>
+    <Sidebar
+      collapsible={collapsible}
+      variant={variant}
+      data-tour='app-sidebar'
+    >
       <SidebarHeader>
         <AppTitle />
       </SidebarHeader>

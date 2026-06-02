@@ -76,6 +76,7 @@ import { Header } from '@/components/layout/header'
 import { Main } from '@/components/layout/main'
 import { ProfileDropdown } from '@/components/profile-dropdown'
 import { ThemeSwitch } from '@/components/theme-switch'
+import { HelpButton } from '@/lib/onboarding/HelpButton'
 import { cn } from '@/lib/utils'
 
 const TARGETS = [
@@ -235,6 +236,7 @@ export function CatalogReview() {
           </Link>
         </Button>
         <div className="ml-auto flex items-center gap-2">
+          <HelpButton />
           <ThemeSwitch />
           <ProfileDropdown />
         </div>

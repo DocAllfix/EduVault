@@ -47,6 +47,16 @@
   --sidebar-accent-foreground: var(--accent-foreground);
   --sidebar-border: var(--border);
   --sidebar-ring: var(--ring);
+
+  /* F10 onboarding tokens (additive, calm Stripe-Dashboard-style) */
+  --onboarding-banner-bg: oklch(0.985 0.005 247.858); /* near-bg subtle */
+  --onboarding-banner-border: var(--border);
+  --onboarding-banner-icon: var(--brand-primary);
+  --onboarding-spotlight-overlay: oklch(0.129 0.042 264.695 / 60%);
+  --onboarding-spotlight-ring: var(--brand-primary);
+  --onboarding-popover-bg: var(--popover);
+  --onboarding-popover-border: var(--border);
+  --onboarding-popover-shadow: 0 4px 24px -6px oklch(0.5611 0.1946 0.971 / 18%);
 }
 
 .dark {
@@ -80,6 +90,16 @@
   --brand-primary-foreground: oklch(0.129 0.042 264.695);
   --brand-secondary: oklch(0.8006 0.1592 126.646); /* #A3D055 */
   --brand-secondary-foreground: oklch(0.129 0.042 264.695);
+
+  /* F10 onboarding tokens (dark, ridotti contrasto per coerenza dark mode) */
+  --onboarding-banner-bg: oklch(0.18 0.04 260);
+  --onboarding-banner-border: var(--border);
+  --onboarding-banner-icon: var(--brand-primary);
+  --onboarding-spotlight-overlay: oklch(0 0 0 / 70%);
+  --onboarding-spotlight-ring: var(--brand-primary);
+  --onboarding-popover-bg: oklch(0.20 0.04 260);
+  --onboarding-popover-border: var(--border);
+  --onboarding-popover-shadow: 0 4px 24px -6px oklch(0.6662 0.1825 359.25 / 25%);
 }
 
 @theme inline {

@@ -32,6 +32,9 @@ import { Main } from '@/components/layout/main'
 import { ProfileDropdown } from '@/components/profile-dropdown'
 import { Search } from '@/components/search'
 import { ThemeSwitch } from '@/components/theme-switch'
+import { HelpButton } from '@/lib/onboarding/HelpButton'
+import { OnboardingBanner } from '@/lib/onboarding/OnboardingBanner'
+import { startDashboardTour } from '@/lib/onboarding/tours/dashboard'
 
 import { CoursesPrimaryButtons } from './components/courses-primary-buttons'
 import { CoursesTable } from './components/courses-table'
@@ -130,6 +133,7 @@ export function Dashboard() {
       <Header>
         <Search />
         <div className='ms-auto flex items-center gap-2'>
+          <HelpButton />
           <ThemeSwitch />
           <ConfigDrawer />
           <ProfileDropdown />
@@ -137,6 +141,14 @@ export function Dashboard() {
       </Header>
 
       <Main>
+        {/* F10 onboarding banner — visibile solo al primo accesso */}
+        <OnboardingBanner
+          pageId='dashboard'
+          title='Benvenuto nella dashboard'
+          body='Da qui monitori metriche, corsi recenti e accedi alle azioni rapide. Premi “Fai il tour” per una guida veloce di 4 passaggi.'
+          onStartTour={() => startDashboardTour()}
+        />
+
         {/* Page heading + primary CTA */}
         <div className='mb-6 flex flex-wrap items-end justify-between gap-3'>
           <div>
@@ -145,11 +157,13 @@ export function Dashboard() {
               Stato della piattaforma e gestione corsi.
             </p>
           </div>
-          <CoursesPrimaryButtons />
+          <div data-tour='dashboard-new-course'>
+            <CoursesPrimaryButtons />
+          </div>
         </div>
 
         {/* 4 KPI cards */}
-        <div className='mb-8'>
+        <div className='mb-8' data-tour='dashboard-stats'>
           <StatsCards
             stats={statsQuery.data}
             generatingCount={generatingQuery.data}
@@ -158,7 +172,9 @@ export function Dashboard() {
         </div>
 
         {/* FASE 13 — 4 dati arricchimento: status breakdown, dirty, ore, recenti */}
-        <EnrichedStats stats={statsQuery.data} />
+        <div data-tour='dashboard-recent-courses'>
+          <EnrichedStats stats={statsQuery.data} />
+        </div>
 
         {/* Courses list */}
         <section id='corsi' aria-labelledby='courses-heading' className='scroll-mt-20'>

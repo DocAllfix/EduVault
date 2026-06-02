@@ -17,6 +17,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
+import { LabelWithHelp } from '@/lib/onboarding/LabelWithHelp'
 
 export function SlideEditor({
   courseId,
@@ -92,7 +93,18 @@ export function SlideEditor({
 
       {isQuiz ? (
         <div className="space-y-2">
-          <Label>Opzioni quiz (la corretta è selezionata)</Label>
+          <LabelWithHelp
+            help={
+              <>
+                Le 4 opzioni del quiz. Seleziona il radio button accanto alla
+                lettera (A/B/C/D) per indicare la risposta corretta. Il marker
+                non appare nel PPTX scaricabile per non distrarre lo studente,
+                ma l’informazione è salvata nel database per tracking.
+              </>
+            }
+          >
+            Opzioni quiz (la corretta è selezionata)
+          </LabelWithHelp>
           {quizOptions.map((opt, i) => (
             <div key={i} className="flex items-center gap-2">
               <input
@@ -129,7 +141,18 @@ export function SlideEditor({
       )}
 
       <div className="space-y-1.5">
-        <Label htmlFor="slide-notes">Note relatore (narrazione audio)</Label>
+        <LabelWithHelp
+          htmlFor="slide-notes"
+          help={
+            <>
+              Testo che diventerà la narrazione audio (Azure Neural TTS, voce
+              Elsa). Target ~75-90 parole per circa 30 secondi di parlato.
+              Puoi inserire <code>(PAUSE 2s)</code> per pause SSML naturali.
+            </>
+          }
+        >
+          Note relatore (narrazione audio)
+        </LabelWithHelp>
         <Textarea
           id="slide-notes"
           value={notes}
@@ -143,7 +166,18 @@ export function SlideEditor({
       </div>
 
       <div className="space-y-1.5">
-        <Label htmlFor="slide-ref">Riferimento normativo</Label>
+        <LabelWithHelp
+          htmlFor="slide-ref"
+          help={
+            <>
+              Citazione normativa visibile in basso a sinistra nella slide
+              (es. “D.Lgs 81/08 — art. 15”). Lasciare vuoto se la slide non
+              ha un riferimento normativo diretto.
+            </>
+          }
+        >
+          Riferimento normativo
+        </LabelWithHelp>
         <Input id="slide-ref" value={ref} onChange={(e) => setRef(e.target.value)} />
       </div>
 

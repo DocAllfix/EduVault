@@ -182,6 +182,7 @@ export function StudioTopBar({
                 <button
                   type="button"
                   onClick={onFilterToggle}
+                  data-tour="studio-quality-badge"
                   className={
                     'flex h-7 items-center gap-1.5 rounded-md border px-2 text-xs transition-colors ' +
                     (filterActive
@@ -273,6 +274,7 @@ export function StudioTopBar({
                 size="sm"
                 variant="default"
                 disabled={rebuildMut.isPending}
+                data-tour="studio-rigenera"
                 className="h-8 px-2.5 text-xs gap-1.5"
               >
                 {rebuildMut.isPending ? (

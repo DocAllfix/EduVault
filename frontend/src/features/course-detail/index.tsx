@@ -54,6 +54,7 @@ import { Header } from '@/components/layout/header'
 import { Main } from '@/components/layout/main'
 import { ProfileDropdown } from '@/components/profile-dropdown'
 import { ThemeSwitch } from '@/components/theme-switch'
+import { HelpButton } from '@/lib/onboarding/HelpButton'
 import { CourseStatusBadge } from '@/features/dashboard/components/course-status-badge'
 import { tokenStorage } from '@/lib/api'
 
@@ -203,6 +204,7 @@ export function CourseDetail() {
     <>
       <Header>
         <div className='ms-auto flex items-center gap-2'>
+          <HelpButton />
           <ThemeSwitch />
           <ProfileDropdown />
         </div>

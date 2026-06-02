@@ -17,6 +17,7 @@ import { ThemeProvider } from './context/theme-provider'
 import { routeTree } from './routeTree.gen'
 // Styles
 import './styles/index.css'
+import './lib/onboarding/driver-overrides.css'
 
 const queryClient = new QueryClient({
   defaultOptions: {

@@ -46,6 +46,7 @@ import { Header } from '@/components/layout/header'
 import { Main } from '@/components/layout/main'
 import { ProfileDropdown } from '@/components/profile-dropdown'
 import { ThemeSwitch } from '@/components/theme-switch'
+import { HelpButton } from '@/lib/onboarding/HelpButton'
 
 import { StepIndicator } from './components/step-indicator'
 import { Step1CourseType } from './components/step-1-course-type'
@@ -176,6 +177,7 @@ export function CoursesWizard() {
     <>
       <Header>
         <div className='ms-auto flex items-center gap-2'>
+          <HelpButton />
           <ThemeSwitch />
           <ProfileDropdown />
         </div>

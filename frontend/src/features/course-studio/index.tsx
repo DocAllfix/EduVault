@@ -26,6 +26,9 @@ import { Header } from '@/components/layout/header'
 import { Main } from '@/components/layout/main'
 import { ProfileDropdown } from '@/components/profile-dropdown'
 import { ThemeSwitch } from '@/components/theme-switch'
+import { HelpButton } from '@/lib/onboarding/HelpButton'
+import { OnboardingBanner } from '@/lib/onboarding/OnboardingBanner'
+import { startCourseStudioTour } from '@/lib/onboarding/tours/course-studio'
 import { SlideViewer } from './components/slide-viewer'
 import { SlideEditor } from './components/slide-editor'
 import { ImagePicker } from './components/image-picker'
@@ -203,6 +206,7 @@ export function CourseStudio() {
             <ArrowLeft className="mr-2 h-4 w-4" /> Dettaglio corso
           </Button>
           <div className="ml-auto flex items-center gap-2">
+            <HelpButton />
             <ThemeSwitch />
             <ProfileDropdown />
           </div>
@@ -247,6 +251,7 @@ export function CourseStudio() {
             <ArrowLeft className="mr-2 h-4 w-4" /> Dettaglio corso
           </Button>
           <div className="ml-auto flex items-center gap-2">
+            <HelpButton />
             <ThemeSwitch />
             <ProfileDropdown />
           </div>
@@ -273,6 +278,12 @@ export function CourseStudio() {
 
         {!slidesQ.isLoading && !slidesQ.isError && selected && (
           <>
+            <OnboardingBanner
+              pageId='course-studio'
+              title='Modifica le slide del tuo corso'
+              body='Naviga i moduli a sinistra, vedi l’anteprima fedele al centro, edita testo e usa gli strumenti AI a destra. Fai il tour per scoprire tutto in 6 passaggi.'
+              onStartTour={() => startCourseStudioTour()}
+            />
             {/* Grid 3-colonne responsive (analista 2026-05-31):
                 - Default (>=1280 xl): 220px / 1fr / 360px — center ampio, sidebar+
                   right comodi per i primary buttons (Rigenera/Salva).
@@ -288,16 +299,18 @@ export function CourseStudio() {
                 Pattern Tome/Pitch/Gamma: icon + numero + dot quality, info
                 completa via Tooltip hover. */}
             <div className="grid grid-cols-[224px_minmax(0,1fr)_320px] gap-3 xl:grid-cols-[240px_minmax(0,1fr)_360px] xl:gap-4">
-              <SlideRail
-                slides={slides}
-                selectedIdx={selectedIdx}
-                onSelect={setSelectedIdx}
-                qualityData={qualityQ.data}
-                onReorder={handleReorder}
-              />
+              <div data-tour="studio-sliderail">
+                <SlideRail
+                  slides={slides}
+                  selectedIdx={selectedIdx}
+                  onSelect={setSelectedIdx}
+                  qualityData={qualityQ.data}
+                  onReorder={handleReorder}
+                />
+              </div>
 
               {/* ─── Center: viewer (nav + audio sono nel TopBar) ─── */}
-              <section className="flex min-w-0 flex-col gap-3">
+              <section className="flex min-w-0 flex-col gap-3" data-tour="studio-canvas">
                 <SlideViewer
                   slide={selected}
                   total={slides.length}
@@ -314,7 +327,7 @@ export function CourseStudio() {
                   - Sotto: "Strumenti AI" (Tabs Quality/Chat + Regenerate + ImagePicker) */}
               <aside className="border-border h-[calc(100vh-7rem)] overflow-y-auto rounded-lg border p-4">
                 {/* ─── Sezione 1: Contenuto slide (editor testo) ─── */}
-                <section aria-label="Contenuto slide">
+                <section aria-label="Contenuto slide" data-tour="studio-editor">
                   <h3 className="text-muted-foreground text-[11px] font-semibold uppercase tracking-wider mb-3">
                     Contenuto slide #{(pos + 1)}
                   </h3>
@@ -324,7 +337,7 @@ export function CourseStudio() {
                 <Separator className="my-5" />
 
                 {/* ─── Sezione 2: Strumenti AI ─── */}
-                <section aria-label="Strumenti AI">
+                <section aria-label="Strumenti AI" data-tour="studio-ai-tools">
                   <h3 className="text-muted-foreground text-[11px] font-semibold uppercase tracking-wider mb-3">
                     Strumenti AI
                   </h3>
