@@ -22,6 +22,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Upload
 from pydantic import BaseModel
 
 from app.api.dependencies import require_role
+from app.services.auth_service import hash_password
 from app.services.dependencies import get_pool
 from config.catalog_config import COURSE_CATALOG
 
@@ -675,3 +676,43 @@ async def admin_diagrams_catalog(
             svg_content=svg_content,
         ))
     return out
+
+
+# ─────────────── POST /api/admin/users ───────────────
+
+
+class CreateUserRequest(BaseModel):
+    email: str
+    password: str
+    role: str = "admin"
+
+
+class CreateUserResponse(BaseModel):
+    id: str
+    email: str
+    role: str
+
+
+@router.post("/api/admin/users", response_model=CreateUserResponse, status_code=201)
+async def create_user(
+    body: CreateUserRequest,
+    user: dict[str, Any] = Depends(require_role("admin")),
+) -> CreateUserResponse:
+    if body.role not in ("admin", "operator", "reviewer"):
+        raise HTTPException(400, "role must be admin/operator/reviewer")
+    if len(body.password) < 8:
+        raise HTTPException(400, "password must be at least 8 chars")
+
+    pool = get_pool()
+    existing = await pool.fetchval("SELECT id FROM users WHERE email = $1", body.email)
+    if existing:
+        raise HTTPException(409, "email already registered")
+
+    pwd_hash = hash_password(body.password)
+    row = await pool.fetchrow(
+        "INSERT INTO users (email, password_hash, role, is_active) "
+        "VALUES ($1, $2, $3, true) RETURNING id, email, role",
+        body.email, pwd_hash, body.role,
+    )
+    logger.info("admin_user_created", email=body.email, role=body.role, created_by=user["email"])
+    return CreateUserResponse(id=str(row["id"]), email=row["email"], role=row["role"])
