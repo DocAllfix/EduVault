@@ -408,7 +408,11 @@ export function CourseStudio() {
                     <RegenerateDialog courseId={id} slide={selected} />
                     {(selected.slide_type === 'CONTENT_IMAGE' ||
                       selected.slide_type === 'DIAGRAM') && (
-                      <ImagePicker courseId={id} slide={selected} />
+                      <ImagePicker
+                        courseId={id}
+                        slide={selected}
+                        courseTitle={courseQ.data?.title}
+                      />
                     )}
                   </div>
                 </section>

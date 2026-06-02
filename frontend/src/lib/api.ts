@@ -879,10 +879,16 @@ async function getCompatibleCourses(
 
 async function rebuildCourse(
   id: string,
+  opts: { skipAudio?: boolean } = {},
 ): Promise<{ status: string; course_id: string }> {
+  // F12: skipAudio=true per rebuild silenzioso post-edit (real-time
+  // preview senza il costo del rebuild full).
   return request<{ status: string; course_id: string }>(
     `/api/courses/${encodeURIComponent(id)}/rebuild`,
-    { method: 'POST' },
+    {
+      method: 'POST',
+      query: opts.skipAudio ? { skip_audio: true } : undefined,
+    },
   )
 }
 

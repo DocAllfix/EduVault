@@ -1354,19 +1354,29 @@ async def delete_course_slide(
 @router.post("/{course_id}/rebuild")
 async def rebuild_course(
     course_id: str,
+    skip_audio: bool = Query(False),
     user: dict[str, Any] = Depends(require_role("admin", "reviewer")),
 ) -> dict[str, str]:
     """Ricostruisce PPTX/PDF/audio dal slide_contents_json corrente (FASE 11).
 
     Async fire-and-forget sotto il Semaphore(1) di generation_service (REI-3).
     Dopo la rebuild il corso torna dirty=false.
+
+    F12 (2026-06-02): ``?skip_audio=true`` per "rebuild silenzioso" post-edit
+    (es. cambio immagine in Course Studio). L'audio NON viene rigenerato
+    (tracce esistenti restano coerenti con le slide perché solo il sub-doc
+    image è cambiato). Risparmio 30-90s di TTS Azure. Use case principale:
+    real-time preview aggiornato (fedele al PPTX scaricabile) dopo edit
+    senza il costo del rebuild full.
     """
     pool = get_pool()
     course = await _load_course_or_404(course_id, pool)
     _enforce_ownership(course, user)
     from app.services.rebuild_service import rebuild_course as do_rebuild
 
-    asyncio.create_task(do_rebuild(course_id, str(user["id"]), pool))
+    asyncio.create_task(
+        do_rebuild(course_id, str(user["id"]), pool, skip_audio=skip_audio)
+    )
     return {"status": "rebuilding", "course_id": course_id}
 
 

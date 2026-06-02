@@ -37,11 +37,23 @@ async def _noop_ws(job_id: str, percent: int, step: str) -> None:
     logger.info("rebuild_progress", course_id=job_id, percent=percent, step=step)
 
 
-async def rebuild_course(course_id: str, user_id: str, pool: Any) -> None:
+async def rebuild_course(
+    course_id: str,
+    user_id: str,
+    pool: Any,
+    skip_audio: bool = False,
+) -> None:
     """Ricostruisce gli artefatti del corso dal slide_contents_json corrente.
 
     Async fire-and-forget: aggiorna courses.status durante e dirty=false alla
     fine. Sotto il Semaphore(1) globale (REI-3).
+
+    F12 (2026-06-02): ``skip_audio=True`` per "rebuild silenzioso" post-edit
+    (es. cambio immagine in Course Studio). Audio resta valido (era già
+    coerente con le slide perché solo il sub-doc image è cambiato), evitando
+    30-60s di TTS Azure inutili. Il rebuild PPTX+PDF dura ~15-30s vs 60-180s
+    full. Pattern simile a `audio_rebuild_service` ma inverso (skip audio
+    invece di skip pptx/pdf).
     """
     cid = uuid_mod.UUID(course_id)
     async with _job_semaphore:
@@ -90,33 +102,44 @@ async def rebuild_course(course_id: str, user_id: str, pool: Any) -> None:
                 db=pool,
             )
 
-            # Re-genera la narrazione audio dal slide_contents_json corrente.
-            # ProductionBuilder costruisce solo PPTX/PDF; l'audio è un passo
-            # separato (come in generation_service). Senza questo, un rebuild
-            # post-edit lascerebbe audio_manifest_path stale o NULL.
-            # generate_narrations fa solo INSERT in audio_tracks → DELETE prima
-            # per idempotenza (rebuild ripetuti non duplicano le tracce).
-            # L'audio è secondario: se fallisce, PPTX/PDF restano validi.
-            try:
-                await pool.execute(
-                    "DELETE FROM audio_tracks WHERE course_id=$1", cid
-                )
-                audio_service = AudioService(voice=settings.tts_voice)
-                audio_result = await audio_service.generate_narrations(
-                    slide_models, course_id, pool
-                )
+            # F12 (2026-06-02): se skip_audio=True (es. rebuild silenzioso
+            # post-edit immagine), saltiamo TTS Azure perché le tracce
+            # esistenti sono ancora coerenti con le slide (cambiato solo
+            # il sub-doc image). Risparmio 30-90s di TTS inutile.
+            if skip_audio:
                 logger.info(
-                    "rebuild_audio_generated",
+                    "rebuild_audio_skipped",
                     course_id=course_id,
-                    tracks=audio_result.get("tracks_generated"),
-                    voice=settings.tts_voice,
+                    reason="skip_audio=True (post-edit fast rebuild)",
                 )
-            except Exception as audio_exc:
-                logger.error(
-                    "rebuild_audio_failed",
-                    course_id=course_id,
-                    error=str(audio_exc),
-                )
+            else:
+                # Re-genera la narrazione audio dal slide_contents_json corrente.
+                # ProductionBuilder costruisce solo PPTX/PDF; l'audio è un passo
+                # separato (come in generation_service). Senza questo, un rebuild
+                # post-edit lascerebbe audio_manifest_path stale o NULL.
+                # generate_narrations fa solo INSERT in audio_tracks → DELETE prima
+                # per idempotenza (rebuild ripetuti non duplicano le tracce).
+                # L'audio è secondario: se fallisce, PPTX/PDF restano validi.
+                try:
+                    await pool.execute(
+                        "DELETE FROM audio_tracks WHERE course_id=$1", cid
+                    )
+                    audio_service = AudioService(voice=settings.tts_voice)
+                    audio_result = await audio_service.generate_narrations(
+                        slide_models, course_id, pool
+                    )
+                    logger.info(
+                        "rebuild_audio_generated",
+                        course_id=course_id,
+                        tracks=audio_result.get("tracks_generated"),
+                        voice=settings.tts_voice,
+                    )
+                except Exception as audio_exc:
+                    logger.error(
+                        "rebuild_audio_failed",
+                        course_id=course_id,
+                        error=str(audio_exc),
+                    )
 
             # Stato finale: completed + dirty=false + snapshot
             await pool.execute(

@@ -22,6 +22,7 @@ import { ImageIcon, Library, Loader2, Search } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { api, API_BASE, type LibraryHit, type StudioSlide } from '@/lib/api'
+import { useJobsStore } from '@/stores/jobs-store'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -44,9 +45,12 @@ import {
 export function ImagePicker({
   courseId,
   slide,
+  courseTitle,
 }: {
   courseId: string
   slide: StudioSlide
+  /** F12: per registrare il job rebuild silenzioso nello store globale. */
+  courseTitle?: string
 }) {
   const qc = useQueryClient()
   const [open, setOpen] = useState(false)
@@ -75,12 +79,9 @@ export function ImagePicker({
   })
 
   const setImageMut = useMutation({
-    mutationFn: (args: { url: string; strategy?: string }) =>
-      // F11 D-232: passo `module_index` per evitare il bug dove slide
-      // con stesso `index` in moduli diversi venivano confuse e il PATCH
-      // toccava la slide sbagliata (o falliva con 422 per slide_type
-      // incompatibile).
-      api.patchSlideImage(
+    mutationFn: async (args: { url: string; strategy?: string }) => {
+      // 1. Patch immagine nel DB
+      const result = await api.patchSlideImage(
         courseId,
         slide.index,
         {
@@ -89,10 +90,32 @@ export function ImagePicker({
           query_url: args.url,
         },
         slide.module_index,
-      ),
+      )
+      // 2. F12 fix: rebuild silenzioso (skipAudio=true) per aggiornare
+      // PPTX+PDF senza il costo del TTS (30-90s). L'anteprima usa il
+      // PPTX rebuildato → fedeltà 1:1 garantita. L'audio resta valido
+      // perché solo il sub-doc image è cambiato (le tracce TTS sono
+      // ancora coerenti con i bullet/note relatore della slide).
+      void api.rebuildCourse(courseId, { skipAudio: true }).catch(() => {
+        // best-effort: se il rebuild auto fallisce, l'utente può
+        // sempre triggerare manualmente "Rigenera tutto" dal topbar.
+      })
+      return result
+    },
     onSuccess: () => {
-      toast.success('Immagine aggiornata')
+      // F12: registra rebuild silenzioso nello store globale → JobsWatcher
+      // mostra progress nel topbar + notifica quando l'anteprima e` pronta.
+      useJobsStore.getState().addJob({
+        courseId,
+        courseTitle: courseTitle ?? 'Corso',
+        kind: 'rebuild',
+      })
+      toast.success(
+        'Immagine aggiornata. Anteprima in aggiornamento (15-30s)…',
+      )
       qc.invalidateQueries({ queryKey: ['course-slides', courseId] })
+      qc.invalidateQueries({ queryKey: ['course', courseId] })
+      qc.invalidateQueries({ queryKey: ['course-detail', courseId] })
       setOpen(false)
     },
     onError: () => toast.error('Aggiornamento immagine fallito'),
@@ -201,8 +224,15 @@ export function ImagePicker({
                     <LibraryCard
                       key={hit.id}
                       hit={hit}
+                      // F12 fix: backend `image.strategy` accetta solo
+                      // Literal["none", "web_search", "diagram"]. "library"
+                      // veniva rifiutato con 422. Uso 'web_search' anche
+                      // per immagini library: il backend distingue local
+                      // path vs URL via `query_url.startswith(http)` in
+                      // image_service.py:135, quindi il path "assets/..."
+                      // viene letto da disco correttamente.
                       onChoose={(url) =>
-                        setImageMut.mutate({ url, strategy: 'library' })
+                        setImageMut.mutate({ url, strategy: 'web_search' })
                       }
                       disabled={setImageMut.isPending}
                     />
@@ -282,6 +312,11 @@ function LibraryCard({ hit, onChoose, disabled }: LibraryCardProps) {
     <Tooltip>
       <TooltipTrigger asChild>
         <button
+          // F12 fix: passo `hit.file_path` (path relativo al repo, es.
+          // "assets/icons/iso7010/X.png") perché il backend
+          // image_service.py:135 distingue tra path locale (legge da
+          // disco) e URL HTTP (fa fetch). Il path locale è il pattern
+          // standard usato anche dalla generation iniziale.
           onClick={() => onChoose(hit.file_path)}
           disabled={disabled}
           className="border-border hover:border-brand-primary group relative aspect-square overflow-hidden rounded-md border transition-colors"
