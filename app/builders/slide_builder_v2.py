@@ -625,12 +625,21 @@ class SlideBuilderV2:
                 if i < len(options):
                     letter = chr(ord("A") + i)
                     _write_shape_by_role(slide, st, role, f"{letter}. {options[i]}", report)
-            # Marker risposta corretta
+            # Marker risposta corretta — DISABILITATO (testo vuoto + spostato
+            # fuori dalla slide). Bug pre-fix: testo "Risposta corretta: A"
+            # (21 chars) dentro shape 23px causava wrap char-per-char in
+            # verticale, producendo una striscia visibile attraverso le opzioni
+            # quiz. Decisione: slide quiz pulita senza marker visivo
+            # (l'info quiz_correct resta nel meta_json per consumer downstream).
             if slide_content.quiz_correct is not None and 0 <= slide_content.quiz_correct < 4:
-                correct_letter = chr(ord("A") + slide_content.quiz_correct)
-                _write_shape_by_role(
-                    slide, st, "correct_marker", f"Risposta corretta: {correct_letter}", report
-                )
+                _write_shape_by_role(slide, st, "correct_marker", "", report)
+                from pptx.util import Emu  # local import (pattern coerente con riga ~770)
+                # Sposta il marker FUORI dalla slide (left/top negativi)
+                for shape in slide.shapes:
+                    if shape.name == "nx_correct_marker":
+                        shape.left = Emu(-100000)
+                        shape.top = Emu(-100000)
+                        break
 
         elif st == SlideType.CASE_STUDY:
             # FIX #28.3 (2026-05-26): sezioni è VERA list[str] (3 elementi via
