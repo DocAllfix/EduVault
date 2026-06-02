@@ -656,8 +656,14 @@ async def _run_pipeline_inner(
     # ═══ FINAL DB STATE per PPTX/PDF — utente può scaricare SUBITO ═══
     # (FIX #29.4: status può essere 'completed' o 'partial'; FIX #31 MOSSA 3:
     #  l'audio non è più nel percorso critico, parte come task background dopo)
+    # D-221 FIX (F-NEXT Fase 3): popola last_rebuilt_at anche alla prima
+    # generazione. Il frontend usa questo campo come cache-key del PPTX
+    # client-side (PptxCanvasRenderer). NULL = renderer disattivato e
+    # fallback al PNG dispensa Jinja2 (testo-only). Senza questo update il
+    # cliente vede sempre la preview "sbagliata" finché non clicca Rigenera.
     await db.execute(
-        "UPDATE courses SET pptx_path=$1, pdf_path=$2, status=$4 WHERE id=$3",
+        "UPDATE courses SET pptx_path=$1, pdf_path=$2, status=$4, "
+        "last_rebuilt_at=NOW() WHERE id=$3",
         str(pptx_path),
         str(pdf_path),
         course_id,
