@@ -12,6 +12,7 @@
  */
 
 import {
+  BookOpen,
   Command,
   LayoutDashboard,
   Library,
@@ -42,6 +43,13 @@ export const sidebarData: SidebarData = {
           title: 'Dashboard',
           url: '/',
           icon: LayoutDashboard,
+        },
+        // F11 Issue 3 (D-229): Catalogo prima di "Nuovo Corso" perche` e`
+        // il punto naturale per scegliere quale tipo di corso creare.
+        {
+          title: 'Catalogo Corsi',
+          url: '/catalog',
+          icon: BookOpen,
         },
         {
           title: 'Nuovo Corso',

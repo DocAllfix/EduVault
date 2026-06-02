@@ -30,6 +30,7 @@ import {
   Pencil,
   Presentation,
   ShieldCheck,
+  Sparkles,
   Trash2,
 } from 'lucide-react'
 import { toast } from 'sonner'
@@ -120,8 +121,10 @@ export function CourseDetail() {
   const [certifying, setCertifying] = useState(false)
   const [deleting, setDeleting] = useState(false)
   // FIX #31 MOSSA 3: timestamp inizio polling audio + flag timeout scaduto
-  const [audioPollStart] = useState<number>(() => Date.now())
+  const [audioPollStart, setAudioPollStart] = useState<number>(() => Date.now())
   const [audioTimedOut, setAudioTimedOut] = useState(false)
+  // F11 Issue 4 (D-230): stato per rebuild audio in corso (dopo click utente)
+  const [audioRebuilding, setAudioRebuilding] = useState(false)
 
   const courseQ = useQuery({
     queryKey: ['course', id] as const,
@@ -186,6 +189,33 @@ export function CourseDetail() {
       toast.error(err instanceof ApiError ? err.message : 'Archiviazione non riuscita.')
     } finally {
       setDeleting(false)
+    }
+  }
+
+  /**
+   * F11 Issue 4 (D-230): genera la narrazione audio per corsi vecchi
+   * che hanno audio_manifest_path NULL (oppure audio fallito). Backend
+   * fire-and-forget: il polling esistente (refetchInterval su courseQ)
+   * rileva audio_manifest_path popolato quando il task termina.
+   */
+  async function handleAudioRebuild() {
+    setAudioRebuilding(true)
+    try {
+      await api.rebuildCourseAudio(id)
+      toast.success(
+        'Generazione audio avviata. Sarà pronto in 2-10 min a seconda della durata del corso.',
+      )
+      // Reset del polling timer + del timeout flag così riprende a pollare
+      setAudioPollStart(Date.now())
+      setAudioTimedOut(false)
+      // Invalida la query per partire da uno snapshot pulito
+      void queryClient.invalidateQueries({ queryKey: ['course', id] })
+    } catch (err) {
+      toast.error(
+        err instanceof ApiError ? err.message : 'Avvio generazione audio non riuscito.',
+      )
+    } finally {
+      setAudioRebuilding(false)
     }
   }
 
@@ -302,6 +332,55 @@ export function CourseDetail() {
                       )
                     })}
                   </div>
+
+                  {/* F11 Issue 4 (D-230): callout "Genera audio" per corsi
+                      vecchi senza audio_manifest_path o con audio fallito.
+                      Mostrato SOLO se:
+                      - corso è downloadable (completed/certified)
+                      - audio NON è pronto
+                      - non c'è polling attivo "in elaborazione" (= audio
+                        mai partito o fallito)
+                      - utente ha ruolo admin o reviewer (gate backend) */}
+                  {(() => {
+                    const audioReady = Boolean(course.audio_manifest_path)
+                    const canRebuildAudio =
+                      downloadable &&
+                      !audioReady &&
+                      audioTimedOut &&
+                      (role === 'admin' || role === 'reviewer')
+                    if (!canRebuildAudio) return null
+                    return (
+                      <div className='border-border bg-brand-primary/5 mt-4 flex flex-col gap-3 rounded-lg border border-dashed p-4 sm:flex-row sm:items-center sm:justify-between'>
+                        <div className='flex items-start gap-3'>
+                          <div className='bg-brand-primary/10 text-brand-primary flex size-9 shrink-0 items-center justify-center rounded-md'>
+                            <Headphones className='size-4' aria-hidden='true' />
+                          </div>
+                          <div>
+                            <p className='text-sm font-medium leading-tight'>
+                              Audio non ancora generato
+                            </p>
+                            <p className='text-muted-foreground mt-1 text-xs leading-relaxed'>
+                              Avvia ora la generazione della narrazione MP3.
+                              Sarà pronta in 2-10 minuti a seconda della
+                              durata del corso.
+                            </p>
+                          </div>
+                        </div>
+                        <Button
+                          onClick={handleAudioRebuild}
+                          disabled={audioRebuilding}
+                          className='gap-2'
+                        >
+                          {audioRebuilding ? (
+                            <Loader2 className='size-4 animate-spin' aria-hidden='true' />
+                          ) : (
+                            <Sparkles className='size-4' aria-hidden='true' />
+                          )}
+                          {audioRebuilding ? 'Avvio…' : 'Genera audio'}
+                        </Button>
+                      </div>
+                    )
+                  })()}
                 </CardContent>
               </Card>
 

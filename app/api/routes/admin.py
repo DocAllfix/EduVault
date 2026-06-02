@@ -21,7 +21,7 @@ import structlog
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from pydantic import BaseModel
 
-from app.api.dependencies import require_role
+from app.api.dependencies import get_current_user, require_role
 from app.services.auth_service import hash_password
 from app.services.dependencies import get_pool
 from config.catalog_config import COURSE_CATALOG
@@ -347,6 +347,67 @@ async def admin_get_catalog_entry(
     data = await get_catalog_entry(pool, slug)
     if data is None:
         raise HTTPException(404, f"Catalog entry '{slug}' non trovata")
+    return CatalogEntryDetail(**data)
+
+
+# ─────────────── GET /api/catalog/public ───────────────
+# F11 Issue 3 (D-229): endpoint pubblico catalog (auth required, ma non
+# admin). Lista SOLO entries `approved_at IS NOT NULL`. Use case:
+# operatore vuole sfogliare i tipi corso disponibili senza essere admin.
+# Pattern: riuso integrale `list_catalog_entries` con `approved_only=True`
+# forzato — zero duplicazione logica.
+
+
+@router.get("/api/catalog/public", response_model=CatalogListResponse)
+async def list_public_catalog(
+    page: int = Query(1, ge=1),
+    per_page: int = Query(50, ge=1, le=200),
+    target: str | None = Query(None),
+    search: str | None = Query(None),
+    user: dict[str, Any] = Depends(get_current_user),
+) -> CatalogListResponse:
+    """Lista pubblica del catalogo: solo entries APPROVATE.
+
+    Stessa logica di ``admin_list_catalog`` ma:
+    - gate auth-only (no admin required)
+    - ``approved_only=True`` forzato (operatori non vedono pending)
+    """
+    from app.services.catalog_service import list_catalog_entries
+
+    pool = get_pool()
+    entries, total = await list_catalog_entries(
+        pool,
+        page=page,
+        per_page=per_page,
+        approved_only=True,  # forzato per non leak entries pending
+        target_filter=target,
+        search=search,
+    )
+    return CatalogListResponse(
+        entries=[CatalogEntrySummary(**e) for e in entries],
+        total=total,
+        page=page,
+        per_page=per_page,
+    )
+
+
+@router.get("/api/catalog/public/{slug}", response_model=CatalogEntryDetail)
+async def get_public_catalog_entry(
+    slug: str,
+    user: dict[str, Any] = Depends(get_current_user),
+) -> CatalogEntryDetail:
+    """Detail pubblico — 404 se entry non approvata (no info leak)."""
+    from fastapi import HTTPException
+
+    from app.services.catalog_service import get_catalog_entry
+
+    pool = get_pool()
+    data = await get_catalog_entry(pool, slug)
+    if data is None or data.get("approved_at") is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Catalog entry '{slug}' non trovata o non approvata",
+        )
     return CatalogEntryDetail(**data)
 
 

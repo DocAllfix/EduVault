@@ -1361,6 +1361,43 @@ async def rebuild_course(
     return {"status": "rebuilding", "course_id": course_id}
 
 
+# ─────────────── POST /api/courses/{id}/audio/rebuild ───────────────
+# F11 Issue 4 (D-230): rebuild SOLO dell'audio. Use case: corsi vecchi
+# senza `audio_manifest_path` (NULL), oppure audio fallito durante la
+# pipeline iniziale. 10x più rapido del rebuild full + non tocca PPTX/PDF.
+
+
+@router.post("/{course_id}/audio/rebuild")
+async def rebuild_audio_only_endpoint(
+    course_id: str,
+    user: dict[str, Any] = Depends(require_role("admin", "reviewer")),
+) -> dict[str, str]:
+    """Rigenera SOLO le tracce audio del corso (PPTX/PDF non toccati).
+
+    Async fire-and-forget sotto Semaphore(1) (REI-3). Polling lato
+    frontend su ``audio_manifest_path`` rileva il completamento. Status
+    del corso NON cambia (resta ``completed``).
+
+    Validation: corso deve esistere e essere in stato ``completed`` o
+    ``partial`` (cioe` ha slide_contents_json popolato).
+    """
+    pool = get_pool()
+    course = await _load_course_or_404(course_id, pool)
+    _enforce_ownership(course, user)
+    if course.get("status") not in ("completed", "partial"):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "L'audio puo` essere rigenerato solo su corsi completati. "
+                f"Stato corrente: {course.get('status')}."
+            ),
+        )
+    from app.services.audio_rebuild_service import rebuild_audio_only
+
+    asyncio.create_task(rebuild_audio_only(course_id, str(user["id"])))
+    return {"status": "audio_rebuild_started", "course_id": course_id}
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # F4 D9 Slide Quality Issues (analista sign-off 2026-05-31 post-H8b rollback)
 # ─────────────────────────────────────────────────────────────────────────────

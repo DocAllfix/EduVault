@@ -239,7 +239,8 @@ export function ImageLibraryAdmin() {
                     <TableCell>
                       <div className='size-16 overflow-hidden rounded-md border bg-muted/30'>
                         <img
-                          src={`/${e.file_path}`}
+                          // F11 D-231 fix: backend monta assets/ a /static/assets
+                          src={`/static/${e.file_path}`}
                           alt={e.tags[0] ?? 'image'}
                           className='size-full object-cover'
                           loading='lazy'
@@ -480,7 +481,8 @@ function PreviewImageDialog({
           <div className='space-y-3'>
             <div className='flex justify-center rounded-md border bg-muted/30 p-2'>
               <img
-                src={`/${entry.file_path}`}
+                // F11 D-231 fix: backend monta assets/ a /static/assets
+                src={`/static/${entry.file_path}`}
                 alt={entry.tags[0] ?? 'preview'}
                 className='max-h-96 object-contain'
               />

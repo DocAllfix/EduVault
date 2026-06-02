@@ -877,6 +877,20 @@ async function rebuildCourse(
   )
 }
 
+/**
+ * F11 Issue 4 (D-230): rigenera SOLO l'audio del corso (PPTX/PDF non
+ * toccati). Use case principale: corsi vecchi senza audio_manifest_path,
+ * oppure audio fallito.
+ */
+async function rebuildCourseAudio(
+  id: string,
+): Promise<{ status: string; course_id: string }> {
+  return request<{ status: string; course_id: string }>(
+    `/api/courses/${encodeURIComponent(id)}/audio/rebuild`,
+    { method: 'POST' },
+  )
+}
+
 // ── Slide management (FASE 6): add / move / delete / duplicate ──────────
 // Tutti ritornano l'array slide aggiornato (reindex contiguo lato backend).
 
@@ -1049,6 +1063,25 @@ async function adminBulkApproveCatalog(slugs: string[]): Promise<{ approved_coun
   )
 }
 
+// ─── F11 Issue 3 (D-229) — Public catalog browse (non-admin) ───
+// Auth required ma NON admin. Backend forza `approved_only=True` cosi`
+// operatori vedono solo entries approvate (no info leak su pending).
+
+async function getPublicCatalog(params: {
+  page?: number
+  per_page?: number
+  target?: string
+  search?: string
+} = {}): Promise<CatalogListResponse> {
+  return request<CatalogListResponse>('/api/catalog/public', { query: params })
+}
+
+async function getPublicCatalogEntry(slug: string): Promise<CatalogEntryDetail> {
+  return request<CatalogEntryDetail>(
+    `/api/catalog/public/${encodeURIComponent(slug)}`,
+  )
+}
+
 // ─── Step B — Image Library admin (upload + audit + delete) ───
 export interface ImageLibraryAdminEntry {
   id: string
@@ -1180,6 +1213,7 @@ export const api = {
   getQualityIssues,
   getCompatibleCourses,
   rebuildCourse,
+  rebuildCourseAudio,
   addSlide,
   moveSlide,
   duplicateSlide,
@@ -1210,6 +1244,8 @@ export const api = {
   adminApproveCatalogEntry,
   adminUnapproveCatalogEntry,
   adminBulkApproveCatalog,
+  getPublicCatalog,
+  getPublicCatalogEntry,
   // Step B — image library admin
   adminListImages,
   adminUploadImage,

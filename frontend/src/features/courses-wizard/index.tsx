@@ -27,7 +27,7 @@
 import { useState } from 'react'
 import { FormProvider, useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
-import { useNavigate } from '@tanstack/react-router'
+import { useNavigate, useSearch } from '@tanstack/react-router'
 import { ArrowLeft, ArrowRight, Loader2, Sparkles } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -120,6 +120,11 @@ export { step1Schema, step2Schema, step3Schema, step4Schema, step5Schema }
 
 export function CoursesWizard() {
   const navigate = useNavigate()
+  // F11 Issue 3 (D-229): leggo opzionale ?course_type=<slug> per pre-fill
+  // dello step 1 quando arrivo dalla pagina /catalog ("Crea corso da questo").
+  const search = useSearch({ from: '/_authenticated/courses/new' }) as {
+    course_type?: string
+  }
   const [step, setStep] = useState(1)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const total = STEP_LABELS.length
@@ -127,7 +132,10 @@ export function CoursesWizard() {
   const form = useForm<WizardValues>({
     resolver: zodResolver(wizardSchema),
     mode: 'onChange',
-    defaultValues: wizardDefaults,
+    defaultValues: {
+      ...wizardDefaults,
+      course_type: search.course_type ?? wizardDefaults.course_type,
+    },
   })
 
   async function goNext() {

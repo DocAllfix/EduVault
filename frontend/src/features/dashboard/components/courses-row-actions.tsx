@@ -21,7 +21,7 @@
 
 import { DotsHorizontalIcon } from '@radix-ui/react-icons'
 import { type Row } from '@tanstack/react-table'
-import { Download, FileText, Headphones, Pencil, Presentation, ShieldCheck, Trash2 } from 'lucide-react'
+import { Download, Eye, FileText, Headphones, Pencil, Presentation, ShieldCheck, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { useNavigate } from '@tanstack/react-router'
@@ -116,6 +116,13 @@ export function CoursesRowActions({
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align='end' className='w-44'>
+        {/* F11 Issue 2: "Apri scheda corso" come primo item con icona Eye.
+            La vecchia label "Dettaglio" senza icona non comunicava affordance
+            (utente confermato: "non sembrava cliccabile"). */}
+        <DropdownMenuItem onClick={() => onOpenDetail(course)}>
+          <Eye className='me-2 size-4' aria-hidden='true' />
+          Apri scheda corso
+        </DropdownMenuItem>
         {canStudio && (
           <DropdownMenuItem
             onClick={() =>
@@ -126,9 +133,6 @@ export function CoursesRowActions({
             Apri Studio
           </DropdownMenuItem>
         )}
-        <DropdownMenuItem onClick={() => onOpenDetail(course)}>
-          Dettaglio
-        </DropdownMenuItem>
         {canDownload && (
           <DropdownMenuSub>
             <DropdownMenuSubTrigger>
