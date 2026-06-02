@@ -62,6 +62,7 @@ import {
 } from '@/lib/api'
 import { useAudioNarration } from '@/stores/audio-narration-store'
 import { usePptxPrecache } from '@/hooks/use-pptx-precache'
+import { HelpButton } from '@/lib/onboarding/HelpButton'
 
 export interface StudioTopBarProps {
   courseId: string
@@ -331,6 +332,9 @@ export function StudioTopBar({
             </TooltipTrigger>
             <TooltipContent>Scarica PPTX</TooltipContent>
           </Tooltip>
+
+          {/* F10 onboarding: HelpButton sempre visibile per riavviare il tour */}
+          <HelpButton />
         </div>
       </header>
     </TooltipProvider>
