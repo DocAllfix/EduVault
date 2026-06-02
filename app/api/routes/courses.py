@@ -747,6 +747,50 @@ async def delete_course(
     return {"status": "archived", "course_id": course_id}
 
 
+# ─────────────── DELETE /api/courses/{id}/hard ───────────────
+# F10 2026-06-02: hard delete da archivio. Permessa SOLO se il corso e`
+# gia` `status='archived'` (forza l'utente a fare prima il soft-delete,
+# poi se davvero vuole cancellare passa dall'archivio). Cancella anche
+# le righe figlie via CASCADE; i file PPTX/PDF/audio su disco vengono
+# lasciati come orphan e ripuliti da un job notturno (out-of-scope qui).
+
+
+@router.delete("/{course_id}/hard")
+async def hard_delete_course(
+    course_id: str,
+    user: dict[str, Any] = Depends(get_current_user),
+) -> dict[str, str]:
+    """Hard delete (admin+owner). Permessa solo su corsi archiviati."""
+    pool = get_pool()
+    course = await _load_course_or_404(course_id, pool)
+    _enforce_ownership(course, user)
+    if course["status"] != "archived":
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Il corso deve essere archiviato prima dell'eliminazione "
+                "definitiva. Archivialo (DELETE) e poi richiama hard-delete."
+            ),
+        )
+    # Cleanup FK senza CASCADE (generation_jobs.course_id e
+    # approved_courses.source_course_id da migration 001).
+    cid = uuid_mod.UUID(course_id)
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            await conn.execute(
+                "DELETE FROM generation_jobs WHERE course_id = $1", cid
+            )
+            await conn.execute(
+                "UPDATE approved_courses SET source_course_id = NULL "
+                "WHERE source_course_id = $1",
+                cid,
+            )
+            # Le tabelle figlie con ON DELETE CASCADE (slide_quality_checks,
+            # conversations, messages) si puliscono automaticamente.
+            await conn.execute("DELETE FROM courses WHERE id = $1", cid)
+    return {"status": "deleted", "course_id": course_id}
+
+
 # ─────────────── FASE 7 — Course Studio endpoints ───────────────
 
 

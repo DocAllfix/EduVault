@@ -367,6 +367,19 @@ async function deleteCourse(id: string): Promise<{ status: string; course_id: st
   )
 }
 
+/**
+ * Hard delete (F10 2026-06-02). Cancella definitivamente un corso
+ * archiviato. Backend richiede `status='archived'`, altrimenti 400.
+ */
+async function hardDeleteCourse(
+  id: string,
+): Promise<{ status: string; course_id: string }> {
+  return request<{ status: string; course_id: string }>(
+    `/api/courses/${encodeURIComponent(id)}/hard`,
+    { method: 'DELETE' },
+  )
+}
+
 // ─────────────────────────── Regulations ───────────────────────────────
 
 /**
@@ -1146,6 +1159,7 @@ export const api = {
   certifyCourse,
   downloadCourse,
   deleteCourse,
+  hardDeleteCourse,
   // Course Studio (FASE 7)
   getCourseSlides,
   getCourseSlide,

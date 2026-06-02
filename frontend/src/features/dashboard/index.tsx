@@ -36,6 +36,7 @@ import { HelpButton } from '@/lib/onboarding/HelpButton'
 import { OnboardingBanner } from '@/lib/onboarding/OnboardingBanner'
 import { startDashboardTour } from '@/lib/onboarding/tours/dashboard'
 
+import { ArchivedCoursesSection } from './components/archived-courses-section'
 import { CoursesPrimaryButtons } from './components/courses-primary-buttons'
 import { CoursesTable } from './components/courses-table'
 import { DeleteCourseDialog } from './components/delete-course-dialog'
@@ -98,9 +99,22 @@ export function Dashboard() {
   // page 1 with a generous per_page; pagination is client-side via
   // TanStack table (suits the dashboard's working-set scale; >100
   // courses we'll switch to server-side in 6.10).
+  //
+  // F10 2026-06-02: backend non ha un filtro "exclude_archived" puro;
+  // fetcho TUTTI (status=null) e filtro client-side. La sezione
+  // Archiviati ha una propria query indipendente con status=archived
+  // → 2 fetch parallel ma robuste contro lo stesso refetchInterval.
   const coursesQuery = useQuery({
     queryKey: COURSES_QK,
     queryFn: () => api.getCourses({ page: 1, per_page: 100 }),
+    select: (rows) => rows.filter((c) => c.status !== 'archived'),
+    refetchInterval: REFRESH_INTERVAL_MS,
+  })
+
+  const archivedCoursesQuery = useQuery({
+    queryKey: [...COURSES_QK, 'archived'] as const,
+    queryFn: () =>
+      api.getCourses({ page: 1, per_page: 100, status: 'archived' }),
     refetchInterval: REFRESH_INTERVAL_MS,
   })
 
@@ -126,6 +140,11 @@ export function Dashboard() {
   function handleDeleted() {
     void queryClient.invalidateQueries({ queryKey: COURSES_QK })
     void queryClient.invalidateQueries({ queryKey: STATS_QK })
+    // F10: invalida anche la query archived perche` il corso appena
+    // soft-deleted va a comparire nella tabella archiviati.
+    void queryClient.invalidateQueries({
+      queryKey: [...COURSES_QK, 'archived'],
+    })
   }
 
   return (
@@ -192,6 +211,13 @@ export function Dashboard() {
             onOpenDetail={handleOpenDetail}
           />
         </section>
+
+        {/* F10 2026-06-02: sezione archiviati separata collassabile */}
+        <ArchivedCoursesSection
+          courses={archivedCoursesQuery.data}
+          isLoading={archivedCoursesQuery.isLoading}
+          onChange={handleDeleted}
+        />
       </Main>
 
       <DeleteCourseDialog

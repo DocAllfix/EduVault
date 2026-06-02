@@ -59,7 +59,7 @@ export function DeleteCourseDialog({
           <AlertDialogTitle>Archiviare il corso?</AlertDialogTitle>
           <AlertDialogDescription>
             {course
-              ? `«${course.title}» verrà spostato negli archivi. Resta consultabile da admin per audit ma non comparirà più nelle liste operative. L'azione non è reversibile dall'interfaccia.`
+              ? `«${course.title}» verrà spostato nella sezione Archiviati a fondo pagina. Da lì potrai eliminarlo definitivamente o lasciarlo come storico. L'azione non è reversibile dall'interfaccia (richiede DBA).`
               : ''}
           </AlertDialogDescription>
         </AlertDialogHeader>

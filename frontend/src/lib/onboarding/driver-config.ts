@@ -91,6 +91,12 @@ export const BASE_DRIVER_CONFIG: Partial<Config> = {
   nextBtnText: 'Avanti →',
   prevBtnText: '← Indietro',
   doneBtnText: 'Fatto',
+  // F10 bugfix 2026-06-02: driver.js v1.4 ha rotto il default click su X.
+  // L'attributo `allowClose: true` mostra la X ma NON la wira automatica al
+  // destroy(). Devo registrare onCloseClick esplicito che chiama .destroy().
+  onCloseClick: (_el, _step, opts) => {
+    opts.driver.destroy()
+  },
 }
 
 /**
