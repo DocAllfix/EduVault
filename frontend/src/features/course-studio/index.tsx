@@ -12,9 +12,10 @@
  */
 
 import { useEffect, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate, useParams } from '@tanstack/react-router'
 import { ArrowLeft } from 'lucide-react'
+import { toast } from 'sonner'
 
 import { useSidebar } from '@/components/ui/sidebar'
 
@@ -120,6 +121,75 @@ export function CourseStudio() {
     return () => window.removeEventListener('keydown', onKey)
   })
 
+  // F-NEXT Fase 1 (2026-06-02): DnD riordino intra-modulo via @dnd-kit.
+  // Backend `move_slide` scambia 1 posizione adiacente per chiamata, quindi
+  // riordinare da pos N a pos M richiede |M-N| chiamate sequenziali.
+  // Optimistic update sulla cache TanStack per UX istantanea, rollback
+  // ed evento di refetch finale in caso di errore.
+  const qc = useQueryClient()
+  const reorderMut = useMutation({
+    mutationFn: async ({
+      fromGlobal,
+      toGlobal,
+    }: {
+      fromGlobal: number
+      toGlobal: number
+    }) => {
+      if (fromGlobal === toGlobal) return
+      const steps = Math.abs(toGlobal - fromGlobal)
+      const direction: 'up' | 'down' =
+        toGlobal < fromGlobal ? 'up' : 'down'
+      // L'API backend usa slide.index module-relative come param URL: ci serve
+      // pesare la slide corrente DOPO ogni move, perche` _reindex cambia gli
+      // indici. Approccio semplice: usa l'array TanStack come fonte di verita`
+      // intermedia + rilegge slide.index dopo ogni move.
+      let workingSlides: StudioSlide[] =
+        qc.getQueryData<{ slides: StudioSlide[] }>(['course-slides', id])
+          ?.slides ?? []
+      for (let i = 0; i < steps; i++) {
+        const currentPosGlobal =
+          direction === 'up' ? fromGlobal - i : fromGlobal + i
+        const movingSlide = workingSlides[currentPosGlobal]
+        if (!movingSlide) break
+        const updated = await api.moveSlide(
+          id,
+          movingSlide.index,
+          direction,
+        )
+        workingSlides = updated
+      }
+      return workingSlides
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['course-slides', id] })
+      qc.invalidateQueries({ queryKey: ['course-detail', id] })
+    },
+    onError: (err) => {
+      toast.error(
+        err instanceof Error
+          ? `Riordino fallito: ${err.message}`
+          : 'Riordino fallito',
+      )
+      qc.invalidateQueries({ queryKey: ['course-slides', id] })
+    },
+  })
+
+  const handleReorder = (fromPosGlobal: number, toPosGlobal: number) => {
+    if (fromPosGlobal === toPosGlobal) return
+    const from = slides[fromPosGlobal]
+    const to = slides[toPosGlobal]
+    if (!from || !to) return
+    if (from.module_index !== to.module_index) {
+      toast.warning(
+        'Riordino tra moduli diversi non supportato. Sposta solo dentro lo stesso modulo.',
+      )
+      return
+    }
+    // Aggiorna selectedIdx se la slide selezionata stessa e` stata mossa
+    // (il suo index potrebbe cambiare dopo backend rebuild).
+    reorderMut.mutate({ fromGlobal: fromPosGlobal, toGlobal: toPosGlobal })
+  }
+
   // D3 gate: skeleton-pending course → review UI instead of the slide IDE.
   if (isSkeletonPending) {
     return (
@@ -223,6 +293,7 @@ export function CourseStudio() {
                 selectedIdx={selectedIdx}
                 onSelect={setSelectedIdx}
                 qualityData={qualityQ.data}
+                onReorder={handleReorder}
               />
 
               {/* ─── Center: viewer (nav + audio sono nel TopBar) ─── */}
