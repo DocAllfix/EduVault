@@ -80,8 +80,19 @@ function getMeta(t: string): { label: string; icon: LucideIcon } {
 
 export interface SlideRailProps {
   slides: StudioSlide[]
+  /**
+   * F10 bugfix 2026-06-02 (D-228): array completo allSlides (anche se filtered
+   * problematic). Usato per calcolare posGlobal univoco di una slide
+   * (slide.index e` module-relative → puo` duplicare tra moduli).
+   */
+  allSlides: StudioSlide[]
+  /**
+   * Indice GLOBALE 0..N-1 nell'array allSlides della slide selezionata.
+   * NB: NON e` `slide.index` (che e` module-relative).
+   */
   selectedIdx: number
-  onSelect: (idx: number) => void
+  /** Callback con il nuovo indice globale. */
+  onSelect: (globalIdx: number) => void
   qualityData: QualityIssuesResponse | undefined
   /**
    * F-NEXT Fase 1 (2026-06-02): callback per riordinare slide intra-modulo
@@ -103,13 +114,16 @@ function getSortableId(s: StudioSlide, posInModule: number): string {
 
 export function SlideRail({
   slides,
+  allSlides,
   selectedIdx,
   onSelect,
   qualityData,
   onReorder,
 }: SlideRailProps) {
-  // Trova la slide selezionata + il suo modulo, per auto-open accordion.
-  const selectedSlide = slides.find((s) => s.index === selectedIdx)
+  // Trova la slide selezionata via indice globale (D-228 fix). NB: allSlides
+  // e` l'unica source-of-truth dell'indice globale; `slides` puo` essere
+  // filtrata (filterProblematic).
+  const selectedSlide = allSlides[selectedIdx] ?? slides[0]
   const currentModuleId =
     selectedSlide != null ? `m-${selectedSlide.module_index ?? 0}` : 'm-0'
   const [openModuleId, setOpenModuleId] = useState<string>(currentModuleId)
@@ -249,7 +263,12 @@ function SortableModuleContent({
         <ul className="space-y-0.5">
           {groupItems.map((s, posInModule) => {
             const meta = getMeta(s.slide_type)
-            const posGlobal = allSlides.findIndex((x) => x.index === s.index)
+            // F10 bugfix 2026-06-02 (D-228): identifica la slide nell'array
+            // globale via (module_index, slide.index) — slide.index da solo
+            // duplica tra moduli (e` module-relative).
+            const posGlobal = allSlides.findIndex(
+              (x) => x.index === s.index && x.module_index === s.module_index,
+            )
             return (
               <SortableSlideItem
                 key={sortableIds[posInModule]}
@@ -258,7 +277,7 @@ function SortableModuleContent({
                 meta={meta}
                 posGlobal={posGlobal}
                 moduleIndex={moduleIndex}
-                isSelected={s.index === selectedIdx}
+                isSelected={posGlobal === selectedIdx}
                 onSelect={onSelect}
                 qualityData={qualityData}
               />
@@ -332,7 +351,7 @@ function SortableSlideItem({
       </button>
       <button
         type="button"
-        onClick={() => onSelect(slide.index)}
+        onClick={() => onSelect(posGlobal)}
         className="flex flex-1 items-center gap-2 px-1 py-1.5 text-left text-xs"
         aria-label={label}
         aria-current={isSelected ? 'true' : undefined}

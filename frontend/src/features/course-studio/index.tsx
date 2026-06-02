@@ -87,13 +87,44 @@ export function CourseStudio() {
   const slides: StudioSlide[] = filterProblematic
     ? allSlides.filter((s) => getSlideMaxSeverity(qualityQ.data, s.index) !== null)
     : allSlides
-  const selected = slides.find((s) => s.index === selectedIdx) ?? slides[0] ?? allSlides[0]
-  const pos = selected ? slides.findIndex((s) => s.index === selected.index) : -1
+  // F10 bugfix 2026-06-02 (D-228): `selectedIdx` ora rappresenta l'indice
+  // GLOBALE nell'array allSlides (0..N-1), NON `slide.index` che e`
+  // module-relative (riparte da 0 ad ogni modulo). Con il vecchio approccio
+  // `slides.find(s => s.index === selectedIdx)` cliccare M2-slide-3 ritornava
+  // M1-slide-3 (primo match). Ora uso `allSlides[selectedIdx]` come selettore
+  // robusto + filtro problematic re-mappato all'indice globale corrispondente.
+  const selected =
+    (filterProblematic
+      ? slides.find(
+          (s) =>
+            allSlides.findIndex(
+              (x) =>
+                x.index === s.index && x.module_index === s.module_index,
+            ) === selectedIdx,
+        ) ?? slides[0]
+      : allSlides[selectedIdx]) ??
+    slides[0] ??
+    allSlides[0]
+  // `pos` = posizione della slide selezionata dentro `slides` (filtered o no)
+  const pos = selected
+    ? slides.findIndex(
+        (s) =>
+          s.index === selected.index &&
+          s.module_index === selected.module_index,
+      )
+    : -1
+  // Helper: data una slide qualsiasi, ritorna il suo indice globale nell'array allSlides
+  const globalIndexOf = (s: StudioSlide): number =>
+    allSlides.findIndex(
+      (x) => x.index === s.index && x.module_index === s.module_index,
+    )
   const goPrev = () => {
-    if (pos > 0) setSelectedIdx(slides[pos - 1].index)
+    if (pos > 0) setSelectedIdx(globalIndexOf(slides[pos - 1]))
   }
   const goNext = () => {
-    if (pos >= 0 && pos < slides.length - 1) setSelectedIdx(slides[pos + 1].index)
+    if (pos >= 0 && pos < slides.length - 1) {
+      setSelectedIdx(globalIndexOf(slides[pos + 1]))
+    }
   }
 
   // Navigazione orizzontale stile PowerPoint: frecce ← → da tastiera.
@@ -302,6 +333,7 @@ export function CourseStudio() {
               <div data-tour="studio-sliderail">
                 <SlideRail
                   slides={slides}
+                  allSlides={allSlides}
                   selectedIdx={selectedIdx}
                   onSelect={setSelectedIdx}
                   qualityData={qualityQ.data}
@@ -316,8 +348,8 @@ export function CourseStudio() {
                   total={slides.length}
                   courseId={id}
                   rebuildToken={courseQ.data?.last_rebuilt_at ?? null}
-                  globalSlideIndex={pos}
-                  key={`${id}-${selected.index}-${pos}`}
+                  globalSlideIndex={globalIndexOf(selected)}
+                  key={`${id}-${selected.module_index}-${selected.index}`}
                 />
               </section>
 
