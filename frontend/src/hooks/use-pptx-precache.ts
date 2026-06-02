@@ -24,7 +24,7 @@
 import { useEffect, useRef, useState } from 'react'
 
 import { api } from '@/lib/api'
-import { buildCacheKey, setCached } from '@/lib/pptx-cache'
+import { buildCacheKey, getCached, setCached } from '@/lib/pptx-cache'
 
 const POLL_INTERVAL_MS = 5000
 const MAX_POLL_DURATION_MS = 3 * 60 * 1000
@@ -38,6 +38,13 @@ export interface UsePptxPrecacheResult {
   isReady: boolean
   /** Trigger esterno: chiama questa quando rebuildMut.onSuccess fires. */
   triggerPrecache: (previousToken: string | null | undefined) => void
+  /**
+   * F11: precache idle (no polling). Chiama direttamente
+   * `api.downloadCourse(pptx)` se non c'e` gia` un blob in cache per
+   * il token corrente. Usato dalla course-detail page per scaldare la
+   * IndexedDB cache PRIMA che l'utente clicchi "Apri Studio".
+   */
+  warmCache: (token: string | null | undefined) => void
 }
 
 export function usePptxPrecache(courseId: string): UsePptxPrecacheResult {
@@ -94,5 +101,35 @@ export function usePptxPrecache(courseId: string): UsePptxPrecacheResult {
     void tick()
   }
 
-  return { isPolling, isFetching, isReady, triggerPrecache }
+  /**
+   * F11: warm cache idle. Se ho gia` il blob in IndexedDB per il dato
+   * token, no-op. Altrimenti scarica e cache (silenzioso). Tipicamente
+   * chiamato in `useEffect` di course-detail dopo che courseQ ha dati.
+   */
+  const warmCache = (token: string | null | undefined) => {
+    if (!token) return
+    const ref = cancelRef.current
+    void (async () => {
+      try {
+        const key = buildCacheKey(courseId, token)
+        const cached = await getCached(key)
+        if (cached || ref.cancelled) return
+        setIsFetching(true)
+        try {
+          const blob = await api.downloadCourse(courseId, 'pptx')
+          if (ref.cancelled) return
+          await setCached(key, blob)
+          setIsReady(true)
+        } catch {
+          // best-effort
+        } finally {
+          if (!ref.cancelled) setIsFetching(false)
+        }
+      } catch {
+        // best-effort: IndexedDB problemi → fallback al loading runtime
+      }
+    })()
+  }
+
+  return { isPolling, isFetching, isReady, triggerPrecache, warmCache }
 }

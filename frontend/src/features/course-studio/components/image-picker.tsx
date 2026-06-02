@@ -76,11 +76,20 @@ export function ImagePicker({
 
   const setImageMut = useMutation({
     mutationFn: (args: { url: string; strategy?: string }) =>
-      api.patchSlideImage(courseId, slide.index, {
-        strategy: args.strategy ?? 'web_search',
-        query,
-        query_url: args.url,
-      }),
+      // F11 D-232: passo `module_index` per evitare il bug dove slide
+      // con stesso `index` in moduli diversi venivano confuse e il PATCH
+      // toccava la slide sbagliata (o falliva con 422 per slide_type
+      // incompatibile).
+      api.patchSlideImage(
+        courseId,
+        slide.index,
+        {
+          strategy: args.strategy ?? 'web_search',
+          query,
+          query_url: args.url,
+        },
+        slide.module_index,
+      ),
     onSuccess: () => {
       toast.success('Immagine aggiornata')
       qc.invalidateQueries({ queryKey: ['course-slides', courseId] })

@@ -47,6 +47,9 @@ import { Main } from '@/components/layout/main'
 import { ProfileDropdown } from '@/components/profile-dropdown'
 import { ThemeSwitch } from '@/components/theme-switch'
 import { HelpButton } from '@/lib/onboarding/HelpButton'
+import { JobsBadge } from '@/components/jobs-badge'
+import { useJobsStore } from '@/stores/jobs-store'
+import { requestNotificationPermissionOnce } from '@/hooks/use-jobs-watcher'
 
 import { StepIndicator } from './components/step-indicator'
 import { Step1CourseType } from './components/step-1-course-type'
@@ -158,6 +161,20 @@ export function CoursesWizard() {
       // match by construction).
       const payload = values as unknown as CourseRequest
       const { course_id, job_id } = await api.createCourse(payload)
+      // F11: registro il job nello store globale → JobsWatcher pollerà
+      // /api/jobs/{job_id}/progress e mostrera` toast.success cliccabile
+      // quando la pipeline termina, anche se l'utente naviga altrove.
+      useJobsStore.getState().addJob({
+        courseId: course_id,
+        courseTitle:
+          payload.course_type
+            ?.split('_')
+            .map((w: string) => w.charAt(0).toUpperCase() + w.slice(1))
+            .join(' ') ?? 'Corso',
+        kind: 'generation',
+        jobId: job_id,
+      })
+      requestNotificationPermissionOnce()
       toast.success('Pipeline avviata.')
       // Redirect to the Progress Monitor (FASE 6.9). `?job=` lets the
       // WS connect immediately without an extra lookup round-trip.
@@ -185,6 +202,7 @@ export function CoursesWizard() {
     <>
       <Header>
         <div className='ms-auto flex items-center gap-2'>
+          <JobsBadge />
           <HelpButton />
           <ThemeSwitch />
           <ProfileDropdown />

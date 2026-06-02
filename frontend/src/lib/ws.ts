@@ -179,15 +179,32 @@ function startPolling(
   onComplete: ((p: JobProgress) => void) | undefined,
   onError: ((err: WatchJobError) => void) | undefined,
   setLast: (p: JobProgress) => void,
+  jobId?: string,
 ): PollingState {
   const state: PollingState = { timer: null, cancelled: false }
 
   const tick = async () => {
     if (state.cancelled) return
     try {
-      const course = await api.getCourse(courseId)
+      // F11 (2026-06-02): se ho jobId, uso il REST endpoint
+      // /api/jobs/{job_id}/progress che ha progress_percent + current_step
+      // (la sorgente reale). Solo se non c'e` jobId, fallback al
+      // courseStatusToJobProgress (lossy, mostra solo `building`).
+      let frame: JobProgress
+      if (jobId) {
+        const j = await api.getJobProgress(jobId)
+        frame = {
+          status: (j.status as JobProgress['status']) ?? 'building',
+          progress_percent: j.progress_percent ?? null,
+          current_step: j.current_step ?? null,
+          error_message: j.error_message ?? null,
+        }
+      } else {
+        const course = await api.getCourse(courseId)
+        if (state.cancelled) return
+        frame = courseStatusToJobProgress(course)
+      }
       if (state.cancelled) return
-      const frame = courseStatusToJobProgress(course)
       setLast(frame)
       onProgress(frame)
       if (TERMINAL_STATES.has(frame.status)) {
@@ -251,7 +268,9 @@ export function connectToJob(jobId: string, opts: WatchJobOptions): WatchHandle 
     (typeof window !== 'undefined'
       ? window.localStorage.getItem('nexus.accessToken')
       : null)
-  const pollIntervalMs = opts.pollIntervalMs ?? 30_000
+  // F11: 3s (era 30s) — il REST `/api/jobs/.../progress` è cheap (1 SELECT
+  // + auth check) e dare aggiornamenti ogni 30s rendeva la barra inerte.
+  const pollIntervalMs = opts.pollIntervalMs ?? 3_000
   const maxReconnects = opts.maxWsReconnects ?? 2
 
   let lastProgress: JobProgress | null = null
@@ -296,6 +315,7 @@ export function connectToJob(jobId: string, opts: WatchJobOptions): WatchHandle 
       opts.onComplete,
       opts.onError,
       setLast,
+      jobId,  // F11: REST /api/jobs/{job_id}/progress se disponibile
     )
   }
 

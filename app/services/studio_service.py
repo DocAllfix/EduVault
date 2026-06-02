@@ -67,29 +67,58 @@ async def get_slides(course_id: str, pool: Any) -> list[dict[str, Any]]:
     return _deserialize_slides(row["slide_contents_json"])
 
 
-async def get_slide_by_idx(course_id: str, idx: int, pool: Any) -> dict[str, Any]:
-    """Ritorna la singola slide con ``index == idx``."""
+async def get_slide_by_idx(
+    course_id: str,
+    idx: int,
+    pool: Any,
+    module_index: int | None = None,
+) -> dict[str, Any]:
+    """Ritorna la singola slide con ``index == idx``.
+
+    F11 D-232 (2026-06-02): ``index`` e` module-relative (riparte da 0
+    ad ogni modulo), quindi puo` duplicare tra moduli. Quando
+    ``module_index`` e` fornito, match composito (univoco). Altrimenti
+    fallback al match by-index (back-compat: ritorna la PRIMA slide).
+    """
     slides = await get_slides(course_id, pool)
     for s in slides:
-        if s.get("index") == idx:
+        if s.get("index") == idx and (
+            module_index is None or s.get("module_index") == module_index
+        ):
             return s
-    raise LookupError(f"slide index {idx} not found")
+    raise LookupError(f"slide index {idx} (module {module_index}) not found")
 
 
 async def update_slide(
-    course_id: str, idx: int, patch: dict[str, Any], pool: Any
+    course_id: str,
+    idx: int,
+    patch: dict[str, Any],
+    pool: Any,
+    module_index: int | None = None,
 ) -> dict[str, Any]:
     """Aggiorna i campi specificati nella slide ``idx``, ri-valida via Pydantic
     strict (FASE 1), persiste l'intero array, marca il corso ``dirty=true``.
+
+    F11 D-232: ``module_index`` opzionale per match composito (D-228).
 
     Solleva ``ValueError`` se la slide aggiornata viola i constraints
     (il caller lo traduce in HTTP 422).
     """
     cid = _parse_course_id(course_id)
     slides = await get_slides(course_id, pool)
-    target_pos = next((i for i, s in enumerate(slides) if s.get("index") == idx), None)
+    target_pos = next(
+        (
+            i
+            for i, s in enumerate(slides)
+            if s.get("index") == idx
+            and (module_index is None or s.get("module_index") == module_index)
+        ),
+        None,
+    )
     if target_pos is None:
-        raise LookupError(f"slide index {idx} not found")
+        raise LookupError(
+            f"slide index {idx} (module {module_index}) not found"
+        )
 
     # FIX 2026-06-01 bug edit slide: il frontend invia `body: str` (single
     # multiline string), il backend SlideContent ha `bullets: list[str]`.
@@ -121,12 +150,23 @@ async def update_slide(
 
 
 async def set_slide_image(
-    course_id: str, idx: int, image_patch: dict[str, Any], pool: Any
+    course_id: str,
+    idx: int,
+    image_patch: dict[str, Any],
+    pool: Any,
+    module_index: int | None = None,
 ) -> dict[str, Any]:
-    """Aggiorna il sub-doc ``image`` della slide ``idx`` + dirty=true."""
-    slide = await get_slide_by_idx(course_id, idx, pool)
+    """Aggiorna il sub-doc ``image`` della slide ``idx`` + dirty=true.
+
+    F11 D-232: ``module_index`` opzionale per match composito (D-228).
+    """
+    slide = await get_slide_by_idx(
+        course_id, idx, pool, module_index=module_index
+    )
     new_image = {**slide.get("image", {}), **image_patch}
-    return await update_slide(course_id, idx, {"image": new_image}, pool)
+    return await update_slide(
+        course_id, idx, {"image": new_image}, pool, module_index=module_index
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────────

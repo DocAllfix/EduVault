@@ -63,6 +63,8 @@ import {
 import { useAudioNarration } from '@/stores/audio-narration-store'
 import { usePptxPrecache } from '@/hooks/use-pptx-precache'
 import { HelpButton } from '@/lib/onboarding/HelpButton'
+import { useJobsStore } from '@/stores/jobs-store'
+import { requestNotificationPermissionOnce } from '@/hooks/use-jobs-watcher'
 
 export interface StudioTopBarProps {
   courseId: string
@@ -75,6 +77,14 @@ export interface StudioTopBarProps {
   qualityData: QualityIssuesResponse | undefined
   filterActive: boolean
   onFilterToggle: () => void
+  /**
+   * F11 (2026-06-02): true se il corso ha `audio_manifest_path`
+   * popolato. Quando false, mostra il bottone "Genera audio" accanto
+   * a Rigenera. Coerente con il callout in course-detail (D-230).
+   */
+  audioReady?: boolean
+  /** F11: titolo del corso, usato per i toast/jobs store. */
+  courseTitle?: string
 }
 
 export function StudioTopBar({
@@ -88,6 +98,8 @@ export function StudioTopBar({
   qualityData,
   filterActive,
   onFilterToggle,
+  audioReady = true,
+  courseTitle = 'Corso',
 }: StudioTopBarProps) {
   const qc = useQueryClient()
 
@@ -101,8 +113,15 @@ export function StudioTopBar({
   const rebuildMut = useMutation({
     mutationFn: () => api.rebuildCourse(courseId),
     onSuccess: () => {
+      // F11: registra job nello store → JobsWatcher rileva fine + notifica.
+      useJobsStore.getState().addJob({
+        courseId,
+        courseTitle,
+        kind: 'rebuild',
+      })
+      requestNotificationPermissionOnce()
       toast.success(
-        'Rigenerazione avviata. PPTX e PDF pronti a breve; la narrazione vocale viene rigenerata in background (2-10 min).',
+        'Rigenerazione avviata. Riceverai una notifica quando sara` pronto.',
       )
       // Snapshot del token PRIMA del rebuild → il hook polla per cambio token.
       const previousToken =
@@ -117,6 +136,28 @@ export function StudioTopBar({
       qc.invalidateQueries({ queryKey: ['dashboard-stats'] })
     },
     onError: () => toast.error('Avvio rigenerazione fallito'),
+  })
+
+  // F11 (D-230): rebuild SOLO audio. Mostrato come bottone separato
+  // accanto a "Rigenera" quando il corso non ha audio_manifest_path.
+  // 10x più veloce + non tocca PPTX/PDF già validi.
+  const rebuildAudioMut = useMutation({
+    mutationFn: () => api.rebuildCourseAudio(courseId),
+    onSuccess: () => {
+      useJobsStore.getState().addJob({
+        courseId,
+        courseTitle,
+        kind: 'audio_rebuild',
+      })
+      requestNotificationPermissionOnce()
+      toast.success(
+        'Generazione audio avviata. Riceverai una notifica quando sara` pronta.',
+      )
+      qc.invalidateQueries({ queryKey: ['course', courseId] })
+      qc.invalidateQueries({ queryKey: ['course-detail', courseId] })
+    },
+    onError: () =>
+      toast.error('Avvio generazione audio fallito.'),
   })
 
   const downloadMut = useMutation({
@@ -267,6 +308,34 @@ export function StudioTopBar({
               <TooltipContent>Slide successiva →</TooltipContent>
             </Tooltip>
           </div>
+
+          {/* F11 (D-230): bottone "Genera audio" — visibile solo se il
+              corso NON ha audio_manifest_path. Pattern coerente con il
+              callout in course-detail. Variant outline per non rubare
+              l'enfasi al bottone primary "Rigenera". */}
+          {!audioReady && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={rebuildAudioMut.isPending}
+                  onClick={() => rebuildAudioMut.mutate()}
+                  className="h-8 px-2.5 text-xs gap-1.5 border-brand-primary/40 text-brand-primary hover:bg-brand-primary/10 hover:text-brand-primary"
+                >
+                  {rebuildAudioMut.isPending ? (
+                    <Loader2 className="size-3.5 animate-spin" />
+                  ) : (
+                    <Sparkles className="size-3.5" />
+                  )}
+                  Genera audio
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                Genera la narrazione MP3 per questo corso (2-10 min).
+              </TooltipContent>
+            </Tooltip>
+          )}
 
           {/* ─── Rebuild + Download ─── */}
           <AlertDialog>

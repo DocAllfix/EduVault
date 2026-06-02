@@ -49,6 +49,7 @@ import { Main } from '@/components/layout/main'
 import { ProfileDropdown } from '@/components/profile-dropdown'
 import { ThemeSwitch } from '@/components/theme-switch'
 import { HelpButton } from '@/lib/onboarding/HelpButton'
+import { JobsBadge } from '@/components/jobs-badge'
 import { cn } from '@/lib/utils'
 
 import { ChunksSheet } from './components/chunks-sheet'
@@ -195,6 +196,7 @@ export function Regulations() {
     <>
       <Header>
         <div className='ms-auto flex items-center gap-2'>
+          <JobsBadge />
           <HelpButton />
           <ThemeSwitch />
           <ProfileDropdown />

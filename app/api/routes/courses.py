@@ -880,9 +880,16 @@ async def patch_course_slide_image(
     course_id: str,
     idx: int,
     patch: ImagePatch,
+    module_index: int | None = Query(None),
     user: dict[str, Any] = Depends(require_role("admin", "reviewer")),
 ) -> dict[str, Any]:
-    """Aggiorna il sub-doc image di una slide (query/url/aspect/diagram)."""
+    """Aggiorna il sub-doc image di una slide (query/url/aspect/diagram).
+
+    F11 D-232 (2026-06-02): ``idx`` e` module-relative (riparte da 0 ad
+    ogni modulo), quindi puo` duplicare tra moduli. Il param opzionale
+    ``module_index`` identifica univocamente la slide. Quando assente,
+    fallback al matching legacy by-index (back-compat).
+    """
     pool = get_pool()
     course = await _load_course_or_404(course_id, pool)
     _enforce_ownership(course, user)
@@ -890,7 +897,9 @@ async def patch_course_slide_image(
     if not image_changes:
         raise HTTPException(400, "Nessun campo immagine da aggiornare")
     try:
-        return await studio_service.set_slide_image(course_id, idx, image_changes, pool)
+        return await studio_service.set_slide_image(
+            course_id, idx, image_changes, pool, module_index=module_index
+        )
     except LookupError as exc:
         raise HTTPException(404, f"Slide {idx} non trovata") from exc
     except Exception as exc:

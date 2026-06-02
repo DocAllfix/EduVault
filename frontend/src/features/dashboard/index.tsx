@@ -33,6 +33,7 @@ import { ProfileDropdown } from '@/components/profile-dropdown'
 import { Search } from '@/components/search'
 import { ThemeSwitch } from '@/components/theme-switch'
 import { HelpButton } from '@/lib/onboarding/HelpButton'
+import { JobsBadge } from '@/components/jobs-badge'
 import { OnboardingBanner } from '@/lib/onboarding/OnboardingBanner'
 import { startDashboardTour } from '@/lib/onboarding/tours/dashboard'
 
@@ -152,6 +153,7 @@ export function Dashboard() {
       <Header>
         <Search />
         <div className='ms-auto flex items-center gap-2'>
+          <JobsBadge />
           <HelpButton />
           <ThemeSwitch />
           <ConfigDrawer />

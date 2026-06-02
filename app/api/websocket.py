@@ -25,8 +25,9 @@ import uuid as uuid_mod
 from typing import Any
 
 import structlog
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
 
+from app.api.dependencies import get_current_user
 from app.services.auth_service import decode_token
 from app.services.dependencies import get_pool
 
@@ -113,6 +114,45 @@ async def websocket_endpoint(
     except WebSocketDisconnect:
         # Client disconnected — the job keeps running in the background.
         logger.info("ws_client_disconnect", job_id=job_id)
+
+
+# ─────────────── GET /api/jobs/{job_id}/progress ───────────────
+# F11 (2026-06-02): REST fallback al WS. Necessario perche` il client
+# spesso non riesce a tenere aperta una connessione WS (Railway proxy
+# timeout, mobile network changes, ecc.) → cade in polling che pero`
+# non aveva mai una sorgente di progress_percent + current_step e
+# restava bloccato a 0%/"Avvio..." (utente segnalato 2026-06-02).
+# Riusa `get_job_progress` come WS, stessa ownership rule.
+
+
+@router.get("/api/jobs/{job_id}/progress")
+async def get_job_progress_rest(
+    job_id: str,
+    user: dict[str, Any] = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Snapshot single-shot del job progress (REST fallback al WS).
+
+    Ownership: operator → own jobs only; admin/reviewer → any job.
+    """
+    pool = get_pool()
+    try:
+        jid = uuid_mod.UUID(job_id)
+    except ValueError:
+        raise HTTPException(404, "Job non trovato") from None
+
+    job = await pool.fetchrow(
+        "SELECT c.created_by FROM generation_jobs j "
+        "JOIN courses c ON j.course_id = c.id WHERE j.id = $1",
+        jid,
+    )
+    if not job:
+        raise HTTPException(404, "Job non trovato")
+
+    role = user.get("role")
+    if role == "operator" and str(job["created_by"]) != str(user["id"]):
+        raise HTTPException(403, "Accesso negato a job di altro utente")
+
+    return await get_job_progress(job_id)
 
 
 __all__ = ["POLL_INTERVAL_SECONDS", "TERMINAL_STATES", "get_job_progress", "router"]

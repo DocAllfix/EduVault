@@ -14,6 +14,7 @@ import { Main } from '@/components/layout/main'
 import { ProfileDropdown } from '@/components/profile-dropdown'
 import { ThemeSwitch } from '@/components/theme-switch'
 import { HelpButton } from '@/lib/onboarding/HelpButton'
+import { JobsBadge } from '@/components/jobs-badge'
 import { Button } from '@/components/ui/button'
 import {
   Card,
@@ -35,6 +36,7 @@ export function CourseStudioEntry() {
       <Header>
         <h1 className='text-base font-semibold'>Course Studio</h1>
         <div className='ml-auto flex items-center gap-2'>
+          <JobsBadge />
           <HelpButton />
           <ThemeSwitch />
           <ProfileDropdown />

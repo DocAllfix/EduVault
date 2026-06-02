@@ -60,6 +60,7 @@ import { Main } from '@/components/layout/main'
 import { ProfileDropdown } from '@/components/profile-dropdown'
 import { ThemeSwitch } from '@/components/theme-switch'
 import { HelpButton } from '@/lib/onboarding/HelpButton'
+import { JobsBadge } from '@/components/jobs-badge'
 
 const PER_PAGE = 20
 
@@ -114,6 +115,7 @@ export function ImageLibraryAdmin() {
     <>
       <Header>
         <div className='ms-auto flex items-center gap-2'>
+          <JobsBadge />
           <HelpButton />
           <ThemeSwitch />
           <ProfileDropdown />

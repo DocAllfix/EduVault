@@ -625,10 +625,19 @@ async function patchSlideImage(
   id: string,
   idx: number,
   image: { strategy?: string; query?: string; query_url?: string; aspect_hint?: string },
+  moduleIndex?: number,
 ): Promise<StudioSlide> {
+  // F11 D-232: idx e` module-relative → moduleIndex e` necessario per
+  // disambiguare slide con stesso index in moduli diversi. Backend
+  // accetta `?module_index=N` opzionale (back-compat).
   return request<StudioSlide>(
     `/api/courses/${encodeURIComponent(id)}/slides/${idx}/image`,
-    { method: 'PATCH', json: image },
+    {
+      method: 'PATCH',
+      json: image,
+      query:
+        moduleIndex !== undefined ? { module_index: moduleIndex } : undefined,
+    },
   )
 }
 
@@ -888,6 +897,25 @@ async function rebuildCourseAudio(
   return request<{ status: string; course_id: string }>(
     `/api/courses/${encodeURIComponent(id)}/audio/rebuild`,
     { method: 'POST' },
+  )
+}
+
+/**
+ * F11 (2026-06-02): REST snapshot di un generation_job. Usato come
+ * fallback al WS — quando il WS fallisce/non si connette, il polling
+ * legge progress_percent + current_step da qui (prima leggeva solo
+ * `courses.status` che non ha questi campi → barra ferma a 0%).
+ */
+export interface JobProgressResponse {
+  status: string
+  progress_percent?: number | null
+  current_step?: string | null
+  error_message?: string | null
+}
+
+async function getJobProgress(jobId: string): Promise<JobProgressResponse> {
+  return request<JobProgressResponse>(
+    `/api/jobs/${encodeURIComponent(jobId)}/progress`,
   )
 }
 
@@ -1214,6 +1242,7 @@ export const api = {
   getCompatibleCourses,
   rebuildCourse,
   rebuildCourseAudio,
+  getJobProgress,
   addSlide,
   moveSlide,
   duplicateSlide,

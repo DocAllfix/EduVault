@@ -67,6 +67,7 @@ import { Main } from '@/components/layout/main'
 import { ProfileDropdown } from '@/components/profile-dropdown'
 import { ThemeSwitch } from '@/components/theme-switch'
 import { HelpButton } from '@/lib/onboarding/HelpButton'
+import { JobsBadge } from '@/components/jobs-badge'
 
 const TARGET_LABELS: Record<string, string> = {
   discente: 'Discente',
@@ -117,6 +118,7 @@ export function CatalogBrowse() {
       <Header>
         <h1 className='text-base font-semibold'>Catalogo Corsi</h1>
         <div className='ml-auto flex items-center gap-2'>
+          <JobsBadge />
           <HelpButton />
           <ThemeSwitch />
           <ProfileDropdown />

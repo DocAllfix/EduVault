@@ -27,6 +27,7 @@ import { Main } from '@/components/layout/main'
 import { ProfileDropdown } from '@/components/profile-dropdown'
 import { ThemeSwitch } from '@/components/theme-switch'
 import { HelpButton } from '@/lib/onboarding/HelpButton'
+import { JobsBadge } from '@/components/jobs-badge'
 import { OnboardingBanner } from '@/lib/onboarding/OnboardingBanner'
 import { startCourseStudioTour } from '@/lib/onboarding/tours/course-studio'
 import { SlideViewer } from './components/slide-viewer'
@@ -237,6 +238,7 @@ export function CourseStudio() {
             <ArrowLeft className="mr-2 h-4 w-4" /> Dettaglio corso
           </Button>
           <div className="ml-auto flex items-center gap-2">
+            <JobsBadge />
             <HelpButton />
             <ThemeSwitch />
             <ProfileDropdown />
@@ -271,6 +273,8 @@ export function CourseStudio() {
           qualityData={qualityQ.data}
           filterActive={filterProblematic}
           onFilterToggle={() => setFilterProblematic(!filterProblematic)}
+          audioReady={Boolean(courseQ.data?.audio_manifest_path)}
+          courseTitle={courseQ.data?.title}
         />
       ) : (
         <Header>
@@ -282,6 +286,7 @@ export function CourseStudio() {
             <ArrowLeft className="mr-2 h-4 w-4" /> Dettaglio corso
           </Button>
           <div className="ml-auto flex items-center gap-2">
+            <JobsBadge />
             <HelpButton />
             <ThemeSwitch />
             <ProfileDropdown />

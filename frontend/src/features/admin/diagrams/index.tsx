@@ -32,6 +32,7 @@ import { Main } from '@/components/layout/main'
 import { ProfileDropdown } from '@/components/profile-dropdown'
 import { ThemeSwitch } from '@/components/theme-switch'
 import { HelpButton } from '@/lib/onboarding/HelpButton'
+import { JobsBadge } from '@/components/jobs-badge'
 
 export function DiagramsCatalogAdmin() {
   const q = useQuery({
@@ -43,6 +44,7 @@ export function DiagramsCatalogAdmin() {
     <>
       <Header>
         <div className='ms-auto flex items-center gap-2'>
+          <JobsBadge />
           <HelpButton />
           <ThemeSwitch />
           <ProfileDropdown />

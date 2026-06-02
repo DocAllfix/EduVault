@@ -18,7 +18,7 @@
  * ─── Impeccable self-audit (point 4) — see SELF-AUDIT at end of file.
  */
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate, useParams } from '@tanstack/react-router'
 import {
@@ -56,6 +56,10 @@ import { Main } from '@/components/layout/main'
 import { ProfileDropdown } from '@/components/profile-dropdown'
 import { ThemeSwitch } from '@/components/theme-switch'
 import { HelpButton } from '@/lib/onboarding/HelpButton'
+import { JobsBadge } from '@/components/jobs-badge'
+import { useJobsStore } from '@/stores/jobs-store'
+import { requestNotificationPermissionOnce } from '@/hooks/use-jobs-watcher'
+import { usePptxPrecache } from '@/hooks/use-pptx-precache'
 import { CourseStatusBadge } from '@/features/dashboard/components/course-status-badge'
 import { tokenStorage } from '@/lib/api'
 
@@ -202,8 +206,17 @@ export function CourseDetail() {
     setAudioRebuilding(true)
     try {
       await api.rebuildCourseAudio(id)
+      // F11: registro job nello store globale → JobsWatcher pollerà e
+      // mostrera` toast cliccabile quando l'audio sara` pronto, anche
+      // se l'utente naviga altrove.
+      useJobsStore.getState().addJob({
+        courseId: id,
+        courseTitle: courseQ.data?.title ?? 'Corso',
+        kind: 'audio_rebuild',
+      })
+      requestNotificationPermissionOnce()
       toast.success(
-        'Generazione audio avviata. Sarà pronto in 2-10 min a seconda della durata del corso.',
+        'Generazione audio avviata. Riceverai una notifica quando sara` pronta.',
       )
       // Reset del polling timer + del timeout flag così riprende a pollare
       setAudioPollStart(Date.now())
@@ -226,6 +239,18 @@ export function CourseDetail() {
     (role === 'admin' || role === 'reviewer')
   const canDelete = course && course.status !== 'archived'
 
+  // F11: precache PPTX in background quando l'utente apre la scheda
+  // corso. Cosi`, quando clicca "Apri Studio", il blob e` gia` in
+  // IndexedDB → preview istantanea (vs 13-25s download primo accesso).
+  // No-op se il blob e` gia` in cache per il rebuild_token corrente.
+  const precache = usePptxPrecache(id)
+  useEffect(() => {
+    if (downloadable && course?.last_rebuilt_at) {
+      precache.warmCache(course.last_rebuilt_at)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [downloadable, course?.last_rebuilt_at])
+
   const fingerprint = course?.normative_fingerprint as
     | { refs?: string[]; chunk_count?: number; generated_at?: string }
     | undefined
@@ -234,6 +259,7 @@ export function CourseDetail() {
     <>
       <Header>
         <div className='ms-auto flex items-center gap-2'>
+          <JobsBadge />
           <HelpButton />
           <ThemeSwitch />
           <ProfileDropdown />
