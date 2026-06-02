@@ -20,7 +20,7 @@ import { ArrowLeft, Loader2, Trash2, Upload as UploadIcon, ImageOff } from 'luci
 import { Link } from '@tanstack/react-router'
 import { toast } from 'sonner'
 
-import { api, ApiError, type ImageLibraryAdminEntry } from '@/lib/api'
+import { api, ApiError, API_BASE, type ImageLibraryAdminEntry } from '@/lib/api'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -241,8 +241,13 @@ export function ImageLibraryAdmin() {
                     <TableCell>
                       <div className='size-16 overflow-hidden rounded-md border bg-muted/30'>
                         <img
-                          // F11 D-231 fix: backend monta assets/ a /static/assets
-                          src={`/static/${e.file_path}`}
+                          // F11 D-231 + F12 fix: backend monta assets/ a
+                          // /static/assets. Su prod Vercel non proxia
+                          // /static al backend Railway → 404 (rispondeva
+                          // l'SPA HTML, non l'immagine). Uso API_BASE
+                          // assoluto: in prod = origin Railway, in dev
+                          // = http://localhost:8000.
+                          src={`${API_BASE}/static/${e.file_path}`}
                           alt={e.tags[0] ?? 'image'}
                           className='size-full object-cover'
                           loading='lazy'
@@ -483,8 +488,9 @@ function PreviewImageDialog({
           <div className='space-y-3'>
             <div className='flex justify-center rounded-md border bg-muted/30 p-2'>
               <img
-                // F11 D-231 fix: backend monta assets/ a /static/assets
-                src={`/static/${entry.file_path}`}
+                // F11 D-231 + F12 fix: backend monta assets/ a /static/assets.
+                // Vercel non proxia /static a Railway → uso API_BASE assoluto.
+                src={`${API_BASE}/static/${entry.file_path}`}
                 alt={entry.tags[0] ?? 'preview'}
                 className='max-h-96 object-contain'
               />

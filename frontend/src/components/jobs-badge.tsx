@@ -40,9 +40,14 @@ function JobRow({
   onOpen,
 }: {
   job: ActiveJob
-  onOpen: (courseId: string) => void
+  onOpen: (job: ActiveJob) => void
 }) {
   const pct = job.progressPercent ?? null
+  // F12 fix: per generation in corso, CTA porta al progress monitor
+  // (dove l'utente vede la pipeline avanzare). Per gli altri kind
+  // (rebuild/audio_rebuild), il corso e` gia` completed → Course Studio.
+  const ctaLabel =
+    job.kind === 'generation' ? 'Vedi progresso' : 'Apri Studio'
   return (
     <div className='border-border bg-card/40 flex flex-col gap-2 rounded-md border p-2.5'>
       <div className='flex items-start justify-between gap-2'>
@@ -76,9 +81,9 @@ function JobRow({
         variant='ghost'
         size='sm'
         className='h-6 self-end px-2 text-[11px]'
-        onClick={() => onOpen(job.courseId)}
+        onClick={() => onOpen(job)}
       >
-        Apri Studio
+        {ctaLabel}
       </Button>
     </div>
   )
@@ -89,8 +94,22 @@ export function JobsBadge() {
   const navigate = useNavigate()
   if (jobs.length === 0) return null
 
-  function handleOpen(courseId: string) {
-    navigate({ to: '/courses/$id/studio', params: { id: courseId } })
+  function handleOpen(job: ActiveJob) {
+    // F12 fix: per generation in corso, redirige al progress monitor
+    // (l'utente vede pipeline avanzare + WS/polling). Per rebuild e
+    // audio_rebuild il corso e` gia` completed → Course Studio.
+    if (job.kind === 'generation') {
+      navigate({
+        to: '/courses/$id/progress',
+        params: { id: job.courseId },
+        search: job.jobId ? { job: job.jobId } : undefined,
+      })
+    } else {
+      navigate({
+        to: '/courses/$id/studio',
+        params: { id: job.courseId },
+      })
+    }
   }
 
   return (

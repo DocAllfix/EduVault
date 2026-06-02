@@ -24,6 +24,7 @@
 
 import { useEffect, useRef } from 'react'
 import { useNavigate } from '@tanstack/react-router'
+import { useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 
 import { api } from '@/lib/api'
@@ -113,6 +114,7 @@ export function useJobsWatcher(): void {
   const updateJob = useJobsStore((s) => s.updateJob)
   const removeJob = useJobsStore((s) => s.removeJob)
   const navigate = useNavigate()
+  const queryClient = useQueryClient()
 
   // Ref to current jobs to avoid re-running setInterval on every job change
   const jobsRef = useRef(jobs)
@@ -149,6 +151,23 @@ export function useJobsWatcher(): void {
           // completed / failed → rimuovi + notifica
           removeJob(job.courseId, job.kind)
           if (result.kind === 'completed') {
+            // F12 fix: invalida TUTTE le query TanStack relative al corso
+            // così Course Studio/Detail vedono subito stato fresco
+            // (es. audio_manifest_path appena popolato dopo audio_rebuild)
+            // senza che l'utente debba ricaricare la pagina.
+            void queryClient.invalidateQueries({
+              queryKey: ['course', job.courseId],
+            })
+            void queryClient.invalidateQueries({
+              queryKey: ['course-detail', job.courseId],
+            })
+            void queryClient.invalidateQueries({
+              queryKey: ['course-slides', job.courseId],
+            })
+            void queryClient.invalidateQueries({ queryKey: ['courses'] })
+            void queryClient.invalidateQueries({
+              queryKey: ['dashboard-stats'],
+            })
             const title = `${job.courseTitle} — ${jobKindCompletedLabel(job.kind)}`
             const body = 'Tocca per aprire il Course Studio.'
             toast.success(title, {
