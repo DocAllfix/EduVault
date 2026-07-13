@@ -25,17 +25,18 @@ export function AppTitle() {
               onClick={() => setOpenMobile(false)}
               className='flex flex-1 items-center gap-2 text-start leading-tight'
             >
-              <img
-                src='/brand/logo-mark.png'
-                alt='C.F.P. Montessori'
-                className='size-8 shrink-0 object-contain'
-              />
+              <span
+                aria-hidden='true'
+                className='bg-primary text-primary-foreground flex size-8 shrink-0 items-center justify-center rounded-lg text-sm font-bold'
+              >
+                E
+              </span>
               <div className='grid leading-tight group-data-[collapsible=icon]:hidden'>
                 <span className='truncate text-sm font-semibold tracking-tight'>
-                  Cfp EduVault
+                  EduVault
                 </span>
                 <span className='text-muted-foreground truncate text-xs'>
-                  C.F.P. Montessori
+                  Formazione professionale
                 </span>
               </div>
             </Link>

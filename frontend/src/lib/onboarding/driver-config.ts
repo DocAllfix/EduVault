@@ -1,10 +1,10 @@
 /**
- * F10 onboarding — driver.js config base CFP Montessori-branded.
+ * F10 onboarding — driver.js config base EduVault-branded.
  *
  * ─── Design intent (frontend-design) ──────────────────────────────────────
  * Tour spotlight calmo, B2B, brand discreto. NESSUNA animazione esuberante:
  * questo non e` un onboarding consumer-gamification (Notion/Linear) ma
- * uno strumento professionale (Stripe Dashboard). L'utente del cliente CFP
+ * uno strumento professionale (Stripe Dashboard). L'utente del cliente
  * sta lavorando, gli stiamo solo facendo "vedere" cosa puo` fare.
  *
  * Pattern: spotlight ring brand-primary (#C82E6E) sottile + popover shadcn-style

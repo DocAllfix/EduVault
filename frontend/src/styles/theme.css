@@ -1,6 +1,6 @@
 /*
- * C.F.P. Montessori brand palette (FASE 6.3).
- * Source HEX: #C82E6E (Montessori Pink) / #769E2E (Montessori Green).
+ * EduVault brand palette (FASE 6.3).
+ * Source HEX: #C82E6E (Brand pink) / #769E2E (Brand green).
  * Converted to OKLCH to match the template's color system (not HSL).
  * Strategy: brand pink drives --primary + focus ring; brand green is an
  * additive --brand-secondary used only for positive states (no template
@@ -14,7 +14,7 @@
   --card-foreground: oklch(0.129 0.042 264.695);
   --popover: oklch(1 0 0);
   --popover-foreground: oklch(0.129 0.042 264.695);
-  --primary: oklch(0.5611 0.1946 0.971); /* Montessori Pink #C82E6E */
+  --primary: oklch(0.5611 0.1946 0.971); /* Brand pink #C82E6E */
   --primary-foreground: oklch(0.984 0.003 247.858);
   --secondary: oklch(0.968 0.007 247.896);
   --secondary-foreground: oklch(0.208 0.042 265.755);
@@ -32,7 +32,7 @@
   --chart-4: oklch(0.828 0.189 84.429);
   --chart-5: oklch(0.769 0.188 70.08);
 
-  /* C.F.P. Montessori brand tokens (additive — see @theme inline mapping) */
+  /* EduVault brand tokens (additive — see @theme inline mapping) */
   --brand-primary: oklch(0.5611 0.1946 0.971); /* #C82E6E */
   --brand-primary-hover: oklch(0.4924 0.1705 1.712); /* #A8255A darker */
   --brand-primary-foreground: oklch(0.984 0.003 247.858);
@@ -66,7 +66,7 @@
   --card-foreground: oklch(0.984 0.003 247.858);
   --popover: oklch(0.208 0.042 265.755);
   --popover-foreground: oklch(0.984 0.003 247.858);
-  --primary: oklch(0.6662 0.1825 359.25); /* Montessori Pink lightened #E85A91 */
+  --primary: oklch(0.6662 0.1825 359.25); /* Brand pink lightened #E85A91 */
   --primary-foreground: oklch(0.984 0.003 247.858);
   --secondary: oklch(0.279 0.041 260.031);
   --secondary-foreground: oklch(0.984 0.003 247.858);
@@ -84,7 +84,7 @@
   --chart-4: oklch(0.627 0.265 303.9);
   --chart-5: oklch(0.645 0.246 16.439);
 
-  /* C.F.P. Montessori brand tokens (dark — lightened for contrast on near-black) */
+  /* EduVault brand tokens (dark — lightened for contrast on near-black) */
   --brand-primary: oklch(0.6662 0.1825 359.25); /* #E85A91 */
   --brand-primary-hover: oklch(0.5611 0.1946 0.971); /* #C82E6E */
   --brand-primary-foreground: oklch(0.129 0.042 264.695);
@@ -107,7 +107,7 @@
   --font-inter: 'Inter', 'sans-serif';
   --font-manrope: 'Manrope', 'sans-serif';
 
-  /* C.F.P. Montessori brand component tokens (FASE 6 restyling) */
+  /* EduVault brand component tokens (FASE 6 restyling) */
   --brand-mark-size: 2rem;
   --brand-mark-size-auth: 4rem;
   --motion-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
@@ -148,7 +148,7 @@
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
 
-  /* C.F.P. Montessori brand utilities: bg-brand-primary, text-brand-secondary, etc. */
+  /* EduVault brand utilities: bg-brand-primary, text-brand-secondary, etc. */
   --color-brand-primary: var(--brand-primary);
   --color-brand-primary-hover: var(--brand-primary-hover);
   --color-brand-primary-foreground: var(--brand-primary-foreground);

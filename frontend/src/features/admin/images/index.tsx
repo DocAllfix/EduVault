@@ -8,7 +8,7 @@
  *   bulk delete entries inutili. Asset bank discovery view.
  * Tone: tabella shadcn con thumbnail 80x80 + tags badges + source chip +
  *   license chip + usage_count + Actions. Header con summary 3-card e CTA
- *   Upload. Brand C.F.P. Montessori (verde + rosa).
+ *   Upload. Brand EduVault (verde + rosa).
  * Constraints: REI-1 shadcn (Table/Card/Badge/Dialog/Input/Label/Select).
  *   Pagina admin-only (require_role admin backend).
  *   File source-of-truth e' image_library DB (delete row ≠ delete file).

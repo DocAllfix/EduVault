@@ -1,5 +1,5 @@
 /**
- * Dashboard route — Cfp EduVault (BP §10).
+ * Dashboard route — EduVault (BP §10).
  *
  * Moved from `/_authenticated/` to `/_authenticated/dashboard` in FASE
  * 6.10 — the prompt mandates `/dashboard` as the canonical URL.

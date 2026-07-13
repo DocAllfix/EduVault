@@ -1,5 +1,5 @@
 /**
- * Dashboard page — Cfp EduVault (BLUEPRINT §10).
+ * Dashboard page — EduVault (BLUEPRINT §10).
  *
  * ─── Design intent (frontend-design skill, point 1) ──────────────────────
  * Purpose: operator cockpit. In one screen the user (a) sees 4 KPI

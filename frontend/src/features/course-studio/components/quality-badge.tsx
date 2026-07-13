@@ -7,7 +7,7 @@
  *   blu (info) > nessuno (slide pulita).
  * QualityIssuesPanel: card collapsible nel right rail Course Studio, mostra
  *   lista issue per slide selezionata con tipo + severity + context.
- * Tone: shadcn-admin coerente, brand CFP Montessori (verde/rosa).
+ * Tone: shadcn-admin coerente, brand EduVault (verde/rosa).
  * Constraint REI-1: riusa Badge + Card + ScrollArea shadcn esistenti.
  * Constraint VAA-c (D9): NON blocca download, solo segnala (decisione
  *   analista). Bottone "Rigenera questa slide" (F4b H8) integrato qui per

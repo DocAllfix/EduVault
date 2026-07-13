@@ -6,8 +6,7 @@
  * activity (Linear.app pattern — `delete-course-dialog` doesn't compete
  * for attention because nothing else on the row animates).
  *
- * Colours chosen to be semantically obvious AND respect the C.F.P.
- * Montessori palette:
+ * Colours chosen to be semantically obvious AND respect the EduVault palette:
  *   - generating → amber (in-progress universal)
  *   - completed  → blue   (BP §10 "completed" is post-pipeline, pre-cert)
  *   - certified  → brand secondary green #769E2E (REI-11 brand use)

@@ -1,5 +1,5 @@
 /**
- * Courses DataTable — Cfp EduVault Dashboard.
+ * Courses DataTable — EduVault Dashboard.
  *
  * Structural fork of the template's `tasks-table.tsx` (REI-1: adapt,
  * don't reinvent). Differences:

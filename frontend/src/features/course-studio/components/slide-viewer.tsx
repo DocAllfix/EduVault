@@ -4,7 +4,7 @@
  * ─── Design intent (frontend-design) ──────────────────────────────────────
  * Purpose: anteprima fedele 16:9 della slide selezionata, una per SlideType,
  *   così l'operatore vede in-app cosa diventerà il PPTX senza scaricarlo.
- * Tone: brand C.F.P. Montessori — barra primary #C82E6E in alto, badge verde
+ * Tone: brand EduVault — barra primary #C82E6E in alto, badge verde
  *   #769E2E per RECAP, layout pulito Linear-like.
  * Constraints: REI-1 riusa solo primitive Tailwind/shadcn; aspect-video per
  *   il 16:9; nessun overflow (i constraints FASE 1 garantiscono il fit).
@@ -336,7 +336,7 @@ export function SlideViewer({
               {slide.title}
             </h1>
             <p className="text-muted-foreground mt-4 text-base italic">
-              Formazione Globale — C.F.P. Montessori
+              EduVault — Formazione professionale
             </p>
           </div>
         </SlideFrame>

@@ -7,7 +7,7 @@
  *   ascolta la voce (AudioPlayer), cambia immagine (ImagePicker), e rigenera
  *   il PPTX quando ha finito (RebuildBanner).
  * Tone: 3 colonne tipo IDE — sidebar lista slide (sx), viewer+audio (centro),
- *   editor (dx). Brand C.F.P. Montessori.
+ *   editor (dx). Brand EduVault.
  * Constraints: REI-1 riusa shadcn; react-query per /slides; nessun tab.
  */
 

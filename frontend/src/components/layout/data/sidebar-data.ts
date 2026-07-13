@@ -1,7 +1,7 @@
 /**
- * Sidebar navigation — Cfp EduVault.
+ * Sidebar navigation — EduVault.
  *
- * Replaces the upstream shadcn-admin demo nav with real Cfp EduVault
+ * Replaces the upstream shadcn-admin demo nav with real EduVault
  * sections (FASE 6.7→6.9). All listed routes exist in `routeTree.gen.ts`;
  * TanStack Router type-checks each `url` against the generated tree.
  *
@@ -30,9 +30,9 @@ export const sidebarData: SidebarData = {
   },
   teams: [
     {
-      name: 'Cfp EduVault',
+      name: 'EduVault',
       logo: Command,
-      plan: 'C.F.P. Montessori',
+      plan: 'Formazione professionale',
     },
   ],
   navGroups: [

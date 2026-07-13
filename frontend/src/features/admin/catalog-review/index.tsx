@@ -8,7 +8,7 @@
  *   l'umano valida. Da qui il bottone "Approva" per riga + bulk approve.
  * Tone: tabella shadcn, header summary 3-card (totali / approvati / pending),
  *   filtri (search + target + only-approved toggle), checkbox bulk, dialog
- *   dettaglio con moduli. Brand C.F.P. Montessori.
+ *   dettaglio con moduli. Brand EduVault.
  * Constraints: REI-1 shadcn (Table/Card/Badge/Checkbox/Select/Dialog/Switch).
  *   Pagina read+approve only: edit dei campi (title/hours/regulation_slugs)
  *   resta backend-ready ma fuori scope MVP UI (utente puo' editare DB

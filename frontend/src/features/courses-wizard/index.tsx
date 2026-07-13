@@ -1,5 +1,5 @@
 /**
- * Course Wizard — Cfp EduVault (BP §10 POST /api/courses).
+ * Course Wizard — EduVault (BP §10 POST /api/courses).
  *
  * ─── Design intent (frontend-design skill, point 1) ──────────────────────
  * Purpose: configure a normative course in 6 screens, ≤90 seconds total.

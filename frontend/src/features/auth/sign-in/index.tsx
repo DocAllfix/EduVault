@@ -9,7 +9,7 @@
  *   marketing copy, no social proof, no "welcome back".
  * Constraints: REI-1 (adapt template SignIn/Card), REI-4 (no Clerk, no
  *   sign-up — admin creates users out-of-band), REI-11 (pixel-perfect).
- * Differentiation: real C.F.P. logo (auth-layout) + Italian copy + zero
+ * Differentiation: text wordmark (auth-layout) + Italian copy + zero
  *   secondary CTAs. Page title says exactly what the user expects.
  */
 
@@ -26,7 +26,7 @@ import {
 import { AuthLayout } from '../auth-layout'
 import { UserAuthForm } from './components/user-auth-form'
 
-const PAGE_TITLE = 'Cfp EduVault — Accesso'
+const PAGE_TITLE = 'EduVault — Accesso'
 
 export function SignIn() {
   const { redirect } = useSearch({ from: '/(auth)/login' })
@@ -76,7 +76,7 @@ export function SignIn() {
  * ─── SELF-AUDIT (impeccable skill, point 4) ──────────────────────────────
  *
  * Hierarchy:
- *   ✓ <h1>Cfp EduVault</h1> in AuthLayout (one per page, the
+ *   ✓ <h1>EduVault</h1> in AuthLayout (one per page, the
  *     brand block). CardTitle is <div> via shadcn — not <h1>, so no
  *     duplicate heading-1.
  *   ✓ CardTitle text-lg, CardDescription text-sm muted: clear two-level

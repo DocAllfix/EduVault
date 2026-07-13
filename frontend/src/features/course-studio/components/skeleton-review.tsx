@@ -7,7 +7,7 @@
  *   dall'LLM per ogni modulo, li può correggere/riordinare/aggiungere/togliere,
  *   e poi APPROVA — solo allora la pipeline materializza le slide.
  * Tone: una card per modulo, lista ordinata di sotto-temi editabili, azioni
- *   chiare. Brand C.F.P. Montessori (verde/rosa).
+ *   chiare. Brand EduVault (verde/rosa).
  * Constraints: REI-1 riusa shadcn (Card/Button/Input/Textarea/Badge). Edit
  *   MANUALE (la chat NL è D7). Approva = gate, non opzionale.
  */

@@ -3,7 +3,7 @@
  *
  * driver.js v1.4 ships con CSS proprio (`driver.css`) molto neutro.
  * Qui sovrascriviamo per allinearsi al design system shadcn-admin v2.2.1
- * + brand C.F.P. Montessori (rosa #C82E6E / verde #769E2E).
+ * + brand EduVault (rosa #C82E6E / verde #769E2E).
  *
  * NB: usiamo `.eduvault-popover` come classe applicata via popoverClass
  * in driver-config.ts → tutto e` scoped, no leak globale.

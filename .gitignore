@@ -128,3 +128,4 @@ scripts/extract_images_from_demos.py
 # assets/seeds/demos/ COMMITTATO (era gitignored ma serve in container Railway
 # per servire library tier-0 hit dal disco — 158MB / 375 PNG dei 3 demo cliente
 # review-13). Vedi commit 19600d8 per fix _download_one_image path locale.
+assets/brand/_retired_cfp/

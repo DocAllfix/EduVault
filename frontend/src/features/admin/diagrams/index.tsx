@@ -7,7 +7,7 @@
  *   ogni template mostra preview SVG renderizzato + descrizione semantica +
  *   slot list (name + max_chars) + usage count nei corsi.
  * Tone: gallery wall 3-col grid, calm hover for detail expand, brand
- *   C.F.P. Montessori. Read-only catalog viewer.
+ *   EduVault. Read-only catalog viewer.
  * Constraints: REI-1 shadcn (Card/Badge). SVG inline rendering via iframe
  *   o fetch statico. Pagina admin/reviewer accessible.
  */

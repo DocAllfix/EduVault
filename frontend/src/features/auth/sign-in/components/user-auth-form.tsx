@@ -2,7 +2,7 @@
  * Sign-in form — Nexus EduVault.
  *
  * ─── Design intent (frontend-design skill, point 1) ──────────────────────
- * Purpose: single-shot authentication for CFP Montessori staff (admin,
+ * Purpose: single-shot authentication for EduVault staff (admin,
  *   reviewer, operator). 1× per day, low ceremony.
  * Tone: refined minimalism istituzionale (refused: AI-workflow slop,
  *   glassmorphism, gradients, hero copy).
@@ -122,7 +122,7 @@ export function UserAuthForm({
                   type='email'
                   autoComplete='username'
                   autoFocus
-                  placeholder='nome@cfpmontessori.it'
+                  placeholder='nome@eduvault.it'
                   {...field}
                 />
               </FormControl>

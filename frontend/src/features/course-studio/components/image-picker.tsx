@@ -4,7 +4,7 @@
  * ─── Design intent (frontend-design) ──────────────────────────────────────
  * Purpose: Library tab "internal asset stock", grid 4-col con hover license chip.
  *   Distinta da Pexels tab esterno via badge color: brand-primary su Library
- *   (asset curato CFP), muted su Web (provenance terza parte).
+ *   (asset curato), muted su Web (provenance terza parte).
  *   Tabs default = Library (asset interno > terza parte: VAA-b attribution).
  * Tone: shadcn Dialog + Tabs + Badge + Tooltip. Riusa pattern image-picker MVP.
  * Constraints: REI-1 shadcn only, REI-10 attribution sempre visibile per CC-BY.
