@@ -164,7 +164,8 @@ def test_slide_content_valid_passes_strict_validator() -> None:
     from tests._helpers import make_slide
 
     slide = make_slide(SlideType.CONTENT_TEXT)
-    assert not slide.body.endswith("…")
+    assert slide.bullets, "CONTENT_TEXT deve avere bullets"
+    assert not any(b.endswith("…") for b in slide.bullets)
     assert slide.slide_type == SlideType.CONTENT_TEXT
 
 

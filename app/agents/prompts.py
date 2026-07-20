@@ -10,7 +10,12 @@ stay in English (REI-7).
 
 from __future__ import annotations
 
-from app.models.core import LAYOUT_CONSTRAINTS, SlideType, TargetType
+from app.models.core import (
+    LAYOUT_CONSTRAINTS,
+    SlideType,
+    TargetType,
+    target_duration_window,
+)
 from app.models.knowledge import StylePattern
 from app.models.pipeline import ModuleSpec
 from app.models.knowledge import NormativeChunk
@@ -211,9 +216,14 @@ def build_constraints_block(slide_distribution: dict[str, int]) -> str:
             parts.append("  bullets: [] (lista vuota — è title-only)")
         elif slide_type == SlideType.QUIZ:
             parts.append("  bullets: [] (lista vuota — è options-only)")
+        # FASE 1 pacing dinamico (2026-07-20): la finestra TTS non e` piu` la
+        # stringa fissa "25-35s" (ereditata dalla regola 30s/slide e mai
+        # aggiornata al passaggio a 45s), ma quella realmente applicata dal
+        # controllo su audio_service.
+        _tts_min, _tts_max = target_duration_window()
         parts.append(
             f"  speaker_notes: {rules.notes_min_words}-{rules.notes_max_words} "
-            f"parole (per durata TTS 25-35s)"
+            f"parole (per durata TTS {_tts_min:.0f}-{_tts_max:.0f}s)"
         )
         if rules.requires_image:
             if slide_type == SlideType.DIAGRAM:

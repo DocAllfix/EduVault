@@ -56,8 +56,15 @@ def make_slide(
     default_title = "Titolo slide breve e valido"
 
     # ─── Body default per tipo ───
+    # Il conteggio rispetta body_min_bullets di LAYOUT_CONSTRAINTS: CONTENT_TEXT
+    # ne vuole >=4, RECAP e MODULE_CLOSE esattamente 5, CASE_STUDY 3 sezioni.
     if body is None:
-        if slide_type in (SlideType.TITLE, SlideType.CLOSING, SlideType.QUIZ):
+        if slide_type in (
+            SlideType.TITLE,
+            SlideType.CLOSING,
+            SlideType.QUIZ,
+            SlideType.MODULE_OPEN,
+        ):
             body = ""  # questi tipi NON devono avere body
         elif slide_type == SlideType.CASE_STUDY:
             body = (
@@ -67,11 +74,20 @@ def make_slide(
             )
         elif slide_type == SlideType.DIAGRAM:
             body = "Didascalia breve del diagramma"
-        else:  # CONTENT_TEXT, CONTENT_IMAGE, RECAP
+        elif slide_type in (SlideType.RECAP, SlideType.MODULE_CLOSE):
             body = (
                 "Primo punto chiave breve\n"
                 "Secondo punto importante\n"
-                "Terzo concetto da memorizzare"
+                "Terzo concetto da memorizzare\n"
+                "Quarto elemento operativo\n"
+                "Quinto riferimento normativo"
+            )
+        else:  # CONTENT_TEXT, CONTENT_IMAGE
+            body = (
+                "Primo punto chiave breve\n"
+                "Secondo punto importante\n"
+                "Terzo concetto da memorizzare\n"
+                "Quarto elemento operativo"
             )
 
     # ─── Speaker notes default per range TTS (LAYOUT_CONSTRAINTS) ───
@@ -112,12 +128,20 @@ def make_slide(
         if quiz_correct is None:
             quiz_correct = 0
 
+    # FIX #28.1 ha sostituito `body: str` con `bullets: list[str]` + `sezioni`
+    # (CASE_STUDY). L'helper accetta ancora `body` come stringa newline-separated
+    # perché è così che i test esprimono le violazioni (es. 7 righe → oltre il
+    # max), e la converte nel campo giusto per il tipo.
+    lines = [ln for ln in body.split("\n") if ln.strip()] if body else []
+    is_case_study = slide_type == SlideType.CASE_STUDY
+
     return SlideContent(
         index=index,
         module_index=module_index,
         slide_type=slide_type,
         title=title if title is not None else default_title,
-        body=body,
+        bullets=[] if is_case_study else lines,
+        sezioni=lines if is_case_study else [],
         speaker_notes=speaker_notes,
         normative_ref=normative_ref,
         source_chunk_ids=source_chunk_ids if source_chunk_ids is not None else ["chunk-1"],

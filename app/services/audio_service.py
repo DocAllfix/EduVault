@@ -44,6 +44,7 @@ from tenacity import (
     wait_exponential,
 )
 
+from app.models.core import DEFAULT_SECONDS_PER_SLIDE, target_duration_window
 from app.models.pipeline import SlideContent
 
 logger = structlog.get_logger()
@@ -79,19 +80,30 @@ _TTS_TIMEOUT_SECONDS = 30.0
 _TTS_SEMAPHORE_LIMIT = 6
 _TTS_RETRY_ATTEMPTS = 3
 
-# FASE 6 vast-hopping: target durata narrazione per slide (regola 30s/slide
-# PacingEngine + tolleranza). Fuori range → flag off_target (no auto-retry v1,
-# l'utente regenera manualmente dalla Course Studio FASE 10).
-_TARGET_DURATION_MIN = 25.0
-_TARGET_DURATION_MAX = 35.0
+# Target durata narrazione per slide → vedi ``target_duration_window`` in
+# app/models/core.py. Fuori finestra → flag off_target (no auto-retry v1,
+# l'utente rigenera manualmente dalla Course Studio FASE 10).
+#
+# FASE 1 pacing dinamico (2026-07-20): le costanti _TARGET_DURATION_MIN/MAX
+# (25.0/35.0) sono state rimosse. Erano ancorate alla regola 30s/slide, mai
+# aggiornata quando il PacingEngine passo` a 45s (FIX #29.0): una slide
+# corretta da 90-160 parole produce ~30-53s di audio e finiva SEMPRE marcata
+# off_target, rendendo l'indicatore strutturalmente inaffidabile.
 _AUDIO_PATH_MAX = 500  # courses.audio_manifest_path + audio_tracks.audio_path VARCHAR(500)
 
 
 class AudioService:
     """Generate per-slide narration MP3s + sync manifest. NO OpenAI."""
 
-    def __init__(self, voice: str = "it-IT-DiegoNeural") -> None:
+    def __init__(
+        self,
+        voice: str = "it-IT-DiegoNeural",
+        seconds_per_slide: float = DEFAULT_SECONDS_PER_SLIDE,
+    ) -> None:
         self.voice = voice
+        # Durata-slide del corso: determina la finestra entro cui una traccia
+        # e` considerata on-target. Fase 2 la passera` dal valore per-corso.
+        self.seconds_per_slide = seconds_per_slide
         self._semaphore = asyncio.Semaphore(_TTS_SEMAPHORE_LIMIT)
 
     async def generate_narrations(
@@ -218,8 +230,9 @@ class AudioService:
         manifest e da audio_tracks (BP §07.1 line 2301: un artefatto rotto NON
         uccide la build).
 
-        FASE 6: ``off_target`` è True se la durata è fuori 25-35s (la slide
-        narra troppo veloce/lento rispetto alla regola 30s/slide).
+        ``off_target`` è True se la durata cade fuori dalla finestra restituita
+        da ``target_duration_window(self.seconds_per_slide)`` — la slide narra
+        troppo veloce o troppo lento rispetto alla durata-slide del corso.
         """
         narration = (slide.speaker_notes or _slide_fallback_text(slide)).strip()
         # F-AUDIO-FIX 2026-06-01: filename include module_index, perche` slide.index
@@ -246,13 +259,14 @@ class AudioService:
                         )
 
             duration = float(MP3(str(audio_path)).info.length)
-            off_target = not (_TARGET_DURATION_MIN <= duration <= _TARGET_DURATION_MAX)
+            win_min, win_max = target_duration_window(self.seconds_per_slide)
+            off_target = not (win_min <= duration <= win_max)
             if off_target:
                 logger.info(
                     "audio_duration_off_target",
                     slide_index=slide.index,
                     duration=round(duration, 1),
-                    target=f"{_TARGET_DURATION_MIN}-{_TARGET_DURATION_MAX}s",
+                    target=f"{win_min:.1f}-{win_max:.1f}s",
                 )
             return (str(audio_path), duration, narration, off_target)
 

@@ -103,10 +103,11 @@ async def test_generate_narrations_produces_files_inserts_and_manifest(
 
     # 2. one MP3 file per slide (mocked content, not a real MP3)
     audio_dir = tmp_path / "audio" / course_id
-    mp3s = sorted(audio_dir.glob("slide_*.mp3"))
+    # D-203: filename include module_index (mod_NN_slide_NNNN.mp3).
+    mp3s = sorted(audio_dir.glob("mod_*_slide_*.mp3"))
     assert len(mp3s) == 5
     assert [p.name for p in mp3s] == [
-        f"slide_{i:04d}.mp3" for i in range(5)
+        f"mod_00_slide_{i:04d}.mp3" for i in range(5)
     ]
 
     # 3. manifest JSON is well-formed and matches the audio files
@@ -116,7 +117,7 @@ async def test_generate_narrations_produces_files_inserts_and_manifest(
     assert len(manifest["tracks"]) == 5
     for i, track in enumerate(manifest["tracks"]):
         assert track["slide_index"] == i
-        assert track["audio_file"] == f"slide_{i:04d}.mp3"
+        assert track["audio_file"] == f"mod_00_slide_{i:04d}.mp3"
         assert track["duration_seconds"] == 12.5
         # FASE 1: narration text è speaker_notes della slide; default factory
         # produce 80 "parola" parole (range valido CONTENT_TEXT 75-90).
@@ -137,10 +138,12 @@ async def test_generate_narrations_produces_files_inserts_and_manifest(
     assert update_calls[0].args[1] == result["manifest_path"]
     assert update_calls[0].args[2] == course_id
     # Each INSERT carries the right voice and rounded duration.
+    # D-203 ha inserito module_index come $2: gli argomenti successivi sono
+    # slittati di una posizione (duration $6 → args[6], voice $7 → args[7]).
     for call in insert_calls:
         assert call.args[1] == course_id
-        assert call.args[5] == 12.5
-        assert call.args[6] == "it-IT-DiegoNeural"
+        assert call.args[6] == 12.5
+        assert call.args[7] == "it-IT-DiegoNeural"
 
 
 @pytest.mark.asyncio
@@ -187,7 +190,8 @@ async def test_narration_falls_back_to_body_when_speaker_notes_empty(
     # post-validation). Bypass via object.__setattr__.
     slide = _slide(0)
     object.__setattr__(slide, "speaker_notes", "")
-    object.__setattr__(slide, "body", "Testo del body usato come fallback.")
+    # FIX #28.1: il fallback legge bullets/sezioni, non piu` un campo `body`.
+    object.__setattr__(slide, "bullets", ["Testo del body usato come fallback."])
     slides = [slide]
     pool = _empty_pool()
     fake_mp3 = MagicMock()

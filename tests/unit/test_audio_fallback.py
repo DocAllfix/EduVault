@@ -75,15 +75,17 @@ async def test_one_failing_slide_does_not_block_the_other_four(
 
     # 2. only 4 MP3 files on disk (the failing slide leaves nothing)
     audio_dir = tmp_path / "audio" / "course-fb"
-    mp3s = sorted(audio_dir.glob("slide_*.mp3"))
+    # D-203: il filename include module_index (mod_NN_slide_NNNN.mp3) per
+    # evitare collisioni fra moduli sullo stesso slot.
+    mp3s = sorted(audio_dir.glob("mod_*_slide_*.mp3"))
     assert len(mp3s) == 4
-    # The skipped slide is index 2 → no slide_0002.mp3
-    assert not (audio_dir / "slide_0002.mp3").exists()
+    # The skipped slide is index 2 → no mod_00_slide_0002.mp3
+    assert not (audio_dir / "mod_00_slide_0002.mp3").exists()
     assert {p.name for p in mp3s} == {
-        "slide_0000.mp3",
-        "slide_0001.mp3",
-        "slide_0003.mp3",
-        "slide_0004.mp3",
+        "mod_00_slide_0000.mp3",
+        "mod_00_slide_0001.mp3",
+        "mod_00_slide_0003.mp3",
+        "mod_00_slide_0004.mp3",
     }
 
     # 3. manifest contains exactly 4 entries (slide_index 0,1,3,4)
