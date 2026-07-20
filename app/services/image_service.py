@@ -54,8 +54,8 @@ DOWNLOAD_TIMEOUT_SECONDS = 10.0
 DIAGRAM_OUTPUT_WIDTH = 1760
 DIAGRAM_OUTPUT_HEIGHT = 800
 
-# FIX #25 (2026-05-26): zero-placeholder guarantee. Brand colours C.F.P.
-# Montessori — used by the branded fallback when every external provider
+# FIX #25 (2026-05-26): zero-placeholder guarantee. EduVault brand colours
+# — used by the branded fallback when every external provider
 # is exhausted, so a CONTENT_IMAGE/DIAGRAM box never renders the literal
 # "[ query ]" placeholder text from the template.
 BRAND_PINK = (0xC8, 0x2E, 0x6E)   # #C82E6E
@@ -532,7 +532,7 @@ def _pick_glyph(query: str) -> str:
 def _make_branded_fallback(
     query: str, *, is_diagram: bool = False
 ) -> str | None:
-    """Render a branded C.F.P. placeholder PNG for one image/diagram box.
+    """Render a branded EduVault placeholder PNG for one image/diagram box.
 
     Diagonal pink→green gradient + a thematic pictogram + the query as a
     small caption at the bottom. The slide already carries its own title /
@@ -663,7 +663,7 @@ def _visual_holes(
 async def _backfill_missing_images(
     slides: list[SlideContent], image_map: dict[int, str], pool: Any
 ) -> None:
-    """Fill every visual hole with a branded C.F.P. fallback.
+    """Fill every visual hole with a branded EduVault fallback.
 
     FIX #31 MOSSA 1 (2026-05-27, analista): Stage 1 (provider retry waves)
     ELIMINATO. Era retry cieco — stessa query, stesso istante, stesso
@@ -792,7 +792,7 @@ async def prefetch_images(
     )
 
     # FIX #25 (2026-05-26): zero-placeholder guarantee. Retry the holes with
-    # throttling, then fill any residual with a branded C.F.P. fallback so no
+    # throttling, then fill any residual with a branded EduVault fallback so no
     # CONTENT_IMAGE/DIAGRAM box ever renders the template's "[ query ]" text.
     logger.info("backfill_entry", slides=len(slides), resolved=len(image_map))
     await _backfill_missing_images(slides, image_map, pool)
