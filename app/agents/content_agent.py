@@ -933,9 +933,17 @@ async def content_agent(state: NexusPipelineState) -> dict[str, object]:
     system_prompt = build_content_system_prompt(request.target)
 
     # Soglia minima slide accettabili per modulo (fix #7 — moduli "BAD" 2-3 slide).
-    # Se un modulo produce < threshold slide, lo rigeneriamo da zero (cap 1 retry per modulo).
-    # Math: target è ~40 slide/modulo, accettiamo fino al 50% loss → soglia 20.
-    MIN_ACCEPTABLE_SLIDES_PER_MODULE = 20
+    # Se un modulo produce meno slide, la pipeline si interrompe (gate fatal #31.4).
+    #
+    # FASE 2 (2026-07-22, D-246): la soglia era ASSOLUTA (20), tarata sul pacing
+    # 45s dove un modulo ha ~28-40 slide (20 = "50% loss" dichiarato nel commento
+    # storico). Con la durata-slide scelta dall'utente l'atteso per modulo cambia
+    # (a 180s un modulo ha ~12 slide, sotto 20) → il gate falliva una generazione
+    # CORRETTA. Reso RELATIVO all'atteso del modulo (50% loss, come da intento
+    # originale), con un floor assoluto per i moduli molto piccoli. Cattura ancora
+    # i collassi veri (2 slide su 82) a qualunque durata.
+    _MIN_SLIDES_RATIO = 0.5
+    _MIN_SLIDES_ABS_FLOOR = 4
 
     async def _generate_one_module(module: object) -> dict[str, object] | None:
         """Generate slides for one module — retry full-module if too few slides.
@@ -971,18 +979,25 @@ async def content_agent(state: NexusPipelineState) -> dict[str, object]:
             # Per una demo self-serve è inaccettabile: un cliente che
             # genera un corso deve vedere un crash esplicito, NON un
             # output silenziosamente rotto.
-            if slide_count < MIN_ACCEPTABLE_SLIDES_PER_MODULE:
+            expected_for_module = int(getattr(module, "slide_count", 0) or 0)
+            min_acceptable = max(
+                _MIN_SLIDES_ABS_FLOOR,
+                round(expected_for_module * _MIN_SLIDES_RATIO),
+            )
+            if slide_count < min_acceptable:
                 logger.error(
                     "module_below_threshold_fatal",
                     module_index=module.module_index,  # type: ignore[attr-defined]
                     slide_count=slide_count,
-                    threshold=MIN_ACCEPTABLE_SLIDES_PER_MODULE,
+                    expected=expected_for_module,
+                    threshold=min_acceptable,
                 )
                 raise RuntimeError(
                     f"Modulo {module.module_index} ha solo {slide_count} "  # type: ignore[attr-defined]
-                    f"slide su soglia minima {MIN_ACCEPTABLE_SLIDES_PER_MODULE}. "
-                    f"Pipeline interrotta per non consegnare corso con modulo "
-                    f"mancante (FIX #31.4 gate fatal — analista review 5)."
+                    f"slide su {expected_for_module} attese (soglia minima "
+                    f"{min_acceptable} = 50% dell'atteso). Pipeline interrotta "
+                    f"per non consegnare corso con modulo mancante "
+                    f"(FIX #31.4 gate fatal — analista review 5)."
                 )
             return result
             # Codice morto seguente (mai eseguito, lasciato per riferimento storico
