@@ -22,20 +22,18 @@ from __future__ import annotations
 
 import math
 
-from app.models.core import SlideDensity
+from app.models.core import DEFAULT_SECONDS_PER_SLIDE, SlideDensity
 from app.models.pipeline import ModuleSpec, PacingPlan
 
 
 class PacingEngine:
     """Compute a per-module slide plan from course duration + density."""
 
-    # GAP-1 v2.0: fixed metric rule.
-    # FIX #29.0 (2026-05-26): 30→45s/slide. Decisione di prodotto (tradizione interna,
-    # non vincolo cliente). Effetto: ~33% slide in meno → ogni chiamata LLM rispetta
-    # il budget output (max_tokens=8000 → tetto teorico ~24 slide), elimina la causa
-    # radice di cardinalità tagliata + note razionate + timeout TPM. Compliance neutra
-    # (la durata corso 4h/8h non cambia, SCORM traccia tempo non slide).
-    SECONDS_PER_SLIDE = 45
+    # FASE 2 pacing dinamico (2026-07-21): la durata-slide non e` piu` una
+    # costante di classe ma un parametro di ``calculate`` (default 45), cosi`
+    # l'utente puo` sceglierla (40-240s) dal wizard. Il default 45 preserva il
+    # comportamento pre-esistente. ``DEFAULT_SECONDS_PER_SLIDE`` vive in
+    # app/models/core.py come unica fonte del default.
 
     # FIX #30.2 (2026-05-26): redistribution post-analista per spostare il
     # corso da "muro di bullet" (79% CONTENT_TEXT misurato) verso varietà.
@@ -77,24 +75,21 @@ class PacingEngine:
         density: SlideDensity = SlideDensity.STANDARD,
         module_titles: list[str] | None = None,
         chunks_per_module: dict[int, int] | None = None,
+        seconds_per_slide: float = DEFAULT_SECONDS_PER_SLIDE,
     ) -> PacingPlan:
         """Return a PacingPlan for the given duration and density.
 
-        FIX #30.2 (2026-05-26): pacing DINAMICO. Se `chunks_per_module` è
-        fornito (dict module_index → n_chunks RAG densi), ogni modulo riceve
-        `clamp(round(n_chunks * 1.5), 18, 29)` slide di CONTENUTO, +2 fissi
-        per bookends MODULE_OPEN/MODULE_CLOSE. La distribution dei tipi
-        contenuto è calcolata sulle slide content (NON sul totale), così le
-        percentuali restano coerenti.
+        FASE 2 (2026-07-21): ``seconds_per_slide`` e` ora un parametro (era la
+        costante di classe SECONDS_PER_SLIDE=45). Piu` alto → meno slide, ognuna
+        copre piu` tempo di corso. Default 45 = comportamento pre-esistente.
 
-        Se chunks_per_module è None, ricade sul comportamento legacy
-        (slide_count = base derivato da duration/SECONDS_PER_SLIDE),
-        retrocompat. Useremo None quando il caller non ha ancora i chunk
-        (preview wizard, test).
+        Se ``chunks_per_module`` è fornito ogni modulo riceve un conteggio slide
+        legato ai chunk RAG; altrimenti il totale deriva da
+        ``duration / seconds_per_slide × density``.
         """
         total_seconds = duration_hours * 3600
         multiplier = self.DENSITY_MULTIPLIER[density]
-        total_slides_legacy = int((total_seconds / self.SECONDS_PER_SLIDE) * multiplier)
+        total_slides_legacy = int((total_seconds / seconds_per_slide) * multiplier)
 
         # FIX #30.9e (2026-05-26, analista): il catalogo definisce i moduli
         # reali. Se module_titles è fornito (vengono dal COURSE_CATALOG

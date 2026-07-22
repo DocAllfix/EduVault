@@ -632,10 +632,25 @@ def _instructor_client_for(provider: str, model: str):  # type: ignore[no-untype
 # - ZERO degrado qualità (i fix #31.3 anti-dup e #30.8 quota tipi restano attivi)
 # - Solo cambio parametro batch_size. Reversibile.
 # Atteso: corso 4h 8.5min → ~6-7min content (50% del path critico era batch loop).
-_BATCH_SIZE = 15
-# Soglia override: se il modulo ha N ≤ questo numero di slide, vai in 1 sola chiamata.
-# A 45s/slide il pacing produce ~26 slide/modulo, sotto 24+margine → spesso 1 batch basta.
-_SINGLE_CALL_THRESHOLD = 15
+# FASE 2 batch adattivo (2026-07-21): il batch size non e` piu` una costante
+# (_BATCH_SIZE=15) ma una funzione della lunghezza delle note del corso. Note
+# piu` lunghe (durata-slide alta) → meno slide per chiamata, per non sforare il
+# budget di output dell'LLM (era la causa dei troncamenti/timeout pre-45s).
+_TOKENS_PER_WORD_IT = 1.6  # italiano, stima conservativa token/parola
+_SLIDE_OVERHEAD_TOKENS = 120  # title + bullets + struttura JSON per slide
+_OUTPUT_BUDGET_TOKENS = 12000  # margine sotto il 16k default di gpt-4.1-mini
+_BATCH_MIN = 3  # sotto 4 il sub-batch recovery (:707) si disattiva
+_BATCH_MAX = 15  # cap = comportamento pre-esistente fino a ~90s/slide
+
+
+def compute_batch_size(notes_max_words: int) -> int:
+    """Slide per chiamata LLM in funzione della lunghezza max delle note.
+
+    A 45s (notes_max=160 per CONTENT_TEXT) restituisce 15 (= vecchio _BATCH_SIZE,
+    invarianza). A 240s (notes_max~853) scende a ~8. Clamp [3, 15].
+    """
+    per_slide = notes_max_words * _TOKENS_PER_WORD_IT + _SLIDE_OVERHEAD_TOKENS
+    return max(_BATCH_MIN, min(_BATCH_MAX, int(_OUTPUT_BUDGET_TOKENS // per_slide)))
 
 
 def _partition_chunks_for_batches(
@@ -782,6 +797,7 @@ async def generate_module_structured(
     chunks_text: str = "",
     slide_distribution: dict[str, int] | None = None,  # FIX #30.8: quota per tipo
     build_subrequest=None,  # legacy, ignorato in batch mode
+    seconds_per_slide: float = 45.0,  # FASE 2: durata-slide del corso
 ):  # type: ignore[no-untyped-def]
     """Genera UN modulo come ModuleSlides validato, con BATCHING (FIX #29.1) +
     fallback chain robusto.
@@ -808,18 +824,24 @@ async def generate_module_structured(
         "degraded": False, "provider_used": None,
     }
 
-    # ── Calcolo batch ──
-    if expected_slides <= _SINGLE_CALL_THRESHOLD:
-        # Modulo piccolo → 1 sola chiamata (default pacing 45s = ~26 slide/modulo
-        # cade qui solo per corsi molto brevi).
+    # ── Calcolo batch (FASE 2: adattivo alla durata-slide) ──
+    # Il batch size dipende dalla lunghezza max delle note del tipo dominante
+    # (CONTENT_TEXT) alla durata-slide del corso. A 45s → 15 (invarianza).
+    from app.models.core import SlideType as _SlideType
+    from app.models.core import build_layout_constraints as _blc
+
+    _notes_max = _blc(seconds_per_slide)[_SlideType.CONTENT_TEXT].notes_max_words
+    batch_size_dyn = compute_batch_size(_notes_max)
+    if expected_slides <= batch_size_dyn:
+        # Modulo piccolo → 1 sola chiamata.
         batches: list[int] = [expected_slides]
     else:
-        n_full = expected_slides // _BATCH_SIZE
-        remainder = expected_slides % _BATCH_SIZE
-        batches = [_BATCH_SIZE] * n_full
+        n_full = expected_slides // batch_size_dyn
+        remainder = expected_slides % batch_size_dyn
+        batches = [batch_size_dyn] * n_full
         if remainder > 0:
             if remainder < 3 and n_full > 0:
-                # Avoid tiny last batch: redistribute (e.g. 26 = 3×7 + 5, OK; 22 = 3×7+1 → 7+7+8)
+                # Avoid tiny last batch: redistribute
                 batches[-1] += remainder
             else:
                 batches.append(remainder)
@@ -872,6 +894,10 @@ async def generate_module_structured(
                 model=model_id,
                 response_model=ModuleSlides,
                 max_retries=_INSTRUCTOR_DEPTH_RETRIES,
+                # FASE 2: budget di output esplicito (era implicito = default 16k
+                # del modello). Rende deterministico il tetto e coerente col
+                # dimensionamento del batch.
+                max_tokens=_OUTPUT_BUDGET_TOKENS,
                 messages=[
                     {"role": "system", "content": system},
                     {"role": "user", "content": batch_prompt},
@@ -879,6 +905,10 @@ async def generate_module_structured(
                 validation_context={
                     "expected_slides": batch_size,
                     "cardinality_mode": "warn",
+                    # FASE 2: il validator SlideContent ricalcola i vincoli note
+                    # per questa durata-slide (una slide da 240s puo` avere
+                    # 480-853 parole senza essere rigettata).
+                    "seconds_per_slide": seconds_per_slide,
                 },
             )
             # Re-index sul globale + forza module_index

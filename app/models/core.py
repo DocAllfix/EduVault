@@ -129,9 +129,31 @@ class SlideConstraints(BaseModel):
     requires_options: bool = False
 
 
-# Mapping SlideType → SlideConstraints. Modificare questi numeri = modificare il
-# contratto con l'LLM (CONSTRAINTS_BLOCK FASE 2) E con il rendering. Una sola fonte.
-LAYOUT_CONSTRAINTS: dict[SlideType, SlideConstraints] = {
+# Tipi di slide la cui NARRAZIONE scala con la durata-slide scelta dall'utente.
+# Gli altri (title, closing, quiz, bookend) restano brevi a prescindere: una
+# slide di apertura modulo non deve avere 4 minuti di voce solo perché il corso
+# usa slide lunghe.
+_NARRATIVE_TYPES: frozenset[SlideType] = frozenset(
+    {
+        SlideType.CONTENT_TEXT,
+        SlideType.CONTENT_IMAGE,
+        SlideType.CASE_STUDY,
+        SlideType.RECAP,
+        SlideType.DIAGRAM,
+    }
+)
+
+
+# Vincoli-base a ``DEFAULT_SECONDS_PER_SLIDE`` (45s). E` l'ANCORA EMPIRICA: i
+# tipi narrativi hanno 90-160 parole = ~37-66s di audio al WPM reale misurato in
+# produzione (145 wpm, non i 180 teorici assunti in passato). ``build_layout_
+# constraints`` scala questi valori sui tipi narrativi in proporzione alla
+# durata-slide; i tipi FIXED restano invariati.
+#
+# NB: DIAGRAM ora ha note ESPLICITE 90/160 (prima ereditava i default di classe
+# 30/120 per una svista — D-240): una slide diagramma va narrata come le altre
+# slide di contenuto, non con 12s di voce.
+_BASE_CONSTRAINTS: dict[SlideType, SlideConstraints] = {
     SlideType.TITLE: SlideConstraints(
         title_max_chars=70,
         body_max_bullets=0,  # TITLE non ha body
@@ -144,10 +166,8 @@ LAYOUT_CONSTRAINTS: dict[SlideType, SlideConstraints] = {
         body_min_bullets=4,  # FIX #27.3: slide piena, mai 2-3 bullet sparsi
         body_max_bullets=6,
         bullet_max_words=12,  # best-practice 7±2 + tolleranza
-        # FIX #29.2 (2026-05-26): audio 45s/slide @ 180 wpm = ~135 parole target.
-        # Floor 90 di sicurezza (era 60 → audio 20s, sotto target). Validator
-        # downgraded a soft warning (FIX #29.2 in pipeline.py) — il gate hard è
-        # mutagen.MP3.info.length nel range 35-55s post-generazione.
+        # 90-160 parole a 45s. Validator downgraded a soft warning per il min
+        # (FIX #29.2 in pipeline.py); il gate hard e` il max (TTS sopra-target).
         notes_min_words=90,
         notes_max_words=160,
     ),
@@ -156,21 +176,19 @@ LAYOUT_CONSTRAINTS: dict[SlideType, SlideConstraints] = {
         body_min_bullets=3,
         body_max_bullets=5,  # body ridotto: 40% slide occupato da immagine
         bullet_max_words=10,
-        notes_min_words=90,  # FIX #29.2
+        notes_min_words=90,
         notes_max_words=160,
         requires_image=True,
     ),
     SlideType.DIAGRAM: SlideConstraints(
         title_max_chars=70,
         body_min_bullets=1,  # FIX #27.3: almeno una riga di didascalia
-        # FIX #31.5A (2026-05-27, analista review 6): 2→3. In E2E #23 batch 0
-        # di M1 era fallito perché LLM generava ostinatamente 3 bullet ed
-        # esauriva 5 reask, perdendo 10 slide. Layout PPTX regge 3 righe
-        # sotto SVG, template SVG (flow/pyramid/org_tree) non vincolano
-        # il numero di bullet didascalia (gestiscono caption unica + slot
-        # label interni separati). Quindi 3 è feasibile.
+        # FIX #31.5A (2026-05-27, analista review 6): 2→3. Layout PPTX regge 3
+        # righe sotto SVG. Quindi 3 è feasibile.
         body_max_bullets=3,
         bullet_max_words=20,
+        notes_min_words=90,  # D-240: esplicito (era 30/120 via class default)
+        notes_max_words=160,
         requires_image=True,  # diagram_code SVG obbligatorio
     ),
     SlideType.QUIZ: SlideConstraints(
@@ -186,7 +204,7 @@ LAYOUT_CONSTRAINTS: dict[SlideType, SlideConstraints] = {
         body_min_bullets=3,  # FIX #27.3: tutte e 3 le sezioni OBBLIGATORIE
         body_max_bullets=3,
         bullet_max_words=50,
-        notes_min_words=90,  # FIX #29.2: audio 45s
+        notes_min_words=90,
         notes_max_words=160,
     ),
     SlideType.RECAP: SlideConstraints(
@@ -194,7 +212,7 @@ LAYOUT_CONSTRAINTS: dict[SlideType, SlideConstraints] = {
         body_min_bullets=5,
         body_max_bullets=5,
         bullet_max_words=10,
-        notes_min_words=90,  # FIX #29.2
+        notes_min_words=90,
         notes_max_words=160,
     ),
     SlideType.CLOSING: SlideConstraints(
@@ -206,8 +224,6 @@ LAYOUT_CONSTRAINTS: dict[SlideType, SlideConstraints] = {
     ),
     # FIX #30.2 (2026-05-26): bookends modulo. Slot fissi generati dal
     # pacing_engine + content_agent, NON dal validator instructor per-modulo.
-    # MODULE_OPEN ha 0 bullet (solo "MODULO N" + titolo modulo);
-    # MODULE_CLOSE ha 5 ✓ (riepilogo concetti chiave modulo).
     SlideType.MODULE_OPEN: SlideConstraints(
         title_max_chars=80,
         body_max_bullets=0,
@@ -219,16 +235,50 @@ LAYOUT_CONSTRAINTS: dict[SlideType, SlideConstraints] = {
         title_max_chars=80,
         body_min_bullets=5,
         body_max_bullets=5,  # ESATTAMENTE 5 concetti chiave
-        # FIX #31.4 (2026-05-27, analista review 5): 10→12. Era incoerente
-        # con CONTENT_TEXT (12). Una violazione MODULE_CLOSE bullet 11>10
-        # in E2E #22 ha triggerato fallback distruttivo che ha eliminato
-        # 77 slide M2. Allineato a CONTENT_TEXT, MODULE_CLOSE è un
-        # riepilogo modulo non più stringente di una slide normale.
+        # FIX #31.4 (2026-05-27): 10→12, allineato a CONTENT_TEXT.
         bullet_max_words=12,
         notes_min_words=60,
         notes_max_words=120,
     ),
 }
+
+
+def build_layout_constraints(
+    seconds_per_slide: float = DEFAULT_SECONDS_PER_SLIDE,
+) -> dict[SlideType, SlideConstraints]:
+    """Vincoli per SlideType calibrati sulla durata-slide del corso.
+
+    I tipi in ``_NARRATIVE_TYPES`` scalano ``notes_min/max_words`` per
+    ``seconds_per_slide / 45`` (ancoraggio al baseline empirico): cosi` una
+    slide da 240s chiede ~5× le parole di una da 48s, e la narrazione riempie
+    davvero la durata scelta. Gli altri tipi restano invariati.
+
+    A 45s la funzione restituisce ESATTAMENTE i valori base (fattore 1.0):
+    invarianza per costruzione col comportamento pre-esistente (unica eccezione
+    voluta: DIAGRAM, D-240).
+    """
+    factor = seconds_per_slide / DEFAULT_SECONDS_PER_SLIDE
+    if factor == 1.0:
+        return dict(_BASE_CONSTRAINTS)
+    out: dict[SlideType, SlideConstraints] = {}
+    for stype, base in _BASE_CONSTRAINTS.items():
+        if stype in _NARRATIVE_TYPES:
+            out[stype] = base.model_copy(
+                update={
+                    "notes_min_words": max(1, round(base.notes_min_words * factor)),
+                    "notes_max_words": max(1, round(base.notes_max_words * factor)),
+                }
+            )
+        else:
+            out[stype] = base
+    return out
+
+
+# Default calcolato (NON un dizionario congelato): usato dai call site che non
+# hanno ancora un valore per-corso (validator senza contesto, edit da Studio,
+# test). La Fase 2 passa i vincoli per-corso via validation_context / parametro
+# dove la durata-slide e` nota.
+LAYOUT_CONSTRAINTS: dict[SlideType, SlideConstraints] = build_layout_constraints()
 
 
 # Convenzione di validazione: usato dai model_validator in pipeline.py + dai prompts.

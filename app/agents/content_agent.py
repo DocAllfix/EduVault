@@ -331,6 +331,7 @@ async def _generate_module_h8(
     previous_summary: str,
     target: "TargetType",
     system_prompt: str,
+    seconds_per_slide: float = 45.0,  # FASE 2: durata-slide del corso
 ) -> dict[str, object]:
     """H8 (2026-05-31): genera cluster di slide PER VOCE dello skeleton.
 
@@ -523,6 +524,7 @@ async def _generate_module_h8(
                 style_patterns=style_patterns,
                 previous_voices_summary=prev_voci_summary,
                 target=target,
+                seconds_per_slide=seconds_per_slide,
             )
 
             chunks_text_voce = "\n\n".join(
@@ -539,6 +541,7 @@ async def _generate_module_h8(
                     expected_slides=n_slide_voce,
                     chunks_text=chunks_text_voce,
                     slide_distribution=dist_voce,
+                    seconds_per_slide=seconds_per_slide,
                 )
                 logger.info(
                     "h8_voce_generated",
@@ -1029,6 +1032,7 @@ async def content_agent(state: NexusPipelineState) -> dict[str, object]:
                     previous_summary=previous_summary,
                     target=request.target,
                     system_prompt=system_prompt,
+                    seconds_per_slide=request.seconds_per_slide,
                 )
             except Exception as exc:
                 # H8 ha fallito: log + fallback al path legacy (safety net).
@@ -1048,6 +1052,7 @@ async def content_agent(state: NexusPipelineState) -> dict[str, object]:
             style_patterns=context.style_patterns,
             previous_summary=previous_summary,
             target=request.target,
+            seconds_per_slide=request.seconds_per_slide,
         )
         expected = int(getattr(module, "slide_count", 0) or 0)
 
@@ -1082,6 +1087,7 @@ async def content_agent(state: NexusPipelineState) -> dict[str, object]:
                     expected_slides=expected,
                     chunks_text=chunks_text,
                     slide_distribution=module.slide_distribution,  # FIX #30.8 quota
+                    seconds_per_slide=request.seconds_per_slide,
                 )
                 logger.info(
                     "module_instructor_ok",

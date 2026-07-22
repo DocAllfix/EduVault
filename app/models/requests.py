@@ -30,6 +30,11 @@ class CourseRequest(BaseModel):
     region: str = Field(default="NAZIONALE")
     brand_preset_id: str
     slide_density: SlideDensity = SlideDensity.STANDARD
+    # FASE 2 (2026-07-21): durata-slide scelta dall'utente. Piu` alta → meno
+    # slide, ognuna con narrazione piu` lunga. Default 45 = comportamento
+    # pre-esistente; range guidato 40-240s (sotto i 40 si torna ai problemi di
+    # budget output LLM; sopra i 240 il batch andrebbe riscritto).
+    seconds_per_slide: float = Field(default=45.0, ge=40.0, le=240.0)
     outputs: list[str] = Field(
         default=["pptx", "pdf"],
         description="Formati richiesti: pptx, pdf, audio, quiz",

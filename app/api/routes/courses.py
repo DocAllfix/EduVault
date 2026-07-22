@@ -181,8 +181,9 @@ async def create_course(
     pacing = PacingEngine().calculate(
         duration_hours=req.duration_hours,
         density=SlideDensity(req.slide_density),
+        seconds_per_slide=req.seconds_per_slide,
     )
-    estimated_minutes = pacing.total_slides * PacingEngine.SECONDS_PER_SLIDE / 60.0
+    estimated_minutes = pacing.total_slides * req.seconds_per_slide / 60.0
 
     # Queue position = #jobs not yet completed/failed/cancelled
     queued_count = await pool.fetchval(
@@ -192,8 +193,10 @@ async def create_course(
 
     course_id = await pool.fetchval(
         "INSERT INTO courses (title, course_type, target, duration_hours, "
-        "region, brand_preset_id, created_by, status, outputs) "
-        "VALUES ($1, $2, $3, $4, $5, $6, $7, 'generating', $8) RETURNING id",
+        "region, brand_preset_id, created_by, status, outputs, "
+        "seconds_per_slide, slide_density) "
+        "VALUES ($1, $2, $3, $4, $5, $6, $7, 'generating', $8, $9, $10) "
+        "RETURNING id",
         f"Corso {req.course_type}",  # placeholder title; UI can rename later
         req.course_type,
         req.target.value,
@@ -202,6 +205,10 @@ async def create_course(
         uuid_mod.UUID(req.brand_preset_id),
         uuid_mod.UUID(str(user["id"])),
         req.outputs,  # F-BUG-AUDIO 2026-06-01: persistere outputs (era scartato)
+        # FASE 2 (2026-07-21): persistiti per il rebuild audio coerente e per
+        # propagare la durata-slide alla generazione contenuti.
+        req.seconds_per_slide,
+        req.slide_density.value,
     )
     job_id = await pool.fetchval(
         "INSERT INTO generation_jobs (course_id, status, progress_percent) "

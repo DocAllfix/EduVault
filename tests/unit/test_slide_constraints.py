@@ -101,17 +101,22 @@ def test_bullet_too_many_words_rejected() -> None:
         SlideContent(**_make_valid_content_text(bullets=bullets))
 
 
-def test_notes_too_few_words_rejected() -> None:
-    """speaker_notes < 60 parole per CONTENT_TEXT → TTS sotto-target, rigettata."""
+def test_notes_too_few_words_is_soft_warning_not_rejection() -> None:
+    """speaker_notes sotto il min (CONTENT_TEXT min=90) NON rigetta.
+
+    FIX #29.2: il floor sulle note e` un soft warning (log), non un raise —
+    topic tecnici stretti producono naturalmente poche parole e il content_agent
+    fa padding post-validation. Il gate hard resta il MAX (vedi test sotto).
+    """
     short_notes = " ".join(["parola"] * 50)
-    with pytest.raises(ValueError, match="50 parole < 60"):
-        SlideContent(**_make_valid_content_text(speaker_notes=short_notes))
+    slide = SlideContent(**_make_valid_content_text(speaker_notes=short_notes))
+    assert len(slide.speaker_notes.split()) == 50  # accettata
 
 
 def test_notes_too_many_words_rejected() -> None:
-    """speaker_notes oltre il max (CONTENT_TEXT max=120) → TTS sopra-target, rigettata."""
-    long_notes = " ".join(["parola"] * 130)
-    with pytest.raises(ValueError, match="130 parole > 120"):
+    """speaker_notes oltre il max (CONTENT_TEXT max=160) → TTS sopra-target, rigettata."""
+    long_notes = " ".join(["parola"] * 170)
+    with pytest.raises(ValueError, match="170 parole > 160"):
         SlideContent(**_make_valid_content_text(speaker_notes=long_notes))
 
 

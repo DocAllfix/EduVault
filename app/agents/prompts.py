@@ -11,9 +11,9 @@ stay in English (REI-7).
 from __future__ import annotations
 
 from app.models.core import (
-    LAYOUT_CONSTRAINTS,
     SlideType,
     TargetType,
+    build_layout_constraints,
     target_duration_window,
 )
 from app.models.knowledge import StylePattern
@@ -174,15 +174,24 @@ def build_content_system_prompt(target: TargetType) -> str:
     return SYSTEM_PROMPT_FORMATORE
 
 
-def build_constraints_block(slide_distribution: dict[str, int]) -> str:
+def build_constraints_block(
+    slide_distribution: dict[str, int],
+    seconds_per_slide: float = 45.0,
+) -> str:
     """Costruisce il blocco CONSTRAINTS specifico per i SlideType presenti in
     questo modulo (FASE 2 vast-hopping-sketch).
 
     Per ogni SlideType in ``slide_distribution`` con count > 0, emette i 5 limiti
-    HARD (title chars, body bullets, bullet words, notes min-max) presi da
-    LAYOUT_CONSTRAINTS. L'LLM riceve i numeri esatti che il Pydantic validator
-    applicherà → zero retry su violazione, zero slide perse.
+    HARD (title chars, body bullets, bullet words, notes min-max). L'LLM riceve
+    i numeri ESATTI che il Pydantic validator applicherà → zero retry, zero
+    slide perse.
+
+    FASE 2 (2026-07-21): i limiti sulle note dipendono da ``seconds_per_slide``
+    (durata-slide del corso). L'LLM va istruito a produrre note piu` lunghe per
+    durate alte, altrimenti la durata scelta non verrebbe rispettata anche se il
+    validator la accetterebbe.
     """
+    constraints = build_layout_constraints(seconds_per_slide)
     lines = ["VINCOLI HARD PER TIPO SLIDE (rispetta ESATTAMENTE, non superare):"]
     for slide_type_str, count in slide_distribution.items():
         if count <= 0:
@@ -191,7 +200,7 @@ def build_constraints_block(slide_distribution: dict[str, int]) -> str:
             slide_type = SlideType(slide_type_str)
         except ValueError:
             continue
-        rules = LAYOUT_CONSTRAINTS.get(slide_type)
+        rules = constraints.get(slide_type)
         if not rules:
             continue
         parts = [
@@ -216,11 +225,10 @@ def build_constraints_block(slide_distribution: dict[str, int]) -> str:
             parts.append("  bullets: [] (lista vuota — è title-only)")
         elif slide_type == SlideType.QUIZ:
             parts.append("  bullets: [] (lista vuota — è options-only)")
-        # FASE 1 pacing dinamico (2026-07-20): la finestra TTS non e` piu` la
-        # stringa fissa "25-35s" (ereditata dalla regola 30s/slide e mai
-        # aggiornata al passaggio a 45s), ma quella realmente applicata dal
-        # controllo su audio_service.
-        _tts_min, _tts_max = target_duration_window()
+        # FASE 1/2 pacing dinamico: la finestra TTS non e` piu` la stringa fissa
+        # "25-35s", ma quella realmente applicata dal controllo su audio_service,
+        # calcolata sulla durata-slide del corso.
+        _tts_min, _tts_max = target_duration_window(seconds_per_slide)
         parts.append(
             f"  speaker_notes: {rules.notes_min_words}-{rules.notes_max_words} "
             f"parole (per durata TTS {_tts_min:.0f}-{_tts_max:.0f}s)"
@@ -286,6 +294,7 @@ def build_voice_prompt(
     style_patterns: list[StylePattern],
     previous_voices_summary: str,
     target: TargetType,
+    seconds_per_slide: float = 45.0,
 ) -> str:
     """H8 (2026-05-31): build prompt PER VOCE dello skeleton.
 
@@ -322,7 +331,9 @@ def build_voice_prompt(
             f"- Media parole per slide: {sp.avg_words_per_slide}\n"
         )
 
-    constraints_text = build_constraints_block(slide_distribution_for_voice)
+    constraints_text = build_constraints_block(
+        slide_distribution_for_voice, seconds_per_slide
+    )
 
     base_prompt = (
         f"MODULO {module_index}: {module_title}\n"
@@ -366,6 +377,7 @@ def build_module_prompt(
     style_patterns: list[StylePattern],
     previous_summary: str,
     target: TargetType,
+    seconds_per_slide: float = 45.0,
 ) -> str:
     """Build the user prompt for one module (BP §05.6 + FASE 2 vast-hopping).
 
@@ -392,7 +404,9 @@ def build_module_prompt(
             f"- Sezioni ricorrenti: {sp.recurring_section_titles}\n"
         )
 
-    constraints_text = build_constraints_block(module.slide_distribution)
+    constraints_text = build_constraints_block(
+        module.slide_distribution, seconds_per_slide
+    )
 
     base_prompt = (
         f"MODULO {module.module_index}: {module.title}\n"

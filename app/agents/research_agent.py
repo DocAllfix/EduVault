@@ -1494,7 +1494,10 @@ async def research_agent(state: NexusPipelineState) -> dict[str, object]:
     # module_titles per i N retrieval indipendenti.
     module_titles = default_modules if default_modules else None
     pacing_plan = PacingEngine().calculate(
-        request.duration_hours, request.slide_density, module_titles=module_titles
+        request.duration_hours,
+        request.slide_density,
+        module_titles=module_titles,
+        seconds_per_slide=request.seconds_per_slide,  # FASE 2: durata-slide utente
     )
     _course_id_for_log = str(state.get("course_request", {}).get("id", "noid"))
 
@@ -1623,6 +1626,7 @@ async def research_agent(state: NexusPipelineState) -> dict[str, object]:
         style_patterns=style_patterns,
         regulation_ids=regulation_ids,
         regulation_slugs=regulation_slugs,
+        seconds_per_slide=request.seconds_per_slide,  # FASE 2
     )
 
     # FIX #31.1: top_k esiste solo nel ramo legacy (module_titles is None).

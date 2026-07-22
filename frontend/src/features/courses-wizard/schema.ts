@@ -43,6 +43,12 @@ export const step3Schema = z.object({
     .max(16, 'La durata non può superare 16 ore.'),
   region: z.string().min(1, 'Seleziona una regione.'),
   slide_density: z.enum(DENSITIES),
+  // FASE 2 pacing dinamico: durata-slide scelta dall'utente. Range guidato
+  // 40-240s (sotto i 40 si riaprono i problemi di budget output dell'LLM).
+  seconds_per_slide: z
+    .number({ error: 'Durata slide non valida.' })
+    .min(40, 'Minimo 40 secondi per slide.')
+    .max(240, 'Massimo 240 secondi (4 minuti) per slide.'),
 })
 
 export const step4Schema = z.object({
@@ -75,6 +81,7 @@ export const wizardDefaults: WizardValues = {
   duration_hours: 4,
   region: 'NAZIONALE',
   slide_density: 'standard',
+  seconds_per_slide: 45,
   brand_preset_id: '',
   outputs: ['pptx', 'pdf'],
 }

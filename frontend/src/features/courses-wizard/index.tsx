@@ -112,7 +112,7 @@ const STEP_TITLES: Record<number, { title: string; description: string }> = {
 const STEP_FIELDS: Record<number, (keyof WizardValues)[]> = {
   1: ['course_type'],
   2: ['target'],
-  3: ['duration_hours', 'region', 'slide_density'],
+  3: ['duration_hours', 'region', 'slide_density', 'seconds_per_slide'],
   4: ['brand_preset_id'],
   5: ['outputs'],
   6: [],

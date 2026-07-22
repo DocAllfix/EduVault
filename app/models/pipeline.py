@@ -14,13 +14,33 @@ import structlog
 from pydantic import BaseModel, Field, ValidationInfo, field_validator, model_validator
 
 from app.models.core import (
-    DIAGRAM_VIEWBOX_LITERAL,
     LAYOUT_CONSTRAINTS,
+    SlideConstraints,
     SlideType,
+    build_layout_constraints,
 )
 from app.models.knowledge import NormativeChunk, StylePattern
 
 logger = structlog.get_logger()
+
+
+def _resolve_constraints(
+    info: ValidationInfo,
+) -> dict[SlideType, SlideConstraints]:
+    """Vincoli di layout per la validazione della slide.
+
+    FASE 2 (2026-07-21): se il ``validation_context`` porta ``seconds_per_slide``
+    (lo passa il batch loop di generazione), i vincoli sono ricalcolati per la
+    durata-slide del corso. Altrimenti si usa il default calcolato a 45s
+    (``LAYOUT_CONSTRAINTS``) — vedi P5 del piano: un default CALCOLATO, non un
+    dizionario congelato.
+    """
+    ctx = info.context if info else None
+    if ctx:
+        sps = ctx.get("seconds_per_slide")
+        if sps is not None:
+            return build_layout_constraints(float(sps))
+    return LAYOUT_CONSTRAINTS
 
 
 class ImageStrategy(BaseModel):
@@ -137,14 +157,22 @@ class SlideContent(BaseModel):
         return []
 
     @model_validator(mode="after")
-    def enforce_layout_constraints(self) -> Self:
+    def enforce_layout_constraints(self, info: ValidationInfo) -> Self:
         """STRICT validation per-SlideType (FASE 1 vast-hopping-sketch).
 
         Rigetta — non tronca — quando i numeri sforano. Il caller (content_agent)
         intercetta il ValueError, manda corrective prompt SPLIT, ri-tenta una volta.
         Filosofia: meglio una slide in meno che una slide rotta.
+
+        FASE 2 (2026-07-21): i vincoli sulle NOTE dipendono dalla durata-slide
+        del corso. Il batch loop passa ``seconds_per_slide`` nel
+        ``validation_context``; quando presente, i vincoli sono ricalcolati per
+        quella durata (una slide da 240s deve poter avere 480-853 parole senza
+        essere rigettata). Senza contesto (edit da Studio, test, rebuild) si usa
+        il default calcolato a 45s — che e` P5 del piano: default CALCOLATO, non
+        dizionario congelato.
         """
-        rules = LAYOUT_CONSTRAINTS.get(self.slide_type)
+        rules = _resolve_constraints(info).get(self.slide_type)
         if rules is None:
             return self  # tipo non mappato (dev/test) — pass-through
 
@@ -469,6 +497,10 @@ class CourseContext(BaseModel):
     style_patterns: list[StylePattern]
     regulation_ids: list[str]
     regulation_slugs: list[str]
+    # FASE 2 (2026-07-21): durata-slide del corso, propagata al content_agent
+    # per calibrare i vincoli di lunghezza note (build_layout_constraints) e il
+    # batch adattivo. Default 45 = comportamento pre-esistente.
+    seconds_per_slide: float = 45.0
 
 
 class GenerationReport(BaseModel):

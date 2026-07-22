@@ -121,6 +121,45 @@ export function Step3Params() {
 
       <FormField
         control={form.control}
+        name='seconds_per_slide'
+        render={({ field }) => {
+          const secs = Number(field.value) || 45
+          const mins = Math.floor(secs / 60)
+          const rest = secs % 60
+          const human =
+            secs < 60
+              ? `${secs} secondi`
+              : `${mins} min${rest ? ` ${rest}s` : ''}`
+          return (
+            <FormItem>
+              <FormLabel>Durata per slide</FormLabel>
+              <FormControl>
+                <Input
+                  type='number'
+                  min={40}
+                  max={240}
+                  step={5}
+                  value={field.value ?? ''}
+                  onChange={(e) => {
+                    const v = e.target.value
+                    field.onChange(v === '' ? undefined : Number(v))
+                  }}
+                  onBlur={field.onBlur}
+                />
+              </FormControl>
+              <FormDescription>
+                Quanto dura ogni slide ({human}). Più alta = meno slide, ognuna
+                con narrazione più lunga. Da 40 secondi a 4 minuti; il default è
+                45 secondi.
+              </FormDescription>
+              <FormMessage />
+            </FormItem>
+          )
+        }}
+      />
+
+      <FormField
+        control={form.control}
         name='slide_density'
         render={({ field }) => (
           <FormItem>
